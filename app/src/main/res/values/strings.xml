@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PocketHost</string>
+    <string name="create_server">Create Server</string>
+    <string name="server_name">Server Name</string>
+    <string name="server_type">Server Type</string>
+    <string name="port">Port</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="restart">Restart</string>
+    <string name="delete">Delete</string>
+    <string name="console">Console</string>
+    <string name="files">Files</string>
+    <string name="settings">Settings</string>
+    <string name="status">Status</string>
+    <string name="running">Running</string>
+    <string name="stopped">Stopped</string>
+    <string name="error">Error</string>
+    <string name="cpu_usage">CPU Usage</string>
+    <string name="memory_usage">Memory Usage</string>
+    <string name="network">Network</string>
+    <string name="uptime">Uptime</string>
+</resources>
