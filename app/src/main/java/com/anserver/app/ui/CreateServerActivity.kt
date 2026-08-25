@@ -41,6 +41,8 @@ class CreateServerActivity : AppCompatActivity() {
         intent.getStringExtra("server_type")?.let { typeName ->
             selectedServerType = ServerType.valueOf(typeName)
             binding.spinnerServerType.setText(typeName, false)
+            updateDefaultValues()
+            updateMinecraftSettingsVisibility()
         }
     }
 
