@@ -17,19 +17,8 @@ data class Server(
 )
 
 enum class ServerType {
-    CUSTOM,
     MINECRAFT,
-    UBUNTU_SERVER,
-    DEBIAN_SERVER,
-    ALPINE_LINUX,
-    WEB_HTTP,
-    WEB_HTTPS,
-    TCP,
-    UDP,
-    PYTHON,
-    NODEJS,
-    JAVA,
-    DOCKER_LIKE
+    UBUNTU_SERVER
 }
 
 enum class ServerStatus {

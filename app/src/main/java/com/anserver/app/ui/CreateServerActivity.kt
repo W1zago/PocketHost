@@ -64,13 +64,18 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun setupServerTypeSpinner() {
-        val serverTypes = ServerType.values().map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, serverTypes)
+        // Only show Minecraft and Ubuntu Server
+        val allowedServerTypes = listOf(
+            ServerType.MINECRAFT,
+            ServerType.UBUNTU_SERVER
+        )
+        val serverTypeNames = allowedServerTypes.map { it.name }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, serverTypeNames)
         binding.spinnerServerType.setAdapter(adapter)
         binding.spinnerServerType.setText(selectedServerType.name, false)
 
         binding.spinnerServerType.setOnItemClickListener { _, _, position, _ ->
-            selectedServerType = ServerType.values()[position]
+            selectedServerType = allowedServerTypes[position]
             updateDefaultValues()
             updateMinecraftSettingsVisibility()
         }
@@ -160,42 +165,6 @@ class CreateServerActivity : AppCompatActivity() {
                 selectedDirectory = File(baseDir, "ubuntu").absolutePath
                 binding.etWorkingDir.setText(selectedDirectory)
                 binding.etStartCommand.setText("proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys /bin/bash")
-            }
-            ServerType.DEBIAN_SERVER -> {
-                binding.etPort.setText("22")
-                selectedDirectory = File(baseDir, "debian").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("proot --link2symlink -0 -r debian-fs -b /dev -b /proc -b /sys /bin/bash")
-            }
-            ServerType.ALPINE_LINUX -> {
-                binding.etPort.setText("22")
-                selectedDirectory = File(baseDir, "alpine").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("proot --link2symlink -0 -r alpine-fs -b /dev -b /proc -b /sys /bin/sh")
-            }
-            ServerType.WEB_HTTP -> {
-                binding.etPort.setText("8080")
-                selectedDirectory = File(baseDir, "web").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("python -m http.server 8080")
-            }
-            ServerType.NODEJS -> {
-                binding.etPort.setText("3000")
-                selectedDirectory = File(baseDir, "nodejs").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("node server.js")
-            }
-            ServerType.PYTHON -> {
-                binding.etPort.setText("5000")
-                selectedDirectory = File(baseDir, "python").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("python app.py")
-            }
-            else -> {
-                binding.etPort.setText("8080")
-                selectedDirectory = File(baseDir, "custom").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("")
             }
         }
     }
