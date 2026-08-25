@@ -84,7 +84,10 @@ class ServerDetailActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 val server = repository.getServer(id).first()
                 server?.let {
-                    val logFile = File(it.workingDirectory, "server.log")
+                    val logFile = File(
+                        com.anserver.app.util.ServerPaths.resolve(this@ServerDetailActivity, it.workingDirectory),
+                        "server.log"
+                    )
                     observeLogFile(logFile)
                 }
             }

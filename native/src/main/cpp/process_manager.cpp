@@ -291,6 +291,23 @@ void ProcessManager::readOutputThread(int pid, int pipeFd) {
 
         // Check if process is still alive
         if (!isProcessAlive(pid)) {
+            // Process exited: switch to blocking reads and drain the remaining
+            // output until EOF so final error messages are not lost.
+            int currentFlags = fcntl(pipeFd, F_GETFL, 0);
+            fcntl(pipeFd, F_SETFL, currentFlags & ~O_NONBLOCK);
+
+            while ((bytesRead = read(pipeFd, buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[bytesRead] = '\0';
+
+                __android_log_print(ANDROID_LOG_INFO, "ServerProcess", "[PID:%d] %s", pid, buffer);
+
+                std::lock_guard<std::mutex> lock(outputMutex);
+                outputBuffers[pid] += std::string(buffer, bytesRead);
+                if (outputBuffers[pid].size() > 100000) {
+                    outputBuffers[pid] = outputBuffers[pid].substr(outputBuffers[pid].size() - 100000);
+                }
+            }
+
             LOGI("Process %d is no longer alive, stopping output reader", pid);
             break;
         }

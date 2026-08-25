@@ -10,6 +10,8 @@ import androidx.core.app.NotificationCompat
 import com.anserver.app.ANServerApplication
 import com.anserver.app.R
 import com.anserver.app.ui.MainActivity
+import com.anserver.app.util.ServerPaths
+import com.anserver.app.util.UbuntuInstaller
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
 import com.anserver.core.model.ServerType
@@ -18,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
@@ -70,13 +73,30 @@ class ServerService : Service() {
                         logToConsole(serverId, "Server name: ${it.name}")
                         logToConsole(serverId, "Server type: ${it.type}")
 
-                        val workingDir = it.workingDirectory
+                        val workingDir = ServerPaths.resolve(this@ServerService, it.workingDirectory).absolutePath
                         val command = buildStartCommand(it)
-                        val environment = buildEnvironment(it)
+                        val environment = buildEnvironment(it, workingDir)
 
                         logToConsole(serverId, "Working directory: $workingDir")
                         logToConsole(serverId, "Command: $command")
                         logToConsole(serverId, "Environment variables: ${environment.size}")
+
+                        if (it.type == ServerType.UBUNTU_SERVER) {
+                            val installDir = File(workingDir)
+                            if (!UbuntuInstaller.isInstalled(installDir)) {
+                                logToConsole(serverId, "Ubuntu rootfs not found. Installing (requires internet)...")
+                                try {
+                                    UbuntuInstaller.install(installDir, cacheDir) { message ->
+                                        logToConsole(serverId, message)
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("ServerService", "Ubuntu installation failed", e)
+                                    logToConsole(serverId, "ERROR: Ubuntu installation failed: ${e.message}")
+                                    repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                                    return@launch
+                                }
+                            }
+                        }
 
                         // Check if command contains Java and verify Java availability
                         if (command.contains("java") && it.type == ServerType.MINECRAFT) {
@@ -142,6 +162,7 @@ class ServerService : Service() {
                             repository.updateServerStatus(serverId, ServerStatus.RUNNING)
                             logToConsole(serverId, "Server started successfully with PID: $pid")
                             android.util.Log.d("ServerService", "Server started with PID: $pid")
+                            startOutputDrain(serverId, pid)
                         } else {
                             repository.updateServerStatus(serverId, ServerStatus.ERROR)
                             val errorMsg = when (pid) {
@@ -209,7 +230,7 @@ class ServerService : Service() {
             try {
                 val server = repository.getServer(serverId).first()
                 server?.let {
-                    val logFile = File(it.workingDirectory, "server.log")
+                    val logFile = File(ServerPaths.resolve(this@ServerService, it.workingDirectory), "server.log")
 
                     // Create parent directories if they don't exist
                     logFile.parentFile?.mkdirs()
@@ -230,6 +251,30 @@ class ServerService : Service() {
         }
     }
 
+    private fun startOutputDrain(serverId: String, pid: Int) {
+        serviceScope.launch {
+            while (true) {
+                val alive = NativeBridge.isProcessAlive(pid)
+                val output = NativeBridge.readProcessOutput(pid)
+                if (output.isNotEmpty()) {
+                    output.split("\n")
+                        .filter { it.isNotBlank() }
+                        .forEach { logToConsole(serverId, it) }
+                }
+                if (!alive && output.isEmpty()) {
+                    break
+                }
+                delay(200)
+            }
+            logToConsole(serverId, "Process $pid exited")
+            runningServers.remove(serverId)
+            val server = repository.getServer(serverId).first()
+            if (server?.status == ServerStatus.RUNNING) {
+                repository.updateServerStatus(serverId, ServerStatus.STOPPED)
+            }
+        }
+    }
+
     private fun buildStartCommand(server: Server): String {
         return when {
             server.config.startCommand.isNotEmpty() -> server.config.startCommand
@@ -237,8 +282,17 @@ class ServerService : Service() {
         }
     }
 
-    private fun buildEnvironment(server: Server): List<String> {
+    private fun buildEnvironment(server: Server, workingDir: String): List<String> {
         val env = mutableListOf<String>()
+        if (server.type == ServerType.UBUNTU_SERVER) {
+            env.add("TERM=xterm-256color")
+            env.add("HOME=/root")
+            env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            env.add("LANG=C.UTF-8")
+            env.add("PROOT_NO_SECCOMP=1")
+            env.add("PROOT_TMP_DIR=$workingDir")
+            env.add("TMPDIR=$workingDir")
+        }
         server.config.environment.forEach { (key, value) ->
             env.add("$key=$value")
         }

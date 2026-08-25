@@ -149,8 +149,8 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun updateDefaultValues() {
-        // Use app's internal storage directory
-        val baseDir = File(getExternalFilesDir(null), "servers")
+        // Use app's internal storage directory (ext4: symlinks + exec work, unlike /storage/emulated)
+        val baseDir = File(filesDir, "servers")
 
         // Find available Java executable
         val javaPath = JavaUtils.findJavaExecutable() ?: "java"
@@ -166,7 +166,7 @@ class CreateServerActivity : AppCompatActivity() {
                 binding.etPort.setText("22")
                 selectedDirectory = File(baseDir, "ubuntu").absolutePath
                 binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys /bin/bash")
+                binding.etStartCommand.setText("./proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys -w /root /bin/bash")
             }
         }
     }
