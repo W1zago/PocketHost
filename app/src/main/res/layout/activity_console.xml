@@ -37,34 +37,142 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
-                android:textColor="#00FF00"
+                android:textColor="#E0E0E0"
                 android:textSize="12sp" />
 
         </ScrollView>
 
         <LinearLayout
+            android:id="@+id/extraKeysPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#0D0D0D"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp">
+
+                <TextView
+                    android:id="@+id/keyEsc"
+                    style="@style/ExtraKey"
+                    android:text="ESC" />
+                <TextView
+                    android:id="@+id/keySlash"
+                    style="@style/ExtraKey"
+                    android:text="/" />
+                <TextView
+                    android:id="@+id/keyDash"
+                    style="@style/ExtraKey"
+                    android:text="—" />
+                <TextView
+                    android:id="@+id/keyHome"
+                    style="@style/ExtraKey"
+                    android:text="HOME" />
+                <TextView
+                    android:id="@+id/keyUp"
+                    style="@style/ExtraKey"
+                    android:text="↑" />
+                <TextView
+                    android:id="@+id/keyEnd"
+                    style="@style/ExtraKey"
+                    android:text="END" />
+                <TextView
+                    android:id="@+id/keyPgUp"
+                    style="@style/ExtraKey"
+                    android:text="PGUP" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/keyTab"
+                    style="@style/ExtraKey"
+                    android:text="TAB" />
+                <TextView
+                    android:id="@+id/keyCtrl"
+                    style="@style/ExtraKey"
+                    android:text="CTRL" />
+                <TextView
+                    android:id="@+id/keyAlt"
+                    style="@style/ExtraKey"
+                    android:text="ALT" />
+                <TextView
+                    android:id="@+id/keyLeft"
+                    style="@style/ExtraKey"
+                    android:text="←" />
+                <TextView
+                    android:id="@+id/keyDown"
+                    style="@style/ExtraKey"
+                    android:text="↓" />
+                <TextView
+                    android:id="@+id/keyRight"
+                    style="@style/ExtraKey"
+                    android:text="→" />
+                <TextView
+                    android:id="@+id/keyPgDn"
+                    style="@style/ExtraKey"
+                    android:text="PGDN" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="8dp"
-            android:background="?attr/colorSurface">
+            android:gravity="center_vertical"
+            android:background="#212121"
+            android:padding="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="$"
+                android:textColor="#00FF00"
+                android:fontFamily="monospace"
+                android:textSize="15sp"
+                android:paddingEnd="8dp"
+                android:paddingStart="4dp" />
 
             <EditText
                 android:id="@+id/inputCommand"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Enter command"
+                android:background="@null"
+                android:hint=""
+                android:textColor="#FFFFFF"
+                android:textColorHint="#777777"
                 android:fontFamily="monospace"
-                android:inputType="text"
-                android:imeOptions="actionSend" />
+                android:textSize="14sp"
+                android:inputType="textNoSuggestions|textVisiblePassword"
+                android:imeOptions="actionSend"
+                android:singleLine="true" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSend"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
                 android:layout_marginStart="8dp"
-                android:text="Send" />
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:cornerRadius="18dp"
+                android:text="↵"
+                android:textSize="18sp" />
 
         </LinearLayout>
 

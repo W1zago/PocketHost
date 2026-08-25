@@ -27,6 +27,13 @@ int ProcessManager::startProcess(const std::string& command,
         LOGE("Failed to create pipe");
         return -1;
     }
+    int stdinPipe[2];
+    if (pipe(stdinPipe) != 0) {
+        LOGE("Failed to create stdin pipe");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
 
     pid_t pid = fork();
 
@@ -34,12 +41,15 @@ int ProcessManager::startProcess(const std::string& command,
         LOGE("Failed to fork process");
         close(pipefd[0]);
         close(pipefd[1]);
+        close(stdinPipe[0]);
+        close(stdinPipe[1]);
         return -1;
     }
 
     if (pid == 0) {
         // Child process
-        close(pipefd[0]); // Close read end
+        close(pipefd[0]); // Close read end of stdout pipe
+        close(stdinPipe[1]); // Close write end of stdin pipe
 
         if (!workingDir.empty()) {
             if (chdir(workingDir.c_str()) != 0) {
@@ -47,6 +57,10 @@ int ProcessManager::startProcess(const std::string& command,
                 exit(1);
             }
         }
+
+        // Redirect stdin from pipe
+        dup2(stdinPipe[0], STDIN_FILENO);
+        close(stdinPipe[0]);
 
         // Redirect stdout and stderr to pipe
         dup2(pipefd[1], STDOUT_FILENO);
@@ -68,12 +82,14 @@ int ProcessManager::startProcess(const std::string& command,
     }
 
     // Parent process
-    close(pipefd[1]); // Close write end
+    close(pipefd[1]); // Close write end of stdout pipe
+    close(stdinPipe[0]); // Close read end of stdin pipe
 
-    // Store pipe fd and start reader thread
+    // Store pipe fds and start reader thread
     ProcessOutput output;
     output.pid = pid;
     output.pipeFd = pipefd[0];
+    output.stdinFd = stdinPipe[1];
     output.readerThread = new std::thread(readOutputThread, pid, pipefd[0]);
     output.readerThread->detach();
 
@@ -243,6 +259,7 @@ void ProcessManager::unregisterProcess(int pid) {
     auto it = processOutputMap.find(pid);
     if (it != processOutputMap.end()) {
         close(it->second.pipeFd);
+        close(it->second.stdinFd);
         delete it->second.readerThread;
         processOutputMap.erase(it);
     }
@@ -327,4 +344,26 @@ std::string ProcessManager::readProcessOutput(int pid) {
     }
 
     return "";
+}
+
+bool ProcessManager::writeProcessInput(int pid, const std::string& data) {
+    auto it = processOutputMap.find(pid);
+    if (it == processOutputMap.end()) {
+        LOGE("writeProcessInput: no process with PID %d", pid);
+        return false;
+    }
+    int fd = it->second.stdinFd;
+    const char* buf = data.c_str();
+    size_t remaining = data.size();
+    while (remaining > 0) {
+        ssize_t written = write(fd, buf, remaining);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            LOGE("writeProcessInput failed for PID %d: %s", pid, strerror(errno));
+            return false;
+        }
+        buf += written;
+        remaining -= written;
+    }
+    return true;
 }

@@ -67,13 +67,18 @@ class ServerService : Service() {
                 server?.let {
                     android.util.Log.d("ServerService", "Server status: ${it.status}")
                     if (it.status == ServerStatus.STOPPED || it.status == ServerStatus.ERROR) {
+                        val workingDir = ServerPaths.resolve(this@ServerService, it.workingDirectory).absolutePath
+                        try {
+                            val lf = File(workingDir, "server.log")
+                            lf.parentFile?.mkdirs()
+                            if (lf.exists()) lf.writeText("") else lf.createNewFile()
+                        } catch (_: Exception) {
+                        }
                         repository.updateServerStatus(serverId, ServerStatus.STARTING)
                         android.util.Log.d("ServerService", "Status updated to STARTING")
                         logToConsole(serverId, "Starting server...")
                         logToConsole(serverId, "Server name: ${it.name}")
                         logToConsole(serverId, "Server type: ${it.type}")
-
-                        val workingDir = ServerPaths.resolve(this@ServerService, it.workingDirectory).absolutePath
                         val command = buildStartCommand(it)
                         val environment = buildEnvironment(it, workingDir)
 
@@ -162,6 +167,13 @@ class ServerService : Service() {
                             repository.updateServerStatus(serverId, ServerStatus.RUNNING)
                             logToConsole(serverId, "Server started successfully with PID: $pid")
                             android.util.Log.d("ServerService", "Server started with PID: $pid")
+                            if (it.type == ServerType.UBUNTU_SERVER) {
+                                val motdDir = File(workingDir, "ubuntu-fs").takeIf { d -> d.exists() } ?: File(workingDir)
+                                val ip = getDeviceIp()
+                                val motd = com.anserver.app.util.MotdGenerator.generate(this@ServerService, motdDir, ip)
+                                logRaw(serverId, "\n" + motd + "\n")
+                                logRaw(serverId, "root@" + android.os.Build.MODEL.replace(" ", "-").lowercase() + ":~# \n")
+                            }
                             startOutputDrain(serverId, pid)
                         } else {
                             repository.updateServerStatus(serverId, ServerStatus.ERROR)
@@ -251,20 +263,59 @@ class ServerService : Service() {
         }
     }
 
+    private fun logRaw(serverId: String, text: String) {
+        serviceScope.launch {
+            try {
+                val server = repository.getServer(serverId).first()
+                server?.let {
+                    val logFile = File(ServerPaths.resolve(this@ServerService, it.workingDirectory), "server.log")
+                    logFile.parentFile?.mkdirs()
+                    if (!logFile.exists()) logFile.createNewFile()
+                    logFile.appendText(text)
+                    if (!text.endsWith("\n")) logFile.appendText("\n")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ServerService", "Error writing raw log", e)
+            }
+        }
+    }
+
+    private fun getDeviceIp(): String {
+        return try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            for (iface in interfaces) {
+                if (!iface.isUp || iface.isLoopback) continue
+                for (addr in iface.inetAddresses) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        val host = addr.hostAddress ?: continue
+                        if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.")) return host
+                    }
+                }
+            }
+            for (iface in java.net.NetworkInterface.getNetworkInterfaces()) {
+                if (!iface.isUp || iface.isLoopback) continue
+                for (addr in iface.inetAddresses) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) return addr.hostAddress ?: continue
+                }
+            }
+            "192.168.0.100"
+        } catch (_: Exception) {
+            "192.168.0.100"
+        }
+    }
+
     private fun startOutputDrain(serverId: String, pid: Int) {
         serviceScope.launch {
             while (true) {
                 val alive = NativeBridge.isProcessAlive(pid)
                 val output = NativeBridge.readProcessOutput(pid)
                 if (output.isNotEmpty()) {
-                    output.split("\n")
-                        .filter { it.isNotBlank() }
-                        .forEach { logToConsole(serverId, it) }
+                    logRaw(serverId, output)
                 }
                 if (!alive && output.isEmpty()) {
                     break
                 }
-                delay(200)
+                delay(100)
             }
             logToConsole(serverId, "Process $pid exited")
             runningServers.remove(serverId)

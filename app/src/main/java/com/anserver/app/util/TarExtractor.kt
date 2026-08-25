@@ -52,7 +52,8 @@ internal object TarExtractor {
             val rawName = readString(header, 0, 100)
             val mode = parseOctal(header, 100, 8)
             val size = parseSize(header, 124, 12)
-            val typeFlag = header[156].toInt().toChar()
+            val rawTypeFlag = header[156].toInt().toChar()
+            val typeFlag = if (rawTypeFlag.code == 0) '0' else rawTypeFlag
             val rawLinkName = readString(header, 157, 100)
 
             var name = pendingPaxPath ?: pendingLongName ?: rawName
@@ -93,10 +94,6 @@ internal object TarExtractor {
                     applyPermissions(file, mode)
                     result.recordFile()
                 }
-                ' ' -> {
-                    skipEntry(tarStream, size)
-                    result.recordFile()
-                }
                 '1' -> {
                     skipEntry(tarStream, size)
                     if (!createHardLink(destination, linkName, name)) {
@@ -124,7 +121,7 @@ internal object TarExtractor {
                 val link = safeTarget(destination, name)
                 val target = safeTarget(destination, linkName)
                 if (link.exists() || Files.isSymbolicLink(link.toPath())) {
-                    continue
+                    return@forEach
                 }
                 link.parentFile?.mkdirs()
                 if (target.isDirectory) {
@@ -302,33 +299,38 @@ internal object TarExtractor {
         }
     }
 
-    private fun createHardLink(destination: File, linkName: String, name: String) {
-        if (linkName.isEmpty()) return
-        try {
+    private fun createHardLink(destination: File, linkName: String, name: String): Boolean {
+        if (linkName.isEmpty()) return false
+        return try {
             val existing = safeTarget(destination, linkName)
             val link = safeTarget(destination, name)
             if (!existing.exists()) {
-                return
+                false
+            } else {
+                if (link.exists() || Files.isSymbolicLink(link.toPath())) {
+                    link.delete()
+                }
+                link.parentFile?.mkdirs()
+                Files.createLink(Paths.get(link.absolutePath), Paths.get(existing.absolutePath))
+                true
             }
-            if (link.exists() || Files.isSymbolicLink(link.toPath())) {
-                link.delete()
-            }
-            link.parentFile?.mkdirs()
-            Files.createLink(Paths.get(link.absolutePath), Paths.get(existing.absolutePath))
         } catch (_: Exception) {
+            false
         }
     }
 
-    private fun createSymbolicLink(destination: File, linkName: String, name: String) {
-        if (linkName.isEmpty()) return
-        try {
+    private fun createSymbolicLink(destination: File, linkName: String, name: String): Boolean {
+        if (linkName.isEmpty()) return false
+        return try {
             val link = safeTarget(destination, name)
             if (link.exists() || Files.isSymbolicLink(link.toPath())) {
                 link.delete()
             }
             link.parentFile?.mkdirs()
             Files.createSymbolicLink(Paths.get(link.absolutePath), Paths.get(linkName))
+            true
         } catch (_: Exception) {
+            false
         }
     }
 }

@@ -152,6 +152,12 @@ Java_com_anserver_native_NativeBridge_readProcessOutput(JNIEnv* env, jobject thi
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_anserver_native_NativeBridge_writeProcessInput(JNIEnv* env, jobject thiz, jint pid, jstring data) {
+    std::string d = jstringToString(env, data);
+    return ProcessManager::writeProcessInput(pid, d);
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_anserver_native_NativeBridge_setEnvironmentVariable(
     JNIEnv* env, jobject thiz, jstring key, jstring value) {
     std::string k = jstringToString(env, key);

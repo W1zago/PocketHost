@@ -21,6 +21,7 @@ struct ProcessInfoNative {
 struct ProcessOutput {
     int pid;
     int pipeFd;
+    int stdinFd;
     std::thread* readerThread;
 };
 
@@ -40,6 +41,7 @@ public:
     static void unregisterProcess(int pid);
 
     static std::string readProcessOutput(int pid);
+    static bool writeProcessInput(int pid, const std::string& data);
 
 private:
     static std::map<int, std::string> processMap;

@@ -48,6 +48,12 @@ JNIEXPORT jboolean JNICALL
 Java_com_anserver_native_NativeBridge_isPortOpen(JNIEnv* env, jobject thiz, jint port);
 
 JNIEXPORT jstring JNICALL
+Java_com_anserver_native_NativeBridge_readProcessOutput(JNIEnv* env, jobject thiz, jint pid);
+
+JNIEXPORT jboolean JNICALL
+Java_com_anserver_native_NativeBridge_writeProcessInput(JNIEnv* env, jobject thiz, jint pid, jstring data);
+
+JNIEXPORT jstring JNICALL
 Java_com_anserver_native_NativeBridge_executeCommand(JNIEnv* env, jobject thiz, jstring command);
 
 JNIEXPORT jboolean JNICALL

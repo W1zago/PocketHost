@@ -17,7 +17,9 @@ object UbuntuInstaller {
 
     fun isInstalled(workingDir: File): Boolean {
         val proot = File(workingDir, "proot")
-        return proot.exists() && proot.canExecute() && File(workingDir, "ubuntu-fs/bin/bash").exists()
+        val rootfsDir = File(workingDir, "ubuntu-fs")
+        val bashOk = File(rootfsDir, "usr/bin/bash").exists() || File(rootfsDir, "bin/bash").exists()
+        return proot.exists() && proot.canExecute() && bashOk
     }
 
     fun install(workingDir: File, cacheDir: File, log: (String) -> Unit) {
@@ -44,7 +46,13 @@ object UbuntuInstaller {
         try {
             download(rootfsUrl, archive)
             log("Download finished (${archive.length() / (1024 * 1024)} MB), extracting...")
-            extractRootfs(archive, rootfsDir)
+            val result = extractRootfs(archive, rootfsDir)
+            log("Extracted ${result.fileCount} files, ${result.dirCount} dirs")
+            if (result.failedLinks.isNotEmpty()) {
+                log("Retrying ${result.failedLinks.size} links...")
+                val repaired = TarExtractor.repairLinks(rootfsDir, result.failedLinks)
+                log("Repaired $repaired links, remaining ${result.failedLinks.size - repaired}")
+            }
         } finally {
             archive.delete()
         }
@@ -59,16 +67,16 @@ object UbuntuInstaller {
             File(rootfsDir, it).mkdirs()
         }
 
-        if (!File(rootfsDir, "bin/bash").exists()) {
+        if (!File(rootfsDir, "usr/bin/bash").exists() && !File(rootfsDir, "bin/bash").exists()) {
             throw IllegalStateException("Rootfs extraction failed: /bin/bash not found")
         }
 
         log("Ubuntu rootfs installed successfully")
     }
 
-    private fun extractRootfs(archive: File, rootfsDir: File) {
+    private fun extractRootfs(archive: File, rootfsDir: File): TarExtractor.ExtractResult {
         GZIPInputStream(archive.inputStream().buffered(64 * 1024)).use { input ->
-            TarExtractor.extract(input, rootfsDir)
+            return TarExtractor.extract(input, rootfsDir)
         }
     }
 

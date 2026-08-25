@@ -43,6 +43,8 @@ object NativeBridge {
 
     external fun readProcessOutput(pid: Int): String
 
+    external fun writeProcessInput(pid: Int, data: String): Boolean
+
     external fun setEnvironmentVariable(key: String, value: String): Boolean
 
     external fun getEnvironmentVariable(key: String): String?
