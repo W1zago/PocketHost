@@ -166,7 +166,7 @@ class CreateServerActivity : AppCompatActivity() {
                 binding.etPort.setText("22")
                 selectedDirectory = File(baseDir, "ubuntu").absolutePath
                 binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("./proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys -w /root /bin/bash")
+                binding.etStartCommand.setText("./proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys -w /root /bin/bash -i")
             }
         }
     }

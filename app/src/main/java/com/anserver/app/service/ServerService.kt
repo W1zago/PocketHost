@@ -89,9 +89,9 @@ class ServerService : Service() {
                         if (it.type == ServerType.UBUNTU_SERVER) {
                             val installDir = File(workingDir)
                             if (!UbuntuInstaller.isInstalled(installDir)) {
-                                logToConsole(serverId, "Ubuntu rootfs not found. Installing (requires internet)...")
+                                logToConsole(serverId, "Ubuntu rootfs not found. Installing...")
                                 try {
-                                    UbuntuInstaller.install(installDir, cacheDir) { message ->
+                                    UbuntuInstaller.install(this@ServerService, installDir, cacheDir) { message ->
                                         logToConsole(serverId, message)
                                     }
                                 } catch (e: Exception) {
@@ -99,6 +99,15 @@ class ServerService : Service() {
                                     logToConsole(serverId, "ERROR: Ubuntu installation failed: ${e.message}")
                                     repository.updateServerStatus(serverId, ServerStatus.ERROR)
                                     return@launch
+                                }
+                            }
+                            if (!UbuntuInstaller.isFullServerInstalled(installDir)) {
+                                logToConsole(serverId, "Upgrading to full Ubuntu Server (apt, ~600 MB, requires internet)...")
+                                try {
+                                    UbuntuInstaller.installFullServer(installDir) { msg -> logToConsole(serverId, msg) }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("ServerService", "Full server upgrade failed", e)
+                                    logToConsole(serverId, "Full server upgrade failed: ${e.message} (running as base)")
                                 }
                             }
                         }
@@ -327,10 +336,13 @@ class ServerService : Service() {
     }
 
     private fun buildStartCommand(server: Server): String {
-        return when {
+        val base = when {
             server.config.startCommand.isNotEmpty() -> server.config.startCommand
             else -> "sh start.sh"
         }
+        return if (server.type == ServerType.UBUNTU_SERVER && base.contains("/bin/bash") && !base.contains(" -i")) {
+            "$base -i"
+        } else base
     }
 
     private fun buildEnvironment(server: Server, workingDir: String): List<String> {
