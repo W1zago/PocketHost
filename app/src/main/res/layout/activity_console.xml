@@ -38,7 +38,13 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
                 android:textColor="#E0E0E0"
-                android:textSize="12sp" />
+                android:textSize="12sp"
+                android:textIsSelectable="true"
+                android:focusable="true"
+                android:longClickable="true"
+                android:contextClickable="true"
+                android:selectAllOnFocus="false"
+                android:bufferType="spannable" />
 
         </ScrollView>
 

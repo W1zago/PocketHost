@@ -7,14 +7,24 @@ data class Server(
     val name: String,
     val type: ServerType,
     val port: Int,
-    val workingDirectory: String,
+    val workingDirectory: String = "", // legacy alias, use workDirUri
+    val workDirUri: String = "",
+    val displayPath: String = "",
+    val termuxPath: String = "",
     val status: ServerStatus = ServerStatus.STOPPED,
     val autoStart: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val lastStarted: Long? = null,
     val config: ServerConfig = ServerConfig(),
-    val pid: Int = -1
-)
+    val termuxExecutionId: Int? = null
+) {
+    // Compatibility: if workDirUri empty, fallback to workingDirectory; handle Gson null via reflection
+    val effectiveWorkDirUri: String get() = try {
+        val wd = try { workDirUri } catch (_: Exception) { null }
+        val legacy = try { workingDirectory } catch (_: Exception) { null }
+        (wd?.takeIf { it.isNotEmpty() } ?: legacy ?: "")
+    } catch (_: Exception) { "" }
+}
 
 enum class ServerType {
     MINECRAFT,

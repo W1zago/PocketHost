@@ -10,15 +10,11 @@ android {
     defaultConfig {
         applicationId = "com.anserver.app"
         minSdk = 26
-        targetSdk = 28
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
     }
 
     buildTypes {
@@ -48,17 +44,10 @@ android {
         buildConfig = true
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("../native/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
 }
 
 dependencies {
     implementation(project(":core"))
-    implementation(project(":native"))
     implementation(project(":plugins:minecraft"))
 
     implementation("androidx.core:core-ktx:1.12.0")
@@ -84,7 +73,11 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
 
+    implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation("org.tukaani:xz:1.9")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

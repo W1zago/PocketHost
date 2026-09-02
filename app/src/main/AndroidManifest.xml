@@ -5,16 +5,20 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" tools:ignore="ProtectedPermissions" />
+
+    <queries>
+        <package android:name="com.termux" />
+        <intent>
+            <action android:name="com.termux.RUN_COMMAND" />
+        </intent>
+    </queries>
 
     <application
         android:name=".ANServerApplication"
@@ -53,11 +57,30 @@
             android:name=".ui.ConsoleActivity"
             android:parentActivityName=".ui.ServerDetailActivity" />
 
+        <activity
+            android:name=".termux.TermuxHardGateActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.ANServer" />
+
+        <activity
+            android:name=".termux.DeviceScanActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.MainActivity"
+            android:theme="@style/Theme.ANServer" />
+
         <service
             android:name=".service.ServerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".termux.TermuxResultsService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="com.termux.permission.RUN_COMMAND" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

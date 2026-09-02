@@ -4,18 +4,20 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.Uri
 import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.documentfile.provider.DocumentFile
 import com.anserver.app.ANServerApplication
 import com.anserver.app.R
+import com.anserver.app.termux.SafHelper
+import com.anserver.app.termux.TermuxBridge
+import com.anserver.app.termux.TermuxPaths
 import com.anserver.app.ui.MainActivity
-import com.anserver.app.util.ServerPaths
-import com.anserver.app.util.UbuntuInstaller
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
 import com.anserver.core.model.ServerType
-import com.anserver.native.NativeBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,13 +25,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.io.File
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicInteger
 
 class ServerService : Service() {
 
     private val binder = ServerBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val runningServers = mutableMapOf<String, Int>()
+    private val runningServers = mutableMapOf<String, TermuxBridge.TermuxSession>()
+    private val startMutex = Mutex()
+    private val executionCounter = AtomicInteger(1000)
     private val repository = ANServerApplication.serverRepository
 
     inner class ServerBinder : Binder() {
@@ -59,215 +65,190 @@ class ServerService : Service() {
 
     private fun startServer(serverId: String) {
         serviceScope.launch {
-            try {
-                android.util.Log.d("ServerService", "startServer called for: $serverId")
-                val server = repository.getServer(serverId).first()
-                android.util.Log.d("ServerService", "Server retrieved: ${server?.name}")
+            startMutex.withLock {
+                try {
+                    android.util.Log.d("ServerService", "startServer $serverId")
+                    val server = repository.getServer(serverId).first()
+                    if (server == null) {
+                        android.util.Log.e("ServerService", "Server not found $serverId")
+                        return@withLock
+                    }
+                    if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) {
+                        logToConsole(serverId, "Сервер вже запущений")
+                        return@withLock
+                    }
+                    if (runningServers.size >= 2) {
+                        logToConsole(serverId, "Зупини перший сервер (максимум 2)")
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+                    if (runningServers.containsKey(serverId)) {
+                        logToConsole(serverId, "Сервер вже в runningServers")
+                        return@withLock
+                    }
 
-                server?.let {
-                    android.util.Log.d("ServerService", "Server status: ${it.status}")
-                    if (it.status == ServerStatus.STOPPED || it.status == ServerStatus.ERROR) {
-                        val workingDir = ServerPaths.resolve(this@ServerService, it.workingDirectory).absolutePath
-                        try {
-                            val lf = File(workingDir, "server.log")
-                            lf.parentFile?.mkdirs()
-                            if (lf.exists()) lf.writeText("") else lf.createNewFile()
-                        } catch (_: Exception) {
-                        }
-                        repository.updateServerStatus(serverId, ServerStatus.STARTING)
-                        android.util.Log.d("ServerService", "Status updated to STARTING")
-                        logToConsole(serverId, "Starting server...")
-                        logToConsole(serverId, "Server name: ${it.name}")
-                        logToConsole(serverId, "Server type: ${it.type}")
-                        val command = buildStartCommand(it)
-                        val environment = buildEnvironment(it, workingDir)
-
-                        logToConsole(serverId, "Working directory: $workingDir")
-                        logToConsole(serverId, "Command: $command")
-                        logToConsole(serverId, "Environment variables: ${environment.size}")
-
-                        if (it.type == ServerType.UBUNTU_SERVER) {
-                            val installDir = File(workingDir)
-                            if (!UbuntuInstaller.isInstalled(installDir)) {
-                                logToConsole(serverId, "Ubuntu rootfs not found. Installing...")
-                                try {
-                                    UbuntuInstaller.install(this@ServerService, installDir, cacheDir) { message ->
-                                        logToConsole(serverId, message)
-                                    }
-                                } catch (e: Exception) {
-                                    android.util.Log.e("ServerService", "Ubuntu installation failed", e)
-                                    logToConsole(serverId, "ERROR: Ubuntu installation failed: ${e.message}")
-                                    repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                                    return@launch
-                                }
-                            }
-                            if (!UbuntuInstaller.isFullServerInstalled(installDir)) {
-                                logToConsole(serverId, "Upgrading to full Ubuntu Server (apt, ~600 MB, requires internet)...")
-                                try {
-                                    UbuntuInstaller.installFullServer(installDir) { msg -> logToConsole(serverId, msg) }
-                                } catch (e: Exception) {
-                                    android.util.Log.e("ServerService", "Full server upgrade failed", e)
-                                    logToConsole(serverId, "Full server upgrade failed: ${e.message} (running as base)")
-                                }
-                            }
-                        }
-
-                        // Check if command contains Java and verify Java availability
-                        if (command.contains("java") && it.type == ServerType.MINECRAFT) {
-                            val javaInfo = com.anserver.core.util.JavaUtils.checkJavaAvailability()
-                            if (javaInfo == null) {
-                                val error = "ERROR: Java runtime not found. Please install Termux and run: pkg install openjdk-17"
-                                android.util.Log.e("ServerService", error)
-                                logToConsole(serverId, error)
-                                logToConsole(serverId, "Termux installation: https://f-droid.org/packages/com.termux/")
-                                repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                                return@launch
-                            } else {
-                                logToConsole(serverId, "Java found: ${javaInfo.path}")
-                                logToConsole(serverId, "Java version: ${javaInfo.version ?: "unknown"}")
-                            }
-                        }
-
-                        // Create working directory if it doesn't exist
-                        val dir = File(workingDir)
-                        if (!dir.exists()) {
-                            val created = dir.mkdirs()
-                            android.util.Log.d("ServerService", "Created directory: $workingDir, success: $created")
-                            logToConsole(serverId, "Created directory: $workingDir (success: $created)")
-                        } else {
-                            logToConsole(serverId, "Directory exists: $workingDir")
-                        }
-
-                        // Check if directory is writable
-                        if (!dir.canWrite()) {
-                            val error = "ERROR: Directory is not writable: $workingDir"
-                            android.util.Log.e("ServerService", error)
-                            logToConsole(serverId, error)
+                    // SAF persisted permission check
+                    val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                    if (uriStr.isEmpty() || uriStr.startsWith("/")) {
+                        logToConsole(serverId, "ERROR: SAF папка не вибрана. Створіть сервер заново в SAF")
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+                    val uri = try { Uri.parse(uriStr) } catch (_: Exception) { null }
+                    if (uri == null) {
+                        logToConsole(serverId, "ERROR: невірний URI $uriStr")
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+                    // Check persisted permission - try to find matching persisted uri
+                    val hasPerm = try {
+                        val persisted = applicationContext.contentResolver.persistedUriPermissions
+                        persisted.any { it.uri.toString() == uriStr || uriStr.startsWith(it.uri.toString()) }
+                    } catch (_: Exception) { false }
+                    if (!hasPerm) {
+                        // Also check via SafHelper for primary storage - if doc can't be opened, treat as revoked
+                        val docCheck = DocumentFile.fromTreeUri(this@ServerService, uri)
+                        if (docCheck == null || !docCheck.canWrite()) {
+                            logToConsole(serverId, "ERROR: Доступ до SAF папки втрачено. Виберіть знову")
                             repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                            return@launch
-                        }
-
-                        // Create log file if it doesn't exist
-                        val logFile = File(workingDir, "server.log")
-                        if (!logFile.exists()) {
-                            try {
-                                logFile.createNewFile()
-                                android.util.Log.d("ServerService", "Created log file: ${logFile.absolutePath}")
-                                logToConsole(serverId, "Created log file: ${logFile.name}")
-                            } catch (e: Exception) {
-                                android.util.Log.e("ServerService", "Failed to create log file", e)
-                                logToConsole(serverId, "ERROR creating log file: ${e.message}")
-                            }
-                        }
-
-                        logToConsole(serverId, "Attempting to start process...")
-
-                        val pid = NativeBridge.startProcess(
-                            command,
-                            workingDir,
-                            environment.toTypedArray()
-                        )
-
-                        logToConsole(serverId, "Process start returned PID: $pid")
-
-                        if (pid > 0) {
-                            runningServers[serverId] = pid
-                            repository.updateServerPid(serverId, pid)
-                            repository.updateServerStatus(serverId, ServerStatus.RUNNING)
-                            logToConsole(serverId, "Server started successfully with PID: $pid")
-                            android.util.Log.d("ServerService", "Server started with PID: $pid")
-                            if (it.type == ServerType.UBUNTU_SERVER) {
-                                val motdDir = File(workingDir, "ubuntu-fs").takeIf { d -> d.exists() } ?: File(workingDir)
-                                val ip = getDeviceIp()
-                                val motd = com.anserver.app.util.MotdGenerator.generate(this@ServerService, motdDir, ip)
-                                logRaw(serverId, "\n" + motd + "\n")
-                                logRaw(serverId, "root@" + android.os.Build.MODEL.replace(" ", "-").lowercase() + ":~# \n")
-                            }
-                            startOutputDrain(serverId, pid)
-                        } else {
-                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                            val errorMsg = when (pid) {
-                                -1 -> "Failed to fork process"
-                                -2 -> "Failed to execute command"
-                                -3 -> "Command not found"
-                                else -> "Unknown error code: $pid"
-                            }
-                            logToConsole(serverId, "ERROR: Failed to start server. $errorMsg")
-                            android.util.Log.e("ServerService", "Failed to start server. Error: $errorMsg")
+                            return@withLock
                         }
                     }
+                    val docDir = DocumentFile.fromTreeUri(this@ServerService, uri)
+                    if (docDir == null || !docDir.exists()) {
+                        logToConsole(serverId, "ERROR: Папка видалена")
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+                    if (!docDir.canWrite()) {
+                        logToConsole(serverId, "ERROR: Нема запису в папку")
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+
+                    repository.updateServerStatus(serverId, ServerStatus.STARTING)
+                    logToConsole(serverId, "Запуск сервера...")
+                    logToConsole(serverId, "Сервер: ${server.name} type=${server.type} port=${server.port}")
+                    logToConsole(serverId, "SAF: $uriStr")
+                    logToConsole(serverId, "Display: ${server.displayPath}")
+
+                    // Ensure server.log exists
+                    try {
+                        val existingLog = docDir.findFile("server.log")
+                        if (existingLog == null) {
+                            docDir.createFile("text/plain", "server.log")
+                        }
+                        // Clear or rotate? We keep as is, Termux command will rotate if >5MB
+                    } catch (_: Exception) {}
+
+                    // Minecraft provisioning check: ensure jar exists if MC
+                    if (server.type == ServerType.MINECRAFT) {
+                        val expectedJar = when (server.config.minecraftLoader) {
+                            com.anserver.core.model.MinecraftLoader.VANILLA -> "server.jar"
+                            com.anserver.core.model.MinecraftLoader.PAPER -> "paper.jar"
+                            com.anserver.core.model.MinecraftLoader.PURPUR -> "purpur.jar"
+                            com.anserver.core.model.MinecraftLoader.FABRIC -> "fabric-server-launch.jar"
+                            else -> "paper.jar"
+                        }
+                        val hasJar = docDir.listFiles().any { it.name == expectedJar || it.name == "server.jar" || it.name == "paper.jar" }
+                        if (!hasJar) {
+                            logToConsole(serverId, "Попередження: jar $expectedJar не знайдено, спроба завантаження при старті через Termux/Provisioner")
+                        }
+                    }
+
+                    // Space check >2GB
+                    try {
+                        val stat = android.os.StatFs(applicationContext.filesDir.absolutePath)
+                        if (stat.availableBytes < 2L * 1024 * 1024 * 1024) {
+                            logToConsole(serverId, "Попередження: мало місця <2GB")
+                        }
+                    } catch (_: Exception) {}
+
+                    val termuxPath = server.termuxPath.ifEmpty { TermuxPaths.safToTermux(this@ServerService, uri) }
+                    val execId = executionCounter.incrementAndGet()
+                    val session = TermuxBridge.TermuxSession(server.id, execId, uriStr, termuxPath)
+                    runningServers[serverId] = session
+                    repository.updateTermuxExecutionId(serverId, execId)
+
+                    // Termux wake-lock
+                    TermuxBridge.sendRawCommand(this@ServerService, termuxPath, "termux-wake-lock 2>/dev/null || true")
+
+                    val ok = TermuxBridge.start(this@ServerService, server.copy(termuxPath = termuxPath), true)
+                    if (!ok) {
+                        logToConsole(serverId, "ERROR: Не вдалося відправити RUN_COMMAND. Перевір Termux.")
+                        runningServers.remove(serverId)
+                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                        return@withLock
+                    }
+                    repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+                    logToConsole(serverId, "Сервер запущено (Termux) exec=$execId path=$termuxPath")
+                    startLivenessPoll(serverId, session)
+                    if (server.type == ServerType.UBUNTU_SERVER) {
+                        val ip = getDeviceIp()
+                        logRaw(serverId, "\nUbuntu старт через proot-distro. IP: $ip\n")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("ServerService", "startServer error", e)
+                    logToConsole(serverId, "EXCEPTION: ${e.message}")
+                    try { repository.updateServerStatus(serverId, ServerStatus.ERROR) } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("ServerService", "Error starting server", e)
-                logToConsole(serverId, "EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
-                logToConsole(serverId, "Stack trace: ${e.stackTraceToString()}")
-                repository.updateServerStatus(serverId, ServerStatus.ERROR)
             }
         }
     }
 
     private fun stopServer(serverId: String) {
         serviceScope.launch {
-            try {
-                android.util.Log.d("ServerService", "stopServer called for: $serverId")
-                val pid = runningServers[serverId]
-                android.util.Log.d("ServerService", "PID found: $pid")
-
-                if (pid != null) {
-                    repository.updateServerStatus(serverId, ServerStatus.STOPPING)
-                    logToConsole(serverId, "Stopping server with PID: $pid")
-
-                    if (NativeBridge.stopProcess(pid)) {
-                        runningServers.remove(serverId)
+            startMutex.withLock {
+                try {
+                    android.util.Log.d("ServerService", "stopServer $serverId")
+                    val session = runningServers[serverId]
+                    if (session == null) {
+                        logToConsole(serverId, "Сервер не запущений")
                         repository.updateServerStatus(serverId, ServerStatus.STOPPED)
-                        logToConsole(serverId, "Server stopped successfully")
-                    } else {
-                        logToConsole(serverId, "Force killing server...")
-                        NativeBridge.killProcess(pid)
-                        runningServers.remove(serverId)
-                        repository.updateServerStatus(serverId, ServerStatus.STOPPED)
-                        logToConsole(serverId, "Server killed")
+                        return@withLock
                     }
-                } else {
-                    logToConsole(serverId, "Server is not running (no PID found)")
+                    repository.updateServerStatus(serverId, ServerStatus.STOPPING)
+                    logToConsole(serverId, "Зупинка сервера...")
+
+                    TermuxBridge.stop(this@ServerService, session)
+                    // Additional fifo cleanup via Termux
+                    TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "rm -f input.fifo; pkill -f java 2>/dev/null; echo stopped >> server.log")
+
+                    runningServers.remove(serverId)
+                    repository.updateTermuxExecutionId(serverId, null)
                     repository.updateServerStatus(serverId, ServerStatus.STOPPED)
+                    logToConsole(serverId, "Сервер зупинено")
+                    // Wake unlock if no servers
+                    if (runningServers.isEmpty()) {
+                        TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "termux-wake-unlock 2>/dev/null || true")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("ServerService", "stop error", e)
+                    logToConsole(serverId, "Error stopping: ${e.message}")
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("ServerService", "Error stopping server", e)
-                logToConsole(serverId, "Error stopping server: ${e.message}")
             }
         }
     }
 
     private fun logToConsole(serverId: String, message: String) {
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-            .format(java.util.Date())
-        val logMessage = "[$timestamp] $message\n"
-
-        android.util.Log.d("ServerService", "logToConsole: $logMessage")
-
-        // Write to log file
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val line = "[$timestamp] $message\n"
         serviceScope.launch {
             try {
-                val server = repository.getServer(serverId).first()
-                server?.let {
-                    val logFile = File(ServerPaths.resolve(this@ServerService, it.workingDirectory), "server.log")
-
-                    // Create parent directories if they don't exist
-                    logFile.parentFile?.mkdirs()
-
-                    // Create file if it doesn't exist
-                    if (!logFile.exists()) {
-                        logFile.createNewFile()
-                        android.util.Log.d("ServerService", "Created log file: ${logFile.absolutePath}")
-                    }
-
-                    logFile.appendText(logMessage)
-                    android.util.Log.d("ServerService", "Wrote to log file: ${logFile.absolutePath}, size: ${logFile.length()}")
+                val server = repository.getServer(serverId).first() ?: return@launch
+                val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                if (uriStr.isEmpty()) return@launch
+                val dirUri = Uri.parse(uriStr)
+                val dir = DocumentFile.fromTreeUri(this@ServerService, dirUri) ?: return@launch
+                var logFile = dir.findFile("server.log")
+                if (logFile == null) logFile = dir.createFile("text/plain", "server.log")
+                logFile?.let {
+                    try {
+                        contentResolver.openOutputStream(it.uri, "wa")?.use { out -> out.write(line.toByteArray()) }
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ServerService", "Error writing to log file", e)
-                e.printStackTrace()
+                android.util.Log.e("ServerService", "log write fail", e)
             }
         }
     }
@@ -275,16 +256,20 @@ class ServerService : Service() {
     private fun logRaw(serverId: String, text: String) {
         serviceScope.launch {
             try {
-                val server = repository.getServer(serverId).first()
-                server?.let {
-                    val logFile = File(ServerPaths.resolve(this@ServerService, it.workingDirectory), "server.log")
-                    logFile.parentFile?.mkdirs()
-                    if (!logFile.exists()) logFile.createNewFile()
-                    logFile.appendText(text)
-                    if (!text.endsWith("\n")) logFile.appendText("\n")
+                val server = repository.getServer(serverId).first() ?: return@launch
+                val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                val dirUri = Uri.parse(uriStr)
+                val dir = DocumentFile.fromTreeUri(this@ServerService, dirUri) ?: return@launch
+                var logFile = dir.findFile("server.log")
+                if (logFile == null) logFile = dir.createFile("text/plain", "server.log")
+                logFile?.let {
+                    contentResolver.openOutputStream(it.uri, "wa")?.use { out ->
+                        out.write(text.toByteArray())
+                        if (!text.endsWith("\n")) out.write("\n".toByteArray())
+                    }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ServerService", "Error writing raw log", e)
+                android.util.Log.e("ServerService", "logRaw fail", e)
             }
         }
     }
@@ -308,69 +293,41 @@ class ServerService : Service() {
                 }
             }
             "192.168.0.100"
-        } catch (_: Exception) {
-            "192.168.0.100"
-        }
+        } catch (_: Exception) { "192.168.0.100" }
     }
 
-    private fun startOutputDrain(serverId: String, pid: Int) {
+    private fun startLivenessPoll(serverId: String, session: TermuxBridge.TermuxSession) {
         serviceScope.launch {
-            while (true) {
-                val alive = NativeBridge.isProcessAlive(pid)
-                val output = NativeBridge.readProcessOutput(pid)
-                if (output.isNotEmpty()) {
-                    logRaw(serverId, output)
-                }
-                if (!alive && output.isEmpty()) {
-                    break
-                }
-                delay(100)
+            var deadCount = 0
+            while (runningServers.containsKey(serverId)) {
+                delay(5000)
+                // Heuristic: if log file not growing and ps check would be needed, we currently just check if SAF still exists
+                try {
+                    val server = repository.getServer(serverId).first()
+                    if (server == null || server.status != ServerStatus.RUNNING) break
+                    val uri = Uri.parse(server.effectiveWorkDirUri)
+                    val dir = DocumentFile.fromTreeUri(this@ServerService, uri)
+                    if (dir == null || !dir.exists()) {
+                        deadCount++
+                        if (deadCount >= 3) {
+                            logToConsole(serverId, "Process exited (папка недоступна)")
+                            runningServers.remove(serverId)
+                            repository.updateServerStatus(serverId, ServerStatus.STOPPED)
+                            break
+                        }
+                    } else {
+                        deadCount = 0
+                    }
+                    // Optional: send ps check via TermuxBridge (async, result via ResultsService not yet parsed)
+                    // TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "ps aux | grep -q '[j]ava' || echo dead >> server.log")
+                } catch (_: Exception) {}
             }
-            logToConsole(serverId, "Process $pid exited")
-            runningServers.remove(serverId)
-            val server = repository.getServer(serverId).first()
-            if (server?.status == ServerStatus.RUNNING) {
-                repository.updateServerStatus(serverId, ServerStatus.STOPPED)
-            }
         }
-    }
-
-    private fun buildStartCommand(server: Server): String {
-        val base = when {
-            server.config.startCommand.isNotEmpty() -> server.config.startCommand
-            else -> "sh start.sh"
-        }
-        return if (server.type == ServerType.UBUNTU_SERVER && base.contains("/bin/bash") && !base.contains(" -i")) {
-            "$base -i"
-        } else base
-    }
-
-    private fun buildEnvironment(server: Server, workingDir: String): List<String> {
-        val env = mutableListOf<String>()
-        if (server.type == ServerType.UBUNTU_SERVER) {
-            env.add("TERM=xterm-256color")
-            env.add("HOME=/root")
-            env.add("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-            env.add("LANG=C.UTF-8")
-            env.add("PROOT_NO_SECCOMP=1")
-            env.add("PROOT_TMP_DIR=$workingDir")
-            env.add("TMPDIR=$workingDir")
-        }
-        server.config.environment.forEach { (key, value) ->
-            env.add("$key=$value")
-        }
-        return env
     }
 
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, ANServerApplication.NOTIFICATION_CHANNEL_ID)
             .setContentTitle("PocketHost")
             .setContentText("Server service is running")
@@ -383,7 +340,13 @@ class ServerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-        runningServers.keys.forEach { stopServer(it) }
+        // Stop all via copy to avoid concurrent modification
+        val toStop = runningServers.keys.toList()
+        toStop.forEach { id ->
+            val session = runningServers[id]
+            if (session != null) TermuxBridge.stop(this, session)
+        }
+        runningServers.clear()
     }
 
     companion object {

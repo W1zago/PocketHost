@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_copy"
+        android:title="Копіювати"
+        android:icon="@android:drawable/ic_menu_share"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_select_all"
+        android:title="Виділити все"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_clear"
+        android:title="Очистити"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_share"
+        android:title="Поділитися логом"
+        app:showAsAction="never" />
+</menu>

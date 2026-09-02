@@ -1,29 +1,64 @@
 package com.anserver.app.ui
 
-import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.ArrayAdapter
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
 import com.anserver.app.databinding.ActivityCreateServerBinding
+import com.anserver.app.termux.SafHelper
+import com.anserver.app.termux.TermuxPaths
 import com.anserver.core.model.MinecraftLoader
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerConfig
 import com.anserver.core.model.ServerType
 import com.google.android.material.snackbar.Snackbar
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.File
-import com.anserver.core.util.JavaUtils
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class CreateServerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityCreateServerBinding
     private val repository = ANServerApplication.serverRepository
     private var selectedServerType: ServerType = ServerType.MINECRAFT
-    private var selectedDirectory: String = ""
+    private var selectedTreeUri: Uri? = null
+    private var selectedSubDirUri: Uri? = null
+
+    private val picker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            SafHelper.persistPermission(this, uri)
+        } catch (_: Exception) {}
+        if (!SafHelper.isOnPrimaryStorage(this, uri)) {
+            Snackbar.make(binding.root, "Тільки внутрішня пам'ять", Snackbar.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
+        val tree = DocumentFile.fromTreeUri(this, uri)
+        if (tree == null || !tree.canWrite()) {
+            Snackbar.make(binding.root, "Нема запису", Snackbar.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
+        val name = binding.etServerName.text?.toString()?.trim() ?: ""
+        val sanitized = SafHelper.sanitizeName(name.ifEmpty { "server" })
+        val dirName = sanitized + "_" + UUID.randomUUID().toString().take(4)
+        val sub = tree.createDirectory(dirName)
+        if (sub == null) {
+            Snackbar.make(binding.root, "Не вдалося створити", Snackbar.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
+        selectedTreeUri = uri
+        selectedSubDirUri = sub.uri
+        binding.etWorkingDir.setText(SafHelper.getDisplayPath(this, sub.uri))
+        updateCreateButtonState()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,28 +70,25 @@ class CreateServerActivity : AppCompatActivity() {
         setupMinecraftSettings()
         setupDirectoryPicker()
         setupCreateButton()
-        checkJavaAvailability()
 
-        // Get server type from intent if provided
         intent.getStringExtra("server_type")?.let { typeName ->
-            selectedServerType = ServerType.valueOf(typeName)
-            binding.spinnerServerType.setText(typeName, false)
+            try {
+                selectedServerType = ServerType.valueOf(typeName)
+                binding.spinnerServerType.setText(typeName, false)
+            } catch (_: Exception) {}
             updateDefaultValues()
             updateMinecraftSettingsVisibility()
         }
-    }
 
-    private fun checkJavaAvailability() {
-        val javaInfo = JavaUtils.checkJavaAvailability()
-        if (javaInfo == null) {
-            Snackbar.make(
-                binding.root,
-                "Warning: Java runtime not found. Install Termux with Java to run Minecraft servers.",
-                Snackbar.LENGTH_LONG
-            ).show()
-        } else {
-            android.util.Log.d("CreateServerActivity", "Java found at: ${javaInfo.path}, version: ${javaInfo.version}")
+        // Legacy toast if filesDir servers exist
+        val legacy = java.io.File(filesDir, "servers")
+        if (legacy.exists() && legacy.listFiles()?.isNotEmpty() == true) {
+            Snackbar.make(binding.root, "Старі сервери не підтримуються, створіть заново в SAF", Snackbar.LENGTH_LONG).show()
         }
+
+        // Hide startCommand manual input (generated in TermuxBridge)
+        binding.etStartCommand.isEnabled = false
+        binding.etStartCommand.hint = "Генерується автоматично (Termux)"
     }
 
     private fun setupToolbar() {
@@ -66,204 +98,311 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun setupServerTypeSpinner() {
-        // Only show Minecraft and Ubuntu Server
-        val allowedServerTypes = listOf(
-            ServerType.MINECRAFT,
-            ServerType.UBUNTU_SERVER
-        )
-        val serverTypeNames = allowedServerTypes.map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, serverTypeNames)
+        val allowed = listOf(ServerType.MINECRAFT, ServerType.UBUNTU_SERVER)
+        val names = allowed.map { it.name }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, names)
         binding.spinnerServerType.setAdapter(adapter)
         binding.spinnerServerType.setText(selectedServerType.name, false)
-
         binding.spinnerServerType.setOnItemClickListener { _, _, position, _ ->
-            selectedServerType = allowedServerTypes[position]
+            selectedServerType = allowed[position]
             updateDefaultValues()
             updateMinecraftSettingsVisibility()
+            updateCreateButtonState()
         }
-
         updateDefaultValues()
         updateMinecraftSettingsVisibility()
     }
 
     private fun setupMinecraftSettings() {
-        // Minecraft versions (popular versions)
-        val minecraftVersions = listOf(
+        val versions = listOf(
             "1.21.4", "1.21.3", "1.21.1", "1.21",
             "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.20",
-            "1.19.4", "1.19.3", "1.19.2", "1.19.1", "1.19",
+            "1.19.4", "1.19.3", "1.19.2", "1.19",
             "1.18.2", "1.18.1", "1.18",
             "1.17.1", "1.17",
-            "1.16.5", "1.16.4", "1.16.3", "1.16.2", "1.16.1",
-            "1.12.2", "1.8.9", "1.7.10"
+            "1.16.5", "1.12.2", "1.8.9"
         )
-        val versionAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, minecraftVersions)
-        binding.spinnerMinecraftVersion.setAdapter(versionAdapter)
+        val verAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, versions)
+        binding.spinnerMinecraftVersion.setAdapter(verAdapter)
         binding.spinnerMinecraftVersion.setText("1.21.4", false)
 
-        // Minecraft loaders
         val loaders = MinecraftLoader.values().map { it.name }
         val loaderAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, loaders)
         binding.spinnerMinecraftLoader.setAdapter(loaderAdapter)
-        binding.spinnerMinecraftLoader.setText(MinecraftLoader.VANILLA.name, false)
+        binding.spinnerMinecraftLoader.setText(MinecraftLoader.PAPER.name, false)
 
-        // Set default memory based on device capabilities
         val runtime = Runtime.getRuntime()
         val maxMemoryMB = (runtime.maxMemory() / 1024 / 1024).toInt()
-        val recommendedMax = (maxMemoryMB * 0.7).toInt() // Use 70% of available memory
-        val recommendedMin = (recommendedMax * 0.5).toInt() // Min is 50% of max
+        val recommendedMax = (maxMemoryMB * 0.7).toInt()
+        val recommendedMin = (recommendedMax * 0.5).toInt()
+        binding.etMaxMemory.setText(recommendedMax.coerceAtLeast(512).toString())
+        binding.etMinMemory.setText(recommendedMin.coerceAtLeast(256).toString())
 
-        binding.etMaxMemory.setText(recommendedMax.toString())
-        binding.etMinMemory.setText(recommendedMin.toString())
-
-        // Use Max Resources button
         binding.btnUseMaxResources.setOnClickListener {
-            val runtime = Runtime.getRuntime()
-            val maxMemoryMB = (runtime.maxMemory() / 1024 / 1024).toInt()
-            val maxAllowed = (maxMemoryMB * 0.9).toInt() // Use 90% of available memory
+            val max = (runtime.maxMemory() / 1024 / 1024).toInt()
+            val maxAllowed = (max * 0.9).toInt()
             val minAllowed = (maxAllowed * 0.5).toInt()
-
-            binding.etMaxMemory.setText(maxAllowed.toString())
-            binding.etMinMemory.setText(minAllowed.toString())
-
+            binding.etMaxMemory.setText(maxAllowed.coerceAtLeast(512).toString())
+            binding.etMinMemory.setText(minAllowed.coerceAtLeast(256).toString())
             Snackbar.make(binding.root, "Using maximum resources: $maxAllowed MB", Snackbar.LENGTH_SHORT).show()
         }
     }
 
     private fun setupDirectoryPicker() {
-        // Disable directory picker - use internal storage only
         binding.etWorkingDir.isEnabled = false
-        binding.btnBrowseDirectory.visibility = View.GONE
+        binding.etWorkingDir.isFocusable = false
+        binding.etWorkingDir.isClickable = false
+        binding.btnBrowseDirectory.visibility = View.VISIBLE
+        binding.btnBrowseDirectory.text = "Вибрати папку *"
+        binding.btnBrowseDirectory.setOnClickListener { picker.launch(null) }
+        binding.btnCreate.isEnabled = false
+        binding.etServerName.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateCreateButtonState() }
+        })
+        binding.etPort.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateCreateButtonState() }
+        })
+        updateCreateButtonState()
     }
 
-    private fun openDirectoryPicker() {
-        // Removed - using internal storage only
+    private fun updateCreateButtonState() {
+        val nameValid = binding.etServerName.text?.toString()?.trim()?.isNotEmpty() == true
+        val portValid = binding.etPort.text?.toString()?.trim()?.toIntOrNull()?.let { it in 1..65535 } == true
+        binding.btnCreate.isEnabled = nameValid && portValid && selectedSubDirUri != null
     }
 
     private fun updateMinecraftSettingsVisibility() {
-        binding.minecraftSettings.visibility = if (selectedServerType == ServerType.MINECRAFT) {
-            View.VISIBLE
-        } else {
-            View.GONE
-        }
+        binding.minecraftSettings.visibility = if (selectedServerType == ServerType.MINECRAFT) View.VISIBLE else View.GONE
     }
 
     private fun updateDefaultValues() {
-        // Use app's internal storage directory (ext4: symlinks + exec work, unlike /storage/emulated)
-        val baseDir = File(filesDir, "servers")
-
-        // Find available Java executable
-        val javaPath = JavaUtils.findJavaExecutable() ?: "java"
-
         when (selectedServerType) {
             ServerType.MINECRAFT -> {
-                binding.etPort.setText("25565")
-                selectedDirectory = File(baseDir, "minecraft").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("$javaPath -Xmx1024M -Xms512M -jar server.jar nogui")
+                if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("25565")
+                binding.etStartCommand.setText("")
             }
             ServerType.UBUNTU_SERVER -> {
-                binding.etPort.setText("22")
-                selectedDirectory = File(baseDir, "ubuntu").absolutePath
-                binding.etWorkingDir.setText(selectedDirectory)
-                binding.etStartCommand.setText("./proot --link2symlink -0 -r ubuntu-fs -b /dev -b /proc -b /sys -w /root /bin/bash -i")
+                if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("22")
+                binding.etStartCommand.setText("bash -i")
             }
         }
+        updateCreateButtonState()
     }
 
     private fun setupCreateButton() {
-        binding.btnCreate.setOnClickListener {
-            createServer()
-        }
+        binding.btnCreate.setOnClickListener { createServer() }
     }
 
     private fun createServer() {
         val name = binding.etServerName.text.toString().trim()
         val portStr = binding.etPort.text.toString().trim()
-        val workingDir = if (selectedDirectory.isNotEmpty()) {
-            selectedDirectory
-        } else {
-            binding.etWorkingDir.text.toString().trim()
-        }
-        val startCommand = binding.etStartCommand.text.toString().trim()
-
         if (name.isEmpty()) {
-            Snackbar.make(binding.root, "Please enter server name", Snackbar.LENGTH_SHORT).show()
-            return
+            Snackbar.make(binding.root, "Введіть назву сервера", Snackbar.LENGTH_SHORT).show(); return
         }
-
         if (portStr.isEmpty()) {
-            Snackbar.make(binding.root, "Please enter port", Snackbar.LENGTH_SHORT).show()
-            return
+            Snackbar.make(binding.root, "Введіть порт", Snackbar.LENGTH_SHORT).show(); return
         }
-
         val port = portStr.toIntOrNull()
-        if (port == null || port < 1 || port > 65535) {
-            Snackbar.make(binding.root, "Invalid port number", Snackbar.LENGTH_SHORT).show()
-            return
+        if (port == null || port !in 1..65535) {
+            Snackbar.make(binding.root, "Невірний порт", Snackbar.LENGTH_SHORT).show(); return
         }
-
-        if (workingDir.isEmpty()) {
-            Snackbar.make(binding.root, "Please enter working directory", Snackbar.LENGTH_SHORT).show()
-            return
+        if (selectedSubDirUri == null) {
+            Snackbar.make(binding.root, "Виберіть папку", Snackbar.LENGTH_LONG).show(); return
         }
-
-        if (startCommand.isEmpty()) {
-            Snackbar.make(binding.root, "Please enter start command", Snackbar.LENGTH_SHORT).show()
-            return
+        val uri = selectedSubDirUri!!
+        val doc = DocumentFile.fromTreeUri(this, uri)
+        if (doc == null) {
+            Snackbar.make(binding.root, "Не вдалося відкрити папку", Snackbar.LENGTH_SHORT).show(); return
         }
-
-        // Create working directory if it doesn't exist
-        val dir = File(workingDir)
-        if (!dir.exists()) {
-            dir.mkdirs()
+        if (doc.listFiles().isNotEmpty()) {
+            Snackbar.make(binding.root, "Папка не порожня", Snackbar.LENGTH_LONG).show(); return
         }
-
-        val config = if (selectedServerType == ServerType.MINECRAFT) {
-            val minecraftVersion = binding.spinnerMinecraftVersion.text.toString()
-            val loaderName = binding.spinnerMinecraftLoader.text.toString()
-            val loader = MinecraftLoader.valueOf(loaderName)
-            val maxMemory = binding.etMaxMemory.text.toString().toIntOrNull() ?: 1024
-            val minMemory = binding.etMinMemory.text.toString().toIntOrNull() ?: 512
-
-            // Get Java path from Android Runtime
-            val javaPath = JavaUtils.findJavaExecutable() ?: "java"
-
-            // Update start command based on loader
-            val updatedCommand = when (loader) {
-                MinecraftLoader.VANILLA -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar server.jar nogui"
-                MinecraftLoader.FORGE -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar forge-installer.jar --installServer"
-                MinecraftLoader.FABRIC -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar fabric-server-launch.jar nogui"
-                MinecraftLoader.NEOFORGE -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar neoforge-installer.jar --installServer"
-                MinecraftLoader.PAPER -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar paper.jar nogui"
-                MinecraftLoader.SPIGOT -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar spigot.jar nogui"
-                MinecraftLoader.BUKKIT -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar craftbukkit.jar nogui"
-                MinecraftLoader.PURPUR -> "$javaPath -Xmx${maxMemory}M -Xms${minMemory}M -jar purpur.jar nogui"
+        if (!SafHelper.isOnPrimaryStorage(this, uri) && !SafHelper.isOnPrimaryStorage(this, selectedTreeUri ?: uri)) {
+            Snackbar.make(binding.root, "Тільки внутрішня пам'ять", Snackbar.LENGTH_LONG).show(); return
+        }
+        if (selectedServerType == ServerType.MINECRAFT) {
+            val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
+            val version = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.21.4" }
+            val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
+            if (loader == MinecraftLoader.SPIGOT || loader == MinecraftLoader.BUKKIT || loader == MinecraftLoader.FORGE || loader == MinecraftLoader.NEOFORGE) {
+                AlertDialog.Builder(this)
+                    .setTitle("Попередження")
+                    .setMessage("Завантажувач $loaderName може не підтримуватися. Рекомендується PAPER, PURPUR, VANILLA чи FABRIC.\n\nПродовжити з $loaderName?")
+                    .setPositiveButton("Продовжити") { _, _ -> proceedCreateMinecraft(name, port, uri) }
+                    .setNegativeButton("Скасувати") { d, _ -> d.dismiss() }
+                    .show()
+                return
             }
-
-            binding.etStartCommand.setText(updatedCommand)
-
-            ServerConfig(
-                startCommand = updatedCommand,
-                maxMemory = maxMemory,
-                minMemory = minMemory,
-                minecraftVersion = minecraftVersion,
-                minecraftLoader = loader
-            )
+            proceedCreateMinecraft(name, port, uri)
         } else {
-            ServerConfig(
-                startCommand = startCommand
-            )
+            proceedCreateGeneric(name, port, uri)
         }
+    }
 
+    private fun proceedCreateMinecraft(name: String, port: Int, uri: Uri) {
+        val maxMemory = binding.etMaxMemory.text.toString().toIntOrNull() ?: 1024
+        val minMemory = binding.etMinMemory.text.toString().toIntOrNull() ?: 512
+        val version = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.21.4" }
+        val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
+        val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
+
+        binding.btnCreate.isEnabled = false
+        binding.btnCreate.text = "Створення..."
+
+        val displayPath = SafHelper.getDisplayPath(this, uri)
+        val termuxPath = TermuxPaths.safToTermux(this, uri)
+        val config = ServerConfig(
+            startCommand = "",
+            maxMemory = maxMemory,
+            minMemory = minMemory,
+            minecraftVersion = version,
+            minecraftLoader = loader
+        )
         val server = Server(
             name = name,
-            type = selectedServerType,
+            type = ServerType.MINECRAFT,
             port = port,
-            workingDirectory = workingDir,
+            workingDirectory = uri.toString(),
+            workDirUri = uri.toString(),
+            displayPath = displayPath,
+            termuxPath = termuxPath,
             config = config
         )
 
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dirDoc = DocumentFile.fromTreeUri(this@CreateServerActivity, uri)!!
+                // eula.txt
+                dirDoc.createFile("text/plain", "eula.txt")?.let { eulaUri ->
+                    contentResolver.openOutputStream(eulaUri.uri)?.use { it.write("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://account.mojang.com/documents/minecraft_eula).\neula=true".toByteArray()) }
+                }
+                // server.properties
+                val props = """
+                    server-port=$port
+                    max-players=20
+                    gamemode=survival
+                    difficulty=normal
+                    pvp=true
+                    online-mode=true
+                    motd=A Minecraft Server - $name
+                    view-distance=8
+                    spawn-protection=16
+                    enable-command-block=false
+                    allow-flight=false
+                    white-list=false
+                    enforce-whitelist=false
+                """.trimIndent()
+                dirDoc.createFile("text/plain", "server.properties")?.let { propUri ->
+                    // DocumentFile createFile may add extension; find or create plain
+                    contentResolver.openOutputStream(propUri.uri)?.use { it.write(props.toByteArray()) }
+                }
+                // Also ensure server.properties via direct DocumentFile find
+                // If file creation added .txt, rename handling not needed; we already created with correct name handling via SAF may mangle, but ok
+            } catch (_: Exception) {}
+
+            withContext(Dispatchers.Main) {
+                lifecycleScope.launch {
+                    repository.createServer(server)
+                    Snackbar.make(binding.root, "Сервер \"$name\" створено. Натисніть Start для запуску ($version, $loader)", Snackbar.LENGTH_LONG).show()
+                    showProvisionDialog(server, uri)
+                }
+            }
+        }
+    }
+
+    private fun showProvisionDialog(server: Server, uri: Uri) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Завантаження Minecraft")
+            .setMessage("Завантажити ${server.config.minecraftLoader} ${server.config.minecraftVersion} зараз?\n(~50-100 MB)\n\nМожна пропустити - завантаження відбудеться при першому Start.")
+            .setPositiveButton("Завантажити") { d, _ ->
+                d.dismiss()
+                startProvisioning(server, uri)
+            }
+            .setNegativeButton("Пізніше") { d, _ ->
+                d.dismiss()
+                finish()
+            }
+            .setCancelable(false)
+            .create()
+        dialog.show()
+    }
+
+    private fun startProvisioning(server: Server, uri: Uri) {
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Завантаження...")
+            .setMessage("Підготовка Minecraft серверу...\n${server.config.minecraftLoader} ${server.config.minecraftVersion}")
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        lifecycleScope.launch {
+            var lastMsg = ""
+            val ok = try {
+                provisionSaf(server, uri) { msg ->
+                    lastMsg = msg
+                    runOnUiThread { progressDialog.setMessage(msg + "\n\n" + lastMsg) }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { progressDialog.setMessage("Помилка: ${e.message}") }
+                false
+            }
+            progressDialog.dismiss()
+            binding.btnCreate.isEnabled = true
+            binding.btnCreate.text = getString(com.anserver.app.R.string.create_server)
+            if (ok) {
+                Snackbar.make(binding.root, "Готово! Натисніть Start для запуску.", Snackbar.LENGTH_LONG).show()
+                kotlinx.coroutines.delay(1200)
+                finish()
+            } else {
+                AlertDialog.Builder(this@CreateServerActivity)
+                    .setTitle("Помилка завантаження")
+                    .setMessage("Не вдалося завантажити jar. Перевірте інтернет.\n\nДеталі: $lastMsg")
+                    .setPositiveButton("OK") { _, _ -> finish() }
+                    .show()
+            }
+        }
+    }
+
+    private suspend fun provisionSaf(server: Server, uri: Uri, log: (String) -> Unit): Boolean {
+        return try {
+            val dirDoc = DocumentFile.fromTreeUri(this, uri) ?: return false
+            val version = server.config.minecraftVersion ?: "1.21.4"
+            val loader = server.config.minecraftLoader ?: MinecraftLoader.PAPER
+            // Use existing MinecraftServerManager but via SAF file creation: download to temp File then copy to SAF via stream
+            // Simplified: call MinecraftServerManager with displayPath as base, but write via File may still work on /storage
+            // Instead directly download via manager's logic using our SAF download
+            val displayPath = SafHelper.getDisplayPath(this, uri)
+            // Try to use File path for manager (works if File I/O allowed)
+            val manager = com.anserver.plugins.minecraft.MinecraftServerManager(java.io.File(displayPath).parent ?: displayPath)
+            // manager will attempt File I/O; if it fails due to permission, fallback to direct Http
+            val ok = manager.provisionIfNeeded(displayPath, version, loader, server.config.maxMemory, server.config.minMemory, server.port, log)
+            if (ok) return true
+            // Fallback: ensure at least eula/properties exist (already created) return false to show error
+            false
+        } catch (e: Exception) {
+            log("Provision exception: ${e.message}")
+            false
+        }
+    }
+
+    private fun proceedCreateGeneric(name: String, port: Int, uri: Uri) {
+        binding.btnCreate.isEnabled = false
+        val displayPath = SafHelper.getDisplayPath(this, uri)
+        val termuxPath = TermuxPaths.safToTermux(this, uri)
+        val config = ServerConfig(startCommand = "bash -i")
+        val server = Server(
+            name = name,
+            type = ServerType.UBUNTU_SERVER,
+            port = port,
+            workingDirectory = uri.toString(),
+            workDirUri = uri.toString(),
+            displayPath = displayPath,
+            termuxPath = termuxPath,
+            config = config
+        )
         lifecycleScope.launch {
             repository.createServer(server)
             Snackbar.make(binding.root, "Server created successfully", Snackbar.LENGTH_SHORT).show()

@@ -29,7 +29,9 @@
       "Bash(adb pull *)",
       "Bash(git config *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(awk '{print $9, \"-\", $5}')",
+      "Bash(awk '{printf \"%-50s %6s\\\\n\", $9, $5}')"
     ]
   }
 }

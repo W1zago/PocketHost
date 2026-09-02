@@ -53,4 +53,13 @@
         android:contentDescription="Create Server"
         app:srcCompat="@android:drawable/ic_input_add" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnScan"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="16dp"
+        android:text="Сканувати пристрій"
+        app:icon="@android:drawable/ic_menu_search" />
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

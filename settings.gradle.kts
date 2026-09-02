@@ -21,5 +21,4 @@ dependencyResolutionManagement {
 rootProject.name = "ANServer"
 include(":app")
 include(":core")
-include(":native")
 include(":plugins:minecraft")

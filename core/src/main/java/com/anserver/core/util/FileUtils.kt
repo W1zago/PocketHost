@@ -43,7 +43,9 @@ object FileUtils {
 
     fun writeFile(path: String, content: String): Boolean {
         return try {
-            File(path).writeText(content)
+            val file = File(path)
+            file.parentFile?.mkdirs()
+            file.writeText(content)
             true
         } catch (e: Exception) {
             false

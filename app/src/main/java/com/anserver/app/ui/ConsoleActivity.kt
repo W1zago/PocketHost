@@ -1,26 +1,28 @@
 package com.anserver.app.ui
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
 import com.anserver.app.databinding.ActivityConsoleBinding
-import com.anserver.app.util.ServerPaths
-import com.anserver.native.NativeBridge
+import com.anserver.app.termux.TermuxBridge
+import com.anserver.app.termux.TermuxPaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.RandomAccessFile
 
 class ConsoleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityConsoleBinding
     private val repository = ANServerApplication.serverRepository
     private var serverId: String? = null
-    private var processPid: Int = -1
+    private var workDirUri: Uri? = null
+    private var termuxPath: String = ""
+    private var termuxSession: TermuxBridge.TermuxSession? = null
     private var ctrlActive = false
     private var altActive = false
 
@@ -42,6 +44,95 @@ class ConsoleActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Console"
+        binding.consoleOutput.setOnLongClickListener { false }
+        binding.consoleOutput.setOnClickListener { }
+        registerForContextMenu(binding.consoleOutput)
+    }
+
+    override fun onCreateContextMenu(
+        menu: android.view.ContextMenu?,
+        v: android.view.View?,
+        menuInfo: android.view.ContextMenu.ContextMenuInfo?
+    ) {
+        super.onCreateContextMenu(menu, v, menuInfo)
+        menu?.add(0, 1, 0, "Копіювати виділене")
+        menu?.add(0, 2, 0, "Копіювати все")
+        menu?.add(0, 3, 0, "Поділитися логом")
+        menu?.add(0, 4, 0, "Очистити консоль")
+    }
+
+    override fun onContextItemSelected(item: android.view.MenuItem): Boolean {
+        return when (item.itemId) {
+            1 -> { copySelection(); true }
+            2 -> { copyAll(); true }
+            3 -> { shareLog(); true }
+            4 -> { clearConsole(); true }
+            else -> super.onContextItemSelected(item)
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
+        menuInflater.inflate(com.anserver.app.R.menu.menu_console, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        return when (item.itemId) {
+            com.anserver.app.R.id.action_copy -> { copyAll(); true }
+            com.anserver.app.R.id.action_select_all -> { selectAll(); true }
+            com.anserver.app.R.id.action_clear -> { clearConsole(); true }
+            com.anserver.app.R.id.action_share -> { shareLog(); true }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun copySelection() {
+        val textView = binding.consoleOutput
+        val start = textView.selectionStart
+        val end = textView.selectionEnd
+        val textToCopy = if (start >= 0 && end > start) {
+            textView.text.substring(start, end).toString()
+        } else textView.text.toString()
+        copyToClipboard(textToCopy)
+    }
+
+    private fun copyAll() {
+        copyToClipboard(binding.consoleOutput.text.toString())
+        android.widget.Toast.makeText(this, "Скопійовано ${binding.consoleOutput.text.length} символів", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun selectAll() {
+        binding.consoleOutput.post {
+            val text = binding.consoleOutput.text
+            if (text is android.text.Spannable) {
+                android.text.Selection.selectAll(text as android.text.Spannable)
+            } else copyAll()
+        }
+    }
+
+    private fun clearConsole() {
+        binding.consoleOutput.text = ""
+        android.widget.Toast.makeText(this, "Консоль очищено (файл логу не видалено)", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareLog() {
+        val logText = binding.consoleOutput.text.toString()
+        if (logText.isBlank()) {
+            android.widget.Toast.makeText(this, "Лог порожній", android.widget.Toast.LENGTH_SHORT).show(); return
+        }
+        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(android.content.Intent.EXTRA_TEXT, logText)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "PocketHost server log")
+        }
+        startActivity(android.content.Intent.createChooser(intent, "Поділитися логом"))
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("console", text)
+        clipboard.setPrimaryClip(clip)
+        android.widget.Toast.makeText(this, "Скопійовано в буфер", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun setupConsole() {
@@ -61,9 +152,7 @@ class ConsoleActivity : AppCompatActivity() {
                 if (command.isNotEmpty()) {
                     sendCommand(command)
                     binding.inputCommand.text?.clear()
-                } else {
-                    writeToProcess("\n")
-                }
+                } else writeToProcess("\n")
                 return@setOnEditorActionListener true
             }
             false
@@ -91,15 +180,8 @@ class ConsoleActivity : AppCompatActivity() {
         updateModifierUI()
     }
 
-    private fun toggleCtrl() {
-        ctrlActive = !ctrlActive
-        updateModifierUI()
-    }
-
-    private fun toggleAlt() {
-        altActive = !altActive
-        updateModifierUI()
-    }
+    private fun toggleCtrl() { ctrlActive = !ctrlActive; updateModifierUI() }
+    private fun toggleAlt() { altActive = !altActive; updateModifierUI() }
 
     private fun updateModifierUI() {
         binding.keyCtrl.setBackgroundColor(if (ctrlActive) 0xFF4A4A00.toInt() else 0xFF222222.toInt())
@@ -110,9 +192,7 @@ class ConsoleActivity : AppCompatActivity() {
 
     private fun sendKey(data: String) {
         var toSend = data
-        if (altActive) {
-            toSend = "\u001B$toSend"
-        }
+        if (altActive) toSend = "\u001B$toSend"
         if (ctrlActive && toSend.length == 1) {
             val c = toSend[0]
             toSend = when {
@@ -123,20 +203,23 @@ class ConsoleActivity : AppCompatActivity() {
             }
         }
         val wasModifier = ctrlActive || altActive
-        if (wasModifier) {
-            ctrlActive = false
-            altActive = false
-            updateModifierUI()
-        }
+        if (wasModifier) { ctrlActive = false; altActive = false; updateModifierUI() }
         writeToProcess(toSend)
     }
 
     private fun writeToProcess(data: String) {
-        if (processPid > 0) {
+        val session = termuxSession
+        if (session != null) {
             try {
-                NativeBridge.writeProcessInput(processPid, data)
+                TermuxBridge.sendInput(this, session, data)
             } catch (e: Exception) {
-                android.util.Log.e("ConsoleActivity", "writeProcessInput failed", e)
+                android.util.Log.e("ConsoleActivity", "sendInput failed", e)
+            }
+        } else {
+            // fallback via raw termuxPath
+            if (termuxPath.isNotEmpty()) {
+                val fake = TermuxBridge.TermuxSession(serverId ?: "", -1, workDirUri?.toString() ?: "", termuxPath)
+                TermuxBridge.sendInput(this, fake, data)
             }
         }
     }
@@ -147,14 +230,21 @@ class ConsoleActivity : AppCompatActivity() {
                 try {
                     repository.getServer(id).collect { server ->
                         server?.let {
-                            if (processPid != it.pid && it.pid > 0) {
-                                processPid = it.pid
-                                android.util.Log.d("ConsoleActivity", "Process PID updated to: $processPid")
+                            val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
+                            workDirUri = try { Uri.parse(uriStr) } catch (_: Exception) { null }
+                            termuxPath = it.termuxPath.ifEmpty {
+                                workDirUri?.let { u -> TermuxPaths.safToTermux(this@ConsoleActivity, u) } ?: ""
                             }
+                            termuxSession = TermuxBridge.TermuxSession(
+                                serverId = it.id,
+                                executionId = it.termuxExecutionId ?: -1,
+                                workDirUri = uriStr,
+                                termuxPath = termuxPath
+                            )
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ConsoleActivity", "Error loading server info", e)
+                    android.util.Log.e("ConsoleActivity", "loadServerInfo", e)
                     binding.consoleOutput.setText("ERROR loading console: ${e.message}\n")
                 }
             }
@@ -164,49 +254,60 @@ class ConsoleActivity : AppCompatActivity() {
     private fun startOutputMonitoring() {
         val id = serverId ?: return
         lifecycleScope.launch(Dispatchers.IO) {
-            val server = try {
-                repository.getServer(id).first { it != null }
-            } catch (e: Exception) {
-                android.util.Log.e("ConsoleActivity", "Error loading server for console", e)
-                null
-            } ?: return@launch
-
-            val logFile = File(
-                ServerPaths.resolve(this@ConsoleActivity, server.workingDirectory),
-                "server.log"
-            )
+            val server = try { repository.getServer(id).first { it != null } } catch (e: Exception) { null } ?: return@launch
+            val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+            val dirUri = try { Uri.parse(uriStr) } catch (_: Exception) { return@launch }
             var offset = 0L
-            if (logFile.exists()) {
-                val length = logFile.length()
-                offset = if (length > INITIAL_TAIL_SIZE) length - INITIAL_TAIL_SIZE else 0L
+            // initial tail 16KB
+            try {
+                val dir = DocumentFile.fromTreeUri(this@ConsoleActivity, dirUri)
+                val logFile = dir?.findFile("server.log")
+                if (logFile != null) {
+                    val len = logFile.length()
+                    offset = if (len > INITIAL_TAIL_SIZE) len - INITIAL_TAIL_SIZE else 0L
+                }
+            } catch (_: Exception) {}
+            if (offset == 0L) {
+                withContext(Dispatchers.Main) { appendOutput("Connecting to Termux shell...\n") }
             }
-            if (!logFile.exists() || logFile.length() == 0L) {
-                withContext(Dispatchers.Main) { appendOutput("Connecting to Ubuntu shell...\n") }
-            }
-
             while (true) {
                 try {
-                    if (logFile.exists()) {
+                    val dir = DocumentFile.fromTreeUri(this@ConsoleActivity, dirUri)
+                    val logFile = dir?.findFile("server.log")
+                    if (logFile != null && logFile.exists()) {
                         val length = logFile.length()
                         if (length < offset) {
                             offset = 0L
                             withContext(Dispatchers.Main) { binding.consoleOutput.text = "" }
                         }
                         if (length > offset) {
-                            val text = RandomAccessFile(logFile, "r").use { raf ->
-                                raf.seek(offset)
-                                val buffer = ByteArray((length - offset).toInt())
-                                raf.readFully(buffer)
-                                String(buffer)
-                            }
+                            val text = contentResolver.openInputStream(logFile.uri)?.use { input ->
+                                // skip offset
+                                var skipped = 0L
+                                while (skipped < offset) {
+                                    val s = input.skip(offset - skipped)
+                                    if (s <= 0) break
+                                    skipped += s
+                                }
+                                val remaining = (length - offset).toInt().coerceAtMost(1024 * 1024)
+                                val buffer = ByteArray(remaining)
+                                var read = 0
+                                var total = 0
+                                while (total < remaining) {
+                                    val r = input.read(buffer, total, remaining - total)
+                                    if (r <= 0) break
+                                    total += r
+                                }
+                                String(buffer, 0, total)
+                            } ?: ""
                             offset = length
-                            withContext(Dispatchers.Main) {
-                                appendOutput(text)
+                            if (text.isNotEmpty()) {
+                                withContext(Dispatchers.Main) { appendOutput(text) }
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ConsoleActivity", "Error reading console log", e)
+                    android.util.Log.e("ConsoleActivity", "Error reading log", e)
                 }
                 delay(200)
             }
@@ -224,11 +325,6 @@ class ConsoleActivity : AppCompatActivity() {
     private fun sendCommand(command: String) {
         appendOutput("$ $command\n")
         writeToProcess("$command\n")
-    }
-
-    fun setProcessPid(pid: Int) {
-        processPid = pid
-        android.util.Log.d("ConsoleActivity", "Process PID set to: $pid")
     }
 
     override fun onSupportNavigateUp(): Boolean {
