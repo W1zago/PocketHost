@@ -5,20 +5,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Довільна папка сервера (опційно, лише за вибором користувача):
+         на Android 11+ потрібен доступ до всіх файлів (системні налаштування),
+         на старіших — класичний WRITE_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="com.termux.permission.RUN_COMMAND" tools:ignore="ProtectedPermissions" />
-
-    <queries>
-        <package android:name="com.termux" />
-        <intent>
-            <action android:name="com.termux.RUN_COMMAND" />
-        </intent>
-    </queries>
+    <!-- Вбудований термінал: зовнішній Termux більше не потрібен,
+         дозвіл com.termux.permission.RUN_COMMAND прибрано щоб система
+         не просила "керування / ввід команд в Termux". -->
 
     <application
         android:name=".ANServerApplication"
@@ -76,11 +77,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Legacy Termux callback, лишено для сумісності старих встановлень.
+             Не вимагає RUN_COMMAND, не використовується вбудованим терміналом. -->
         <service
             android:name=".termux.TermuxResultsService"
             android:enabled="true"
-            android:exported="true"
-            android:permission="com.termux.permission.RUN_COMMAND" />
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -109,7 +109,11 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 log("Minecraft jar not found, downloading $software $version...")
                 val downloaded = downloadServerJar(serverDir, version, software, log)
                 if (downloaded == null) {
-                    log("ERROR: Download failed. Check internet and try Paper/Vanilla.")
+                    if (software == MinecraftServerSoftware.SPIGOT || software == MinecraftServerSoftware.FORGE || software == MinecraftServerSoftware.BUKKIT) {
+                        log("ERROR: $software не має прямого завантаження. Поклади jar вручну через Files (${getJarName(software)}) або обери PAPER/PURPUR/VANILLA/FABRIC.")
+                    } else {
+                        log("ERROR: Download failed for $software $version. Дивись причину вище (HTTP-код). Якщо інтернет є - спробуй VANILLA/PURPUR/FABRIC.")
+                    }
                     return@withContext false
                 }
             } else {
@@ -201,10 +205,17 @@ class MinecraftServerManager(private val baseDirectory: String) {
             }
 
             log?.invoke("Fetching $downloadUrl")
-            downloadFile(downloadUrl, File(jarPath), log)
+            try {
+                downloadFile(downloadUrl, File(jarPath), log)
+            } catch (e: Exception) {
+                log?.invoke("Download error: ${e.message}. Перевір інтернет, VPN/провайдер міг заблокувати $downloadUrl")
+                try { File(jarPath).takeIf { it.exists() && it.length() < 1024 * 1024 }?.delete() } catch (_: Exception) {}
+                throw e
+            }
 
-            if (!File(jarPath).exists() || File(jarPath).length() < 1024) {
-                log?.invoke("Downloaded file invalid")
+            val len = File(jarPath).length()
+            if (!File(jarPath).exists() || len < 1024 * 1024) {
+                log?.invoke("Downloaded file invalid (${len / 1024} KB). Можливо обрив зʼєднання - спробуй ще раз або VANILLA/PURPUR.")
                 return@withContext null
             }
 
@@ -310,31 +321,68 @@ class MinecraftServerManager(private val baseDirectory: String) {
     }
 
     private fun getPaperUrl(version: String, log: ((String) -> Unit)?): String? {
+        // PaperMC Fill v2 (api.papermc.io) повертає 410 Gone з 01.07.2026.
+        // Актуальний API: Fill v3 -> fill.papermc.io
+        // Док: https://docs.papermc.io/misc/downloads-service/
+        // GET /v3/projects/paper/versions/{version}/builds/latest
+        //   -> downloads["server:default"].url (абсолютний URL на fill-data.papermc.io)
         return try {
-            log?.invoke("Resolving Paper $version ...")
-            val verJson = httpGet("https://api.papermc.io/v2/projects/paper/versions/$version")
-            if (verJson != null) {
-                val obj = JSONObject(verJson)
-                val builds = obj.getJSONArray("builds")
-                if (builds.length() > 0) {
-                    val latestBuild = builds.getInt(builds.length() - 1)
-                    log?.invoke("Latest Paper build: $latestBuild")
-                    val buildJson = httpGet("https://api.papermc.io/v2/projects/paper/versions/$version/builds/$latestBuild")
-                    if (buildJson != null) {
-                        val buildObj = JSONObject(buildJson)
-                        val downloads = buildObj.getJSONObject("downloads")
-                        val app = downloads.getJSONObject("application")
-                        val name = app.getString("name")
-                        val url = "https://api.papermc.io/v2/projects/paper/versions/$version/builds/$latestBuild/downloads/$name"
-                        log?.invoke("Paper URL: $url")
-                        return url
+            log?.invoke("Resolving Paper $version (Fill v3) ...")
+            val latestJson = try {
+                httpGet("https://fill.papermc.io/v3/projects/paper/versions/$version/builds/latest")
+            } catch (e: Exception) {
+                log?.invoke("Fill v3 latest failed: ${e.message}")
+                null
+            }
+            if (latestJson != null) {
+                try {
+                    val obj = JSONObject(latestJson)
+                    val downloads = obj.getJSONObject("downloads")
+                    // Ключ змінився у v3: application -> server:default
+                    val downloadObj = when {
+                        downloads.has("server:default") -> downloads.getJSONObject("server:default")
+                        downloads.has("application") -> downloads.getJSONObject("application")
+                        else -> null
                     }
+                    val url = downloadObj?.optString("url", null)
+                    if (!url.isNullOrEmpty()) {
+                        log?.invoke("Paper URL (Fill v3): $url")
+                        return url
+                    } else {
+                        log?.invoke("Fill v3: no download url in response, trying builds list")
+                    }
+                } catch (e: Exception) {
+                    log?.invoke("Fill v3 parse failed: ${e.message}, trying builds list")
                 }
             }
-            // Fallback try papermc new API or fill
-            log?.invoke("Trying Purpur-like fallback for Paper")
-            // older fallback url pattern
-            "https://api.papermc.io/v2/projects/paper/versions/$version/builds/latest/downloads/paper-$version.jar"
+            // Fallback: список білдів (Fill v3 повертає newest-first), беремо перший STABLE
+            try {
+                val buildsJson = httpGet("https://fill.papermc.io/v3/projects/paper/versions/$version/builds")
+                if (buildsJson != null) {
+                    val arr = org.json.JSONArray(buildsJson)
+                    for (i in 0 until arr.length()) {
+                        val buildObj = arr.getJSONObject(i)
+                        val channel = buildObj.optString("channel", "STABLE")
+                        if (channel != "STABLE" && i != arr.length() - 1) continue
+                        val downloads = buildObj.optJSONObject("downloads") ?: continue
+                        val downloadObj = when {
+                            downloads.has("server:default") -> downloads.optJSONObject("server:default")
+                            downloads.has("application") -> downloads.optJSONObject("application")
+                            else -> null
+                        }
+                        val url = downloadObj?.optString("url", null)
+                        if (!url.isNullOrEmpty()) {
+                            log?.invoke("Paper URL (Fill v3 list, build ${buildObj.optInt("id", -1)}, $channel): $url")
+                            return url
+                        }
+                    }
+                    log?.invoke("Fill v3 builds list: no suitable build for $version")
+                }
+            } catch (e: Exception) {
+                log?.invoke("Fill v3 builds list failed: ${e.message}")
+            }
+            log?.invoke("No Paper build for $version. Перевір список версій: Paper підтримує $version? Спробуй VANILLA/PURPUR/FABRIC.")
+            null
         } catch (e: Exception) {
             e.printStackTrace()
             log?.invoke("Paper resolve failed: ${e.message}")
@@ -398,32 +446,46 @@ class MinecraftServerManager(private val baseDirectory: String) {
         }
     }
 
+    companion object {
+        // Fill v3 вимагає ідентифікуючий User-Agent з контактом, інакше 403/rate-limit.
+        // https://docs.papermc.io/misc/downloads-service/
+        private const val USER_AGENT = "PocketHost/1.0 (Android; +https://github.com/anserver/pockethost)"
+    }
+
     private fun httpGet(urlStr: String): String? {
         var current = urlStr
         var redirects = 0
-        while (redirects < 5) {
+        while (redirects < 6) {
             val url = URL(current)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.connectTimeout = 30000
             conn.readTimeout = 30000
-            conn.setRequestProperty("User-Agent", "PocketHost/1.0")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
             conn.instanceFollowRedirects = false
             try {
                 val code = conn.responseCode
                 if (code in 300..399) {
-                    val loc = conn.getHeaderField("Location") ?: return null
-                    current = loc
+                    val loc = conn.getHeaderField("Location")
+                        ?: throw IllegalStateException("HTTP $code redirect without Location for $current")
+                    // Location може бути відносним
+                    current = try { URL(URL(current), loc).toString() } catch (_: Exception) { loc }
                     redirects++
                     continue
                 }
-                if (code != HttpURLConnection.HTTP_OK) return null
+                if (code != HttpURLConnection.HTTP_OK) {
+                    val errBody = try {
+                        (conn.errorStream ?: conn.inputStream).bufferedReader().readText().take(300)
+                    } catch (_: Exception) { "" }
+                    throw IllegalStateException("HTTP $code for $current. $errBody".trim())
+                }
                 return conn.inputStream.bufferedReader().readText()
             } finally {
                 conn.disconnect()
             }
         }
-        return null
+        throw IllegalStateException("Too many redirects for $urlStr")
     }
 
     private fun downloadFile(urlStr: String, target: File, log: ((String) -> Unit)?) {
@@ -434,19 +496,24 @@ class MinecraftServerManager(private val baseDirectory: String) {
             val conn = url.openConnection() as HttpURLConnection
             conn.connectTimeout = 30000
             conn.readTimeout = 90000
-            conn.setRequestProperty("User-Agent", "PocketHost/1.0")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "*/*")
             conn.instanceFollowRedirects = false
             val code = conn.responseCode
             if (code in 300..399) {
-                val loc = conn.getHeaderField("Location") ?: throw IllegalStateException("Redirect without Location")
-                if (++redirects > 5) throw IllegalStateException("Too many redirects")
-                current = loc
+                val loc = conn.getHeaderField("Location") ?: throw IllegalStateException("Redirect without Location (HTTP $code) for $current")
+                if (++redirects > 5) throw IllegalStateException("Too many redirects for $urlStr")
+                current = try { URL(URL(current), loc).toString() } catch (_: Exception) { loc }
+                log?.invoke("Redirect -> $current")
                 conn.disconnect()
                 continue
             }
             if (code != HttpURLConnection.HTTP_OK) {
+                val errBody = try {
+                    (conn.errorStream ?: conn.inputStream).bufferedReader().readText().take(300)
+                } catch (_: Exception) { "" }
                 conn.disconnect()
-                throw IllegalStateException("HTTP $code for $current")
+                throw IllegalStateException("HTTP $code for $current. $errBody".trim())
             }
             val total = conn.contentLengthLong
             log?.invoke("Downloading ${target.name} (${if (total > 0) "${total / 1024 / 1024} MB" else "unknown size"})...")

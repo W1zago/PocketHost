@@ -54,14 +54,11 @@ class ANServerApplication : Application() {
     }
 
     private fun checkLegacyServers() {
+        // Вбудований термінал використовує filesDir/servers - це тепер основне сховище, нічого ігнорувати не треба.
         try {
-            val legacy = java.io.File(filesDir, "servers")
-            if (legacy.exists() && legacy.listFiles()?.isNotEmpty() == true) {
-                android.util.Log.w("ANServerApplication", "Legacy filesDir servers found, ignoring. SAF required.")
-                // Toast must be on main thread, delay
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    android.widget.Toast.makeText(this, "Старі сервери не підтримуються, створіть заново в SAF", android.widget.Toast.LENGTH_LONG).show()
-                }
+            val servers = java.io.File(filesDir, "servers")
+            if (servers.exists()) {
+                android.util.Log.i("ANServerApplication", "Embedded servers dir: ${servers.absolutePath}, count=${servers.listFiles()?.size ?: 0}")
             }
         } catch (_: Exception) {}
     }

@@ -19,7 +19,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.documentfile.provider.DocumentFile
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +27,10 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * Діагностика ВБУДОВАНОГО терміналу.
+ * Жодних перевірок Termux / RUN_COMMAND / SAF - все всередині додатку.
+ */
 class DeviceScanActivity : AppCompatActivity() {
 
     private lateinit var container: LinearLayout
@@ -39,21 +42,9 @@ class DeviceScanActivity : AppCompatActivity() {
         refresh()
     }
 
-    private val safPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            try {
-                SafHelper.persistPermission(this, uri)
-                Toast.makeText(this, "SAF дозвіл збережено: ${SafHelper.getDisplayPath(this, uri)}", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "Помилка SAF: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-        refresh()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        supportActionBar?.title = "Сканування пристрою"
+        supportActionBar?.title = "Діагностика"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         val scroll = ScrollView(this)
@@ -64,7 +55,6 @@ class DeviceScanActivity : AppCompatActivity() {
         scroll.addView(container)
         setContentView(scroll)
 
-        // Auto-request all on first open? We do not auto, user clicks button
         refresh()
     }
 
@@ -78,31 +68,70 @@ class DeviceScanActivity : AppCompatActivity() {
         return true
     }
 
+    private data class ScanResult(
+        val shellOk: Boolean,
+        val storageOk: Boolean,
+        val javaOk: Boolean,
+        val javaPath: String?,
+        val batteryOk: Boolean,
+        val notifOk: Boolean,
+        val spaceOk: Boolean,
+        val freeGb: Double
+    )
+
     private fun refresh() {
+        // Скелет одразу, важкі перевірки (fork sh) — у IO щоб не ANR.
         container.removeAllViews()
         addHeader()
-        addCheck("1. Termux встановлено", checkTermuxInstalled(), "Встановити F-Droid") { openFdroid() }
-        addCheck("2. Termux версія >=95 (F-Droid)", checkTermuxVersion(), "Оновити F-Droid") { openFdroid() }
-        addCheck("3. RUN_COMMAND дозвіл", checkRunCommand(), "Надати дозвіл") { openAppDetails() }
-        addCheck("4. SAF папка вибрана", checkSaf(), "Вибрати SAF папку") { safPicker.launch(null) }
-        addCheck("5. Сховище Termux (termux-setup-storage)", checkTermuxStorage(), "Інструкція") { openTermuxSettings() }
-        addCheck("6. Батарея: ігнор оптимізації (PocketHost)", checkBatterySelf(), "Дозволити фон") { requestBatterySelf() }
-        addCheck("7. Батарея: ігнор для Termux", checkBatteryTermux(), "Дозволити Termux") { requestBatteryTermux() }
-        addCheck("8. Сповіщення POST_NOTIFICATIONS", checkNotification(), "Запросити") { requestNotification() }
-        addCheck("9. Вільно місця >2GB", checkSpace(), "Очистити") { openStorageSettings() }
-        addCheck("10. Інтернет (8.8.8.8)", checkInternetSync(), "Перевірити мережу") { openWifiSettings() }
-        addActions()
+        val loading = TextView(this).apply {
+            text = "Перевірка..."
+            gravity = Gravity.CENTER
+            setPadding(0, 24, 0, 24)
+        }
+        container.addView(loading)
+        scope.launch(Dispatchers.IO) {
+            val shellOk = checkEmbeddedShell()
+            val storageOk = checkInternalStorage()
+            val javaPath = try { com.anserver.app.embedded.EmbeddedJava.findJava(this@DeviceScanActivity) } catch (_: Exception) { null }
+            val batteryOk = checkBatterySelf()
+            val notifOk = checkNotification()
+            val freeGb = try { getFreeSpaceGB() } catch (_: Exception) { 99.0 }
+            val res = ScanResult(shellOk, storageOk, javaPath != null, javaPath, batteryOk, notifOk, freeGb > 0.5, freeGb)
+            withContext(Dispatchers.Main) {
+                try {
+                    container.removeAllViews()
+                    addHeader()
+                    addCheck("1. Вбудований термінал (sh)", res.shellOk, "Деталі") { showShellInfo() }
+                    addCheck("2. Внутрішнє сховище", res.storageOk, "Відкрити сховище") { openStorageSettings() }
+                    addCheck("3. Вбудована Java", res.javaOk, "Встановити JRE") { installJre() }
+                    addCheck("4. Вбудований shell для Ubuntu", res.shellOk, "Деталі") { showShellInfo() }
+                    addCheck("5. Батарея: ігнор оптимізації (PocketHost)", res.batteryOk, "Дозволити фон") { requestBatterySelf() }
+                    addCheck("6. Сповіщення POST_NOTIFICATIONS", res.notifOk, "Запросити") { requestNotification() }
+                    addCheck("7. Вільно місця >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "Очистити") { openStorageSettings() }
+                    addCheck("8. Інтернет", checkInternetSync(), "Перевірити мережу") { openWifiSettings() }
+                    // деталь Java-шляху
+                    if (res.javaPath != null) {
+                        container.addView(TextView(this@DeviceScanActivity).apply {
+                            text = "Java: ${res.javaPath}"
+                            textSize = 11f
+                            setTextColor(0xFF666666.toInt())
+                        })
+                    }
+                    addActions()
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun addHeader() {
         val title = TextView(this).apply {
-            text = "Перевірка пристрою для PocketHost Pure Termux"
+            text = "PocketHost — вбудований термінал"
             textSize = 18f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 16)
         }
         val subtitle = TextView(this).apply {
-            text = "Зелений = OK, Червоний = треба дія. Натисни «Надати всі дозволи» щоб додаток сам запросив що може."
+            text = "Зовнішній Termux НЕ потрібен. Все працює всередині додатку без дозволу «керування Termux»."
             textSize = 13f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 16)
@@ -115,7 +144,7 @@ class DeviceScanActivity : AppCompatActivity() {
             setOnClickListener { refreshWithInternet() }
         }
         val btnAuto = MaterialButton(this).apply {
-            text = "Надати всі дозволи автоматично"
+            text = "Надати дозволи автоматично"
             setOnClickListener { autoRequestAll() }
         }
         container.addView(btnRescan.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 8) } })
@@ -124,7 +153,7 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun addActions() {
         val info = TextView(this).apply {
-            text = "Примітка: RUN_COMMAND та SAF не можна надати автоматично без переходу в Налаштування — додаток відкриє потрібний екран сам."
+            text = "Примітка: SAF-папки та RUN_COMMAND більше не використовуються. Старі SAF-сервери запускаються в міграційному режимі у внутрішній папці."
             textSize = 12f
             setPadding(0, 24, 0, 0)
         }
@@ -159,7 +188,6 @@ class DeviceScanActivity : AppCompatActivity() {
         row.addView(btn.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) })
         container.addView(row)
 
-        // Details line
         val detail = TextView(this).apply {
             text = getDetail(title, ok)
             textSize = 11f
@@ -173,77 +201,90 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun getDetail(title: String, ok: Boolean): String {
         return when {
-            title.contains("Termux встановлено") -> if (ok) "Пакет com.termux знайдено" else "Не знайдено com.termux. Потрібен F-Droid 0.118+"
-            title.contains("версія") -> if (ok) "versionCode=${TermuxChecker.getVersionCode(this)} >=95" else "versionCode=${TermuxChecker.getVersionCode(this)} <95 або Play Store. Видали Play, постав F-Droid"
-            title.contains("RUN_COMMAND") -> if (ok) "Дозвіл GRANTED (${TermuxChecker.getRunCommandDetails(this)})" else "Нема доступу. На Samsung: Налаштування -> Додатки -> PocketHost -> Дозволи -> Інше (або Додаткові дозволи) -> увімкни 'Виконувати команди в Termux' / RUN_COMMAND. ${TermuxChecker.getRunCommandDetails(this)}"
-            title.contains("SAF") -> {
-                val count = try { contentResolver.persistedUriPermissions.size } catch (_: Exception) { 0 }
-                if (ok) "Збережено $count SAF дозволів" else "Нема жодного persistedUriPermissions. Вибери /Download або /Documents"
+            title.contains("Вбудований термінал") -> if (ok) "ProcessBuilder sh працює" else "sh недоступний (дуже рідко). Перезапусти пристрій"
+            title.contains("Внутрішнє сховище") -> {
+                val root = filesDir.absolutePath
+                if (ok) "Доступно: $root" else "Нема запису в $root"
             }
-            title.contains("Сховище Termux") -> if (ok) "Ймовірно налаштовано (є SAF)" else "Виконай в Termux: termux-setup-storage"
-            title.contains("Батарея") && title.contains("PocketHost") -> if (ok) "Ігнор оптимізації увімкнено" else "Система може вбивати фоновий сервіс"
-            title.contains("Батарея") && title.contains("Termux") -> if (ok) "Termux не оптимізується" else "Termux може вбиватися. Запроси ігнор"
+            title.contains("Вбудована Java") -> {
+                val java = try { com.anserver.app.embedded.EmbeddedJava.findJava(this) } catch (_: Exception) { null }
+                if (ok) "Знайдено: $java" else "Не знайдено. Натисни «Встановити JRE» (потрібен інтернет, ~100MB)"
+            }
+            title.contains("Ubuntu") -> if (ok) "sh -i готовий для команд" else "sh недоступний"
+            title.contains("Батарея") -> if (ok) "Ігнор оптимізації увімкнено" else "Система може вбивати фоновий сервіс"
             title.contains("Сповіщення") -> if (ok) "POST_NOTIFICATIONS дозволено" else "Потрібен для foreground service"
             title.contains("Вільно місця") -> {
                 val free = getFreeSpaceGB()
-                if (ok) "${String.format("%.1f", free)} GB вільно" else "${String.format("%.1f", free)} GB <2GB, звільни місце"
+                if (ok) "${String.format("%.1f", free)} GB вільно" else "${String.format("%.1f", free)} GB <0.5GB, звільни місце"
             }
-            title.contains("Інтернет") -> if (ok) "Доступ до 8.8.8.8 є (або кеш)" else "Перевірка не пройшла (може бути кеш). Увімкни WiFi/мобільні"
+            title.contains("Інтернет") -> if (ok) "Доступ є (або кеш)" else "Перевірка не пройшла. Увімкни WiFi/мобільні"
             else -> ""
         }
     }
 
-    private fun checkTermuxInstalled() = try { TermuxChecker.isInstalled(this) } catch (_: Exception) { false }
-    private fun checkTermuxVersion() = try { TermuxChecker.isVersionOk(this) } catch (_: Exception) { false }
-    private fun checkRunCommand() = try { TermuxChecker.isRunCommandGranted(this) } catch (_: Exception) { false }
-    private fun checkSaf(): Boolean {
+    private fun checkEmbeddedShell(): Boolean {
         return try {
-            val perms = contentResolver.persistedUriPermissions
-            perms.any { it.isReadPermission && it.isWritePermission && SafHelper.isOnPrimaryStorage(this, it.uri) }
+            val proc = ProcessBuilder("sh", "-c", "echo ok").start()
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            proc.waitFor()
+            out.contains("ok")
         } catch (_: Exception) { false }
     }
-    private fun checkTermuxStorage(): Boolean {
-        // Heuristic: if SAF exists assume storage setup done; real check via RUN_COMMAND ls ~/storage requires async
-        return checkSaf()
+
+    private fun checkInternalStorage(): Boolean {
+        return try {
+            val test = java.io.File(filesDir, ".write_test")
+            test.writeText("ok")
+            val ok = test.exists()
+            try { test.delete() } catch (_: Exception) {}
+            ok && filesDir.canWrite()
+        } catch (_: Exception) { false }
     }
+
+    private fun checkJava(): Boolean {
+        return try { com.anserver.app.embedded.EmbeddedJava.isJavaAvailable(this) } catch (_: Exception) { false }
+    }
+
+    private fun checkUbuntuShell(): Boolean = checkEmbeddedShell()
+
     private fun checkBatterySelf(): Boolean {
         return try {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
             pm.isIgnoringBatteryOptimizations(packageName)
         } catch (_: Exception) { false }
     }
-    private fun checkBatteryTermux(): Boolean {
-        return try {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            pm.isIgnoringBatteryOptimizations("com.termux")
-        } catch (_: Exception) { false }
-    }
+
     private fun checkNotification(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         } else true
     }
+
     private fun checkSpace(): Boolean {
-        return try { getFreeSpaceGB() > 2.0 } catch (_: Exception) { true }
+        return try { getFreeSpaceGB() > 0.5 } catch (_: Exception) { true }
     }
+
     private fun getFreeSpaceGB(): Double {
         val stat = StatFs(filesDir.absolutePath)
         return stat.availableBytes / (1024.0 * 1024 * 1024)
     }
+
     private var internetCache: Boolean? = null
     private fun checkInternetSync(): Boolean {
         internetCache?.let { return it }
-        return true // default true until async check finishes
+        return true
     }
+
     private fun refreshWithInternet() {
         scope.launch {
             val result = withContext(Dispatchers.IO) { checkInternet() }
             internetCache = result
             refresh()
-            if (!result) Toast.makeText(this@DeviceScanActivity, "Інтернет недоступний (8.8.8.8)", Toast.LENGTH_SHORT).show()
+            if (!result) Toast.makeText(this@DeviceScanActivity, "Інтернет недоступний", Toast.LENGTH_SHORT).show()
         }
         refresh()
     }
+
     private fun checkInternet(): Boolean {
         return try {
             val url = URL("https://8.8.8.8")
@@ -254,30 +295,42 @@ class DeviceScanActivity : AppCompatActivity() {
             conn.responseCode in 200..399
         } catch (_: Exception) {
             try {
-                // Fallback ping
                 Runtime.getRuntime().exec("ping -c 1 -W 2 8.8.8.8").waitFor() == 0
             } catch (_: Exception) { false }
         }
     }
 
     private fun autoRequestAll() {
-        // Sequential auto-request for fixable permissions
         when {
             !checkNotification() -> requestNotification()
             !checkBatterySelf() -> requestBatterySelf()
-            !checkBatteryTermux() -> requestBatteryTermux()
-            !checkTermuxInstalled() -> openFdroid()
-            !checkTermuxVersion() -> openFdroid()
-            !checkRunCommand() -> openAppDetails()
-            !checkSaf() -> safPicker.launch(null)
-            else -> Toast.makeText(this, "Всі авто-дозволи вже надані. Перевір RUN_COMMAND/SAF вручну", Toast.LENGTH_LONG).show()
+            !checkJava() -> installJre()
+            else -> Toast.makeText(this, "Все готово: вбудований термінал не потребує дозволів", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showShellInfo() {
+        Toast.makeText(this, "Вбудований термінал: sh + stdin/stdout, логи в filesDir/servers/<id>/server.log", Toast.LENGTH_LONG).show()
+    }
+
+    private fun installJre() {
+        Toast.makeText(this, "Завантаження JRE стартує при першому запуску Minecraft-сервера", Toast.LENGTH_LONG).show()
+        scope.launch(Dispatchers.IO) {
+            try {
+                com.anserver.app.embedded.EmbeddedBootstrap.ensureJava(this@DeviceScanActivity) {}
+            } catch (_: Exception) {}
+            withContext(Dispatchers.Main) { refresh() }
         }
     }
 
     private fun requestNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.POST_NOTIFICATIONS)) {
+                    requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
             }
         }
     }
@@ -288,37 +341,15 @@ class DeviceScanActivity : AppCompatActivity() {
                 data = Uri.parse("package:$packageName")
             }
             startActivity(intent)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             try { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } catch (_: Exception) {}
         }
     }
 
-    private fun requestBatteryTermux() {
-        try {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:com.termux")
-            }
-            startActivity(intent)
-        } catch (_: Exception) {
-            try { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } catch (_: Exception) { Toast.makeText(this, "Відкрий вручну: Батарея -> Неоптимізовані -> Termux", Toast.LENGTH_LONG).show() }
-        }
-    }
-
-    private fun openFdroid() {
-        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/"))) } catch (_: Exception) {}
-    }
-    private fun openAppDetails() {
-        try {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-            Toast.makeText(this, "Увімкни: Дозволи -> Додаткові дозволи -> Run Command", Toast.LENGTH_LONG).show()
-        } catch (_: Exception) { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)) }
-    }
-    private fun openTermuxSettings() {
-        try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", "com.termux", null))) } catch (_: Exception) {}
-    }
     private fun openStorageSettings() {
         try { startActivity(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)) } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }
+
     private fun openWifiSettings() {
         try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
     }

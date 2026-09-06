@@ -46,18 +46,27 @@ class ServerRepository(private val context: Context) {
                             if (rawName.isNullOrEmpty()) { removedLegacy++; continue }
                             if (rawPort == null || rawPort !in 1..65535) { removedLegacy++; continue }
                             val wd = (rawWd?.takeIf { it.isNotEmpty() } ?: rawWorking ?: "").trim()
-                            // Pure Termux requires content:// SAF uri
-                            if (wd.isEmpty() || wd.startsWith("/") || !wd.startsWith("content://")) {
+                            // Вбудований термінал: приймаємо embedded://, content:// (legacy SAF) та
+                            // внутрішні шляхи /data/... . Порожні відкидаємо.
+                            if (wd.isEmpty()) {
                                 removedLegacy++
                                 continue
                             }
-                            // Check persisted permission still valid, if not keep but mark ERROR (don't filter)
-                            val hasPerm = try {
-                                context.contentResolver.persistedUriPermissions.any { it.uri.toString() == wd || wd.startsWith(it.uri.toString()) }
-                            } catch (_: Exception) { true }
+                            // Вбудований термінал: канонічний формат embedded://<id>.
+                            // Legacy content:// та абсолютні внутрішні шляхи приймаємо як є
+                            // (запуск все одно йде через EmbeddedPaths.resolveWorkDir),
+                            // невідомі схеми мігруємо у embedded щоб не втратити сервер.
+                            var normalizedWd = wd
+                            val isEmbedded = wd.startsWith("embedded://")
+                            val isSaf = wd.startsWith("content://")
+                            val isFileScheme = wd.startsWith("file://")
+                            val isAbsPath = wd.startsWith("/")
+                            if (!isEmbedded && !isSaf && !isFileScheme && !isAbsPath) {
+                                normalizedWd = "embedded://${raw.id}"
+                            }
                             val safe = raw.copy(
-                                workingDirectory = wd,
-                                workDirUri = wd,
+                                workingDirectory = normalizedWd,
+                                workDirUri = normalizedWd,
                                 displayPath = rawDisplay ?: "",
                                 termuxPath = rawTermux ?: ""
                             )
@@ -68,7 +77,7 @@ class ServerRepository(private val context: Context) {
                         }
                     }
                     if (removedLegacy > 0) {
-                        android.util.Log.w("ServerRepository", "Removed $removedLegacy legacy filesDir servers (SAF required)")
+                        android.util.Log.w("ServerRepository", "Removed $removedLegacy invalid servers")
                         // Persist cleaned list to avoid future crashes
                         try {
                             val cleanedJson = gson.toJson(sanitized.values.toList())
@@ -77,7 +86,7 @@ class ServerRepository(private val context: Context) {
                         // Notify user on main thread
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             try {
-                                android.widget.Toast.makeText(context, "Видалено $removedLegacy старих серверів (filesDir). Створіть заново в SAF", android.widget.Toast.LENGTH_LONG).show()
+                                android.widget.Toast.makeText(context, "Видалено $removedLegacy пошкоджених серверів", android.widget.Toast.LENGTH_LONG).show()
                             } catch (_: Exception) {}
                         }
                     }

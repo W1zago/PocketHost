@@ -18,8 +18,6 @@ import com.anserver.app.R
 import com.anserver.app.databinding.ActivityMainBinding
 import com.anserver.app.service.ServerService
 import com.anserver.app.termux.DeviceScanActivity
-import com.anserver.app.termux.TermuxChecker
-import com.anserver.app.termux.TermuxHardGateActivity
 import com.anserver.app.ui.adapter.ServerAdapter
 import com.anserver.core.model.ServerType
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -46,38 +44,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        try {
-            val needGate = try {
-                // Hard gate only for Termux missing or outdated. RUN_COMMAND is soft - warn but don't block (Samsung shows it under Інше and auto-grants)
-                !TermuxChecker.isInstalled(this) || !TermuxChecker.isVersionOk(this)
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Checker failed, allowing Main", e)
-                false
-            }
-            if (needGate) {
-                try {
-                    startActivity(Intent(this, TermuxHardGateActivity::class.java))
-                    finish()
-                    return
-                } catch (e: Exception) {
-                    android.util.Log.e("MainActivity", "Gate start failed", e)
-                    android.widget.Toast.makeText(this, "Gate error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                }
-            } else {
-                // Soft check for RUN_COMMAND - just warn via Snackbar, don't block
-                try {
-                    if (!TermuxChecker.isRunCommandGranted(this)) {
-                        android.util.Log.w("MainActivity", "RUN_COMMAND not granted, soft warn")
-                        // Will be shown in DeviceScan, also hint here
-                        com.google.android.material.snackbar.Snackbar.make(binding.root, "RUN_COMMAND не надано (категорія Інше). Відкрий Сканер для деталей", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                            .setAction("Сканер") { startActivity(Intent(this, com.anserver.app.termux.DeviceScanActivity::class.java)) }
-                            .show()
-                    }
-                } catch (_: Exception) {}
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Gate check outer failed", e)
-        }
+        // Вбудований термінал: жодного гейту Termux / RUN_COMMAND більше нема.
+        // Додаток працює одразу, без зовнішніх залежностей.
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -94,15 +62,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        try {
-            val needGate = !TermuxChecker.isInstalled(this) || !TermuxChecker.isVersionOk(this)
-            if (needGate) {
-                startActivity(Intent(this, TermuxHardGateActivity::class.java))
-                finish()
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "onResume gate check failed", e)
-        }
+        // гейт видалено: вбудований термінал не потребує Termux
     }
 
     private fun setupToolbar() {
@@ -194,7 +154,7 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         try { repository.clearAll() } catch (_: Exception) {}
                         withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            android.widget.Toast.makeText(this@MainActivity, "Очищено пошкоджені сервери (SAF). Створіть заново", android.widget.Toast.LENGTH_LONG).show()
+                            android.widget.Toast.makeText(this@MainActivity, "Очищено пошкоджені сервери. Створіть заново", android.widget.Toast.LENGTH_LONG).show()
                         }
                     }
                 } catch (_: Exception) {}
@@ -223,16 +183,13 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, "Дозволити PocketHost працювати в фоні?", Snackbar.LENGTH_LONG)
                     .setAction("Дозволити") { requestBattery(pkg) }
                     .show()
-            } else if (!isBatteryIgnoredForTermux()) {
-                Snackbar.make(binding.root, "Дозволити Termux працювати в фоні?", Snackbar.LENGTH_LONG)
-                    .setAction("Дозволити") { requestBattery("com.termux") }
-                    .show()
             }
+            // Зовнішній Termux більше не використовується - запит для com.termux прибрано
         } catch (_: Exception) {}
     }
 
     private fun autoRequestAllPermissions() {
-        // Sequential auto-request for demo: notification -> battery self -> battery termux -> scan activity
+        // Вбудований термінал: лише notification + battery для самого додатку
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_PERMISSIONS)
@@ -244,20 +201,9 @@ class MainActivity : AppCompatActivity() {
             requestBattery(packageName)
             return
         }
-        if (!isBatteryIgnoredForTermux()) {
-            requestBattery("com.termux")
-            return
-        }
-        // If all auto-grantable done, open full scan for manual steps (RUN_COMMAND, SAF)
+        // Все готово - відкриваємо діагностику вбудованого терміналу
         startActivity(Intent(this, DeviceScanActivity::class.java))
-        Snackbar.make(binding.root, "Автодозволи надані. Перевір RUN_COMMAND та SAF в сканері", Snackbar.LENGTH_LONG).show()
-    }
-
-    private fun isBatteryIgnoredForTermux(): Boolean {
-        return try {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            pm.isIgnoringBatteryOptimizations("com.termux")
-        } catch (_: Exception) { true }
+        Snackbar.make(binding.root, "Все готово: вбудований термінал не потребує дозволів", Snackbar.LENGTH_LONG).show()
     }
 
     private fun autoRequestOnStartup() {
@@ -277,12 +223,7 @@ class MainActivity : AppCompatActivity() {
                     requestBattery(packageName)
                     return@launch
                 }
-                if (!isBatteryIgnoredForTermux()) {
-                    Snackbar.make(binding.root, "Запитуємо дозвіл для Termux...", Snackbar.LENGTH_SHORT).show()
-                    kotlinx.coroutines.delay(800)
-                    requestBattery("com.termux")
-                    return@launch
-                }
+                // com.termux більше не потрібен
             } catch (_: Exception) {}
         }
     }

@@ -25,6 +25,16 @@
         android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior"
         android:clipToPadding="false"
-        android:padding="8dp" />
+        android:padding="8dp"
+        android:paddingBottom="96dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSelectFolder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="16dp"
+        android:text="Вибрати цю папку"
+        android:visibility="gone" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

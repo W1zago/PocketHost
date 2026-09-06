@@ -14,10 +14,23 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.launch
 
+/**
+ * Legacy gate: більше не блокує. Вбудований термінал не потребує Termux.
+ * Залишено для сумісності - одразу перенаправляє на MainActivity.
+ */
+@Deprecated("Вбудований термінал не потребує Termux")
 class TermuxHardGateActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Автоміграція на вбудований термінал: жодних перевірок Termux
+        try {
+            startActivity(Intent(this, com.anserver.app.ui.MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            finish()
+            return
+        } catch (_: Exception) { /* fallback нижче покаже UI */ }
         try {
             buildGateUi()
         } catch (e: Exception) {

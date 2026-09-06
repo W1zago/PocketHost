@@ -2,22 +2,22 @@ package com.anserver.app.ui
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.text.format.Formatter
 import androidx.appcompat.app.AppCompatActivity
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
 import com.anserver.app.databinding.ActivityServerDetailBinding
+import com.anserver.app.embedded.EmbeddedPaths
 import com.anserver.app.service.ServerService
-import com.anserver.app.termux.TermuxBridge
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.RandomAccessFile
 import java.net.NetworkInterface
 import java.util.Collections
 
@@ -66,38 +66,53 @@ class ServerDetailActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 val server = repository.getServer(id).first()
                 server?.let {
-                    val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
-                    if (uriStr.isNotEmpty()) {
-                        try {
-                            val uri = Uri.parse(uriStr)
-                            val dir = DocumentFile.fromTreeUri(this@ServerDetailActivity, uri)
-                            val logFile = dir?.findFile("server.log")
-                            if (logFile != null) observeLogFile(logFile)
-                        } catch (_: Exception) {}
-                    }
+                    val workDir = EmbeddedPaths.resolveWorkDir(
+                        this@ServerDetailActivity, it.id,
+                        it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
+                    )
+                    observeLogFile(File(workDir, "server.log"))
                 }
             }
         }
     }
 
-    private fun observeLogFile(logFile: DocumentFile) {
+    private fun observeLogFile(logFile: File) {
         lifecycleScope.launch {
-            var lastPosition = 0L
+            // Хвіст останніх 16KB щоб банер помилок бачив і історію, як ConsoleActivity.
+            var offset = try {
+                val len = logFile.length()
+                if (len > 16 * 1024) len - 16 * 1024 else 0L
+            } catch (_: Exception) { 0L }
             while (true) {
                 try {
-                    val currentLength = logFile.length()
-                    if (currentLength > lastPosition) {
-                        val text = contentResolver.openInputStream(logFile.uri)?.bufferedReader()?.readText() ?: ""
-                        val newContent = if (text.length > lastPosition) text.substring(lastPosition.toInt().coerceAtMost(text.length)) else ""
-                        if (newContent.contains("Error", ignoreCase = true) || newContent.contains("Failed", ignoreCase = true)) {
-                            runOnUiThread {
-                                binding.tvErrorMessage.text = newContent.lines().lastOrNull {
-                                    it.contains("Error", ignoreCase = true) || it.contains("Failed", ignoreCase = true)
-                                } ?: ""
-                                binding.tvErrorMessage.visibility = android.view.View.VISIBLE
+                    if (logFile.exists()) {
+                        val currentLength = logFile.length()
+                        if (currentLength < offset) offset = 0L
+                        if (currentLength > offset) {
+                            val newContent = try {
+                                RandomAccessFile(logFile, "r").use { raf ->
+                                    raf.seek(offset)
+                                    val n = (currentLength - offset).toInt().coerceAtMost(64 * 1024)
+                                    val buf = ByteArray(n)
+                                    var total = 0
+                                    while (total < n) {
+                                        val r = raf.read(buf, total, n - total)
+                                        if (r <= 0) break
+                                        total += r
+                                    }
+                                    String(buf, 0, total)
+                                }
+                            } catch (_: Exception) { "" }
+                            if (newContent.contains("Error", ignoreCase = true) || newContent.contains("Failed", ignoreCase = true)) {
+                                runOnUiThread {
+                                    binding.tvErrorMessage.text = newContent.lines().lastOrNull {
+                                        it.contains("Error", ignoreCase = true) || it.contains("Failed", ignoreCase = true)
+                                    } ?: ""
+                                    binding.tvErrorMessage.visibility = android.view.View.VISIBLE
+                                }
                             }
+                            offset = currentLength
                         }
-                        lastPosition = currentLength
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("ServerDetailActivity", "Error reading log", e)
@@ -125,8 +140,14 @@ class ServerDetailActivity : AppCompatActivity() {
             btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
             btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
             btnRestart.isEnabled = server.status == ServerStatus.RUNNING
-            // Show SAF paths
-            serverIpAddress.text = "SAF: ${server.displayPath.ifEmpty { server.effectiveWorkDirUri }}"
+            // Вбудований шлях замість SAF
+            val workDirStr = try {
+                EmbeddedPaths.resolveWorkDir(
+                    this@ServerDetailActivity, server.id,
+                    server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                ).absolutePath
+            } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
+            serverIpAddress.text = "Папка: $workDirStr"
         }
     }
 
@@ -187,6 +208,42 @@ class ServerDetailActivity : AppCompatActivity() {
                         delay(1000)
                     }
                 }
+                // Видаляємо і папку сервера — строго всередині пісочниці додатку
+                // (внутрішнє сховище або app-external dirs). Кастомну папку — лише
+                // якщо це точно та папка, що записана при створенні (захист від зносу чужого).
+                try {
+                    val srv = repository.getServer(id).first()
+                    if (srv != null) {
+                        val storedUri = srv.effectiveWorkDirUri.ifEmpty { srv.workingDirectory }
+                        val dir = EmbeddedPaths.resolveWorkDir(
+                            this@ServerDetailActivity, srv.id, storedUri
+                        )
+                        val dirCanon = try { dir.canonicalPath } catch (_: Exception) { dir.absolutePath }
+                        var allowed = false
+                        if (EmbeddedPaths.kindOfUri(storedUri) == EmbeddedPaths.StorageKind.CUSTOM) {
+                            val recorded = try {
+                                File(storedUri).canonicalPath
+                            } catch (_: Exception) { storedUri }
+                            allowed = dirCanon == recorded
+                        } else {
+                            val allowedRoots = mutableListOf<String>()
+                            try {
+                                allowedRoots.add(EmbeddedPaths.serversRoot(this@ServerDetailActivity).canonicalPath + File.separator)
+                            } catch (_: Exception) {}
+                            try {
+                                EmbeddedPaths.externalServersRoot(this@ServerDetailActivity)?.let {
+                                    allowedRoots.add(it.canonicalPath + File.separator)
+                                }
+                            } catch (_: Exception) {}
+                            allowed = allowedRoots.any { dirCanon.startsWith(it) }
+                        }
+                        if (allowed) {
+                            dir.deleteRecursively()
+                        } else {
+                            android.util.Log.w("ServerDetail", "skip delete outside allowed roots: $dirCanon")
+                        }
+                    }
+                } catch (_: Exception) {}
                 repository.deleteServer(id)
                 finish()
             }
@@ -198,8 +255,6 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun updateIpAddress() {
         val ipAddress = getLocalIpAddress()
         android.util.Log.d("ServerDetailActivity", "IP $ipAddress")
-        // Keep original ip text but also show SAF in same view? Use separate? We'll append
-        // serverIpAddress already used for SAF, so we reuse another? For now show IP in errorMessage if needed
     }
 
     private fun getLocalIpAddress(): String {
@@ -238,8 +293,7 @@ class ServerDetailActivity : AppCompatActivity() {
 
     private fun updateSystemResources() {
         try {
-            // CPU not available in Termux mode
-            binding.tvCpuUsage.text = "CPU: недоступний в Termux режимі"
+            binding.tvCpuUsage.text = "Термінал: вбудований (без Termux)"
             val runtime = Runtime.getRuntime()
             val totalMem = runtime.totalMemory() / 1024 / 1024
             val freeMem = runtime.freeMemory() / 1024 / 1024
@@ -248,33 +302,12 @@ class ServerDetailActivity : AppCompatActivity() {
             binding.tvMemoryUsage.text = "Memory: $used MB / $max MB (heap $used/$totalMem)"
             val cores = runtime.availableProcessors()
             binding.tvCpuCores.text = "CPU Cores: $cores"
-
-            // Try to get disk via SAF termux path df
-            serverId?.let { id ->
-                lifecycleScope.launch {
-                    val server = repository.getServer(id).first()
-                    server?.let {
-                        val uriStr = it.effectiveWorkDirUri
-                        if (uriStr.isNotEmpty()) {
-                            try {
-                                val termuxPath = it.termuxPath
-                                if (termuxPath.isNotEmpty()) {
-                                    // Fire RUN_COMMAND df, result will be in server.log; we just trigger it occasionally
-                                    // To avoid spam, only every 10 cycles. For now just show local storage via StatFs
-                                    val stat = android.os.StatFs(android.os.Environment.getExternalStorageDirectory().absolutePath)
-                                    val totalBytes = stat.totalBytes / 1024 / 1024 / 1024
-                                    val freeBytes = stat.availableBytes / 1024 / 1024 / 1024
-                                    binding.tvCpuUsage.text = "CPU: недоступний | Disk: ${totalBytes - freeBytes}GB / ${totalBytes}GB"
-                                    // Also send df via Termux for log
-                                    if ((System.currentTimeMillis() / 2000) % 10 == 0L) {
-                                        TermuxBridge.sendRawCommand(this@ServerDetailActivity, termuxPath, "df -h ~/storage 2>&1 | tee -a server.log; cat /proc/meminfo 2>&1 | head -n 5 | tee -a server.log")
-                                    }
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
+            try {
+                val stat = android.os.StatFs(filesDir.absolutePath)
+                val totalBytes = stat.totalBytes / 1024 / 1024 / 1024
+                val freeBytes = stat.availableBytes / 1024 / 1024 / 1024
+                binding.tvCpuUsage.text = "Вбудований термінал | Disk: ${totalBytes - freeBytes}GB / ${totalBytes}GB"
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
         }

@@ -1,28 +1,31 @@
 package com.anserver.app.ui
 
-import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
 import com.anserver.app.databinding.ActivityConsoleBinding
-import com.anserver.app.termux.TermuxBridge
-import com.anserver.app.termux.TermuxPaths
+import com.anserver.app.embedded.EmbeddedPaths
+import com.anserver.app.embedded.EmbeddedProcessManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.RandomAccessFile
 
+/**
+ * Вбудована консоль: читає filesDir/servers/<id>/server.log
+ * і пише ввід напряму в stdin процесу через EmbeddedProcessManager.
+ * Жодних SAF / RUN_COMMAND дозволів.
+ */
 class ConsoleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityConsoleBinding
     private val repository = ANServerApplication.serverRepository
     private var serverId: String? = null
-    private var workDirUri: Uri? = null
-    private var termuxPath: String = ""
-    private var termuxSession: TermuxBridge.TermuxSession? = null
+    private var workDir: File? = null
     private var ctrlActive = false
     private var altActive = false
 
@@ -43,7 +46,7 @@ class ConsoleActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Console"
+        supportActionBar?.title = "Console (вбудована)"
         binding.consoleOutput.setOnLongClickListener { false }
         binding.consoleOutput.setOnClickListener { }
         registerForContextMenu(binding.consoleOutput)
@@ -204,24 +207,31 @@ class ConsoleActivity : AppCompatActivity() {
         }
         val wasModifier = ctrlActive || altActive
         if (wasModifier) { ctrlActive = false; altActive = false; updateModifierUI() }
-        writeToProcess(toSend)
+        writeToProcessRaw(toSend)
     }
 
     private fun writeToProcess(data: String) {
-        val session = termuxSession
-        if (session != null) {
-            try {
-                TermuxBridge.sendInput(this, session, data)
-            } catch (e: Exception) {
-                android.util.Log.e("ConsoleActivity", "sendInput failed", e)
-            }
-        } else {
-            // fallback via raw termuxPath
-            if (termuxPath.isNotEmpty()) {
-                val fake = TermuxBridge.TermuxSession(serverId ?: "", -1, workDirUri?.toString() ?: "", termuxPath)
-                TermuxBridge.sendInput(this, fake, data)
-            }
+        val id = serverId ?: return
+        val ok = try {
+            EmbeddedProcessManager.sendInput(id, data)
+        } catch (e: Exception) {
+            android.util.Log.e("ConsoleActivity", "sendInput failed", e)
+            false
         }
+        if (!ok) {
+            // процес не запущений - показуємо підказку, але не просимо жодних дозволів
+            appendOutput("[процес не запущений, натисни Start]\n")
+        }
+    }
+
+    private fun writeToProcessRaw(data: String) {
+        val id = serverId ?: return
+        val ok = try {
+            // спецклавіші шлемо як сирі байти без зайвого \n
+            if (data.endsWith("\n")) EmbeddedProcessManager.sendInput(id, data)
+            else EmbeddedProcessManager.sendRaw(id, data.toByteArray(Charsets.UTF_8))
+        } catch (_: Exception) { false }
+        if (!ok) appendOutput("[процес не запущений]\n")
     }
 
     private fun loadServerInfo() {
@@ -231,16 +241,7 @@ class ConsoleActivity : AppCompatActivity() {
                     repository.getServer(id).collect { server ->
                         server?.let {
                             val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
-                            workDirUri = try { Uri.parse(uriStr) } catch (_: Exception) { null }
-                            termuxPath = it.termuxPath.ifEmpty {
-                                workDirUri?.let { u -> TermuxPaths.safToTermux(this@ConsoleActivity, u) } ?: ""
-                            }
-                            termuxSession = TermuxBridge.TermuxSession(
-                                serverId = it.id,
-                                executionId = it.termuxExecutionId ?: -1,
-                                workDirUri = uriStr,
-                                termuxPath = termuxPath
-                            )
+                            workDir = EmbeddedPaths.resolveWorkDir(this@ConsoleActivity, it.id, uriStr)
                         }
                     }
                 } catch (e: Exception) {
@@ -254,56 +255,78 @@ class ConsoleActivity : AppCompatActivity() {
     private fun startOutputMonitoring() {
         val id = serverId ?: return
         lifecycleScope.launch(Dispatchers.IO) {
-            val server = try { repository.getServer(id).first { it != null } } catch (e: Exception) { null } ?: return@launch
-            val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-            val dirUri = try { Uri.parse(uriStr) } catch (_: Exception) { return@launch }
-            var offset = 0L
-            // initial tail 16KB
-            try {
-                val dir = DocumentFile.fromTreeUri(this@ConsoleActivity, dirUri)
-                val logFile = dir?.findFile("server.log")
-                if (logFile != null) {
-                    val len = logFile.length()
-                    offset = if (len > INITIAL_TAIL_SIZE) len - INITIAL_TAIL_SIZE else 0L
+            // одноразовий резолв папки: getServer().first() повертає null якщо нема,
+            // а не висить (StateFlow завжди емітить). Ретрі лише при винятку.
+            var dir: File? = null
+            repeat(5) {
+                try {
+                    val server = repository.getServer(id).first()
+                    if (server != null) {
+                        dir = EmbeddedPaths.resolveWorkDir(
+                            this@ConsoleActivity, server.id,
+                            server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                        )
+                        workDir = dir
+                        return@repeat
+                    } else {
+                        // сервера нема в репозиторії - fallback на embedded dir, далі не ретраїмо
+                        return@repeat
+                    }
+                } catch (_: Exception) {
+                    delay(250)
                 }
+            }
+            val workDirFile = dir ?: EmbeddedPaths.lookupServerDir(this@ConsoleActivity, id)
+            val logFile = File(workDirFile, "server.log")
+            try { if (!logFile.exists()) logFile.createNewFile() } catch (_: Exception) {}
+
+            var offset = 0L
+            try {
+                val len = logFile.length()
+                offset = if (len > INITIAL_TAIL_SIZE) len - INITIAL_TAIL_SIZE else 0L
             } catch (_: Exception) {}
             if (offset == 0L) {
-                withContext(Dispatchers.Main) { appendOutput("Connecting to Termux shell...\n") }
+                withContext(Dispatchers.Main) { appendOutput("Вбудований термінал готовий.\n") }
             }
+            // legacy SAF лог: якщо сервер старий (content://), показуємо підказку про міграцію
+            try {
+                val server = repository.getServer(id).first()
+                val uriStr = server?.effectiveWorkDirUri ?: ""
+                if (uriStr.startsWith("content://")) {
+                    withContext(Dispatchers.Main) {
+                        appendOutput("[старий SAF-сервер: запуск тепер іде у внутрішній папці ${workDirFile.absolutePath}]\n")
+                    }
+                }
+            } catch (_: Exception) {}
+
             while (true) {
                 try {
-                    val dir = DocumentFile.fromTreeUri(this@ConsoleActivity, dirUri)
-                    val logFile = dir?.findFile("server.log")
-                    if (logFile != null && logFile.exists()) {
-                        val length = logFile.length()
-                        if (length < offset) {
-                            offset = 0L
-                            withContext(Dispatchers.Main) { binding.consoleOutput.text = "" }
-                        }
-                        if (length > offset) {
-                            val text = contentResolver.openInputStream(logFile.uri)?.use { input ->
-                                // skip offset
-                                var skipped = 0L
-                                while (skipped < offset) {
-                                    val s = input.skip(offset - skipped)
-                                    if (s <= 0) break
-                                    skipped += s
-                                }
+                    if (!logFile.exists()) {
+                        delay(300); continue
+                    }
+                    val length = logFile.length()
+                    if (length < offset) {
+                        offset = 0L
+                        withContext(Dispatchers.Main) { binding.consoleOutput.text = "" }
+                    }
+                    if (length > offset) {
+                        val text = try {
+                            RandomAccessFile(logFile, "r").use { raf ->
+                                raf.seek(offset)
                                 val remaining = (length - offset).toInt().coerceAtMost(1024 * 1024)
                                 val buffer = ByteArray(remaining)
-                                var read = 0
                                 var total = 0
                                 while (total < remaining) {
-                                    val r = input.read(buffer, total, remaining - total)
+                                    val r = raf.read(buffer, total, remaining - total)
                                     if (r <= 0) break
                                     total += r
                                 }
                                 String(buffer, 0, total)
-                            } ?: ""
-                            offset = length
-                            if (text.isNotEmpty()) {
-                                withContext(Dispatchers.Main) { appendOutput(text) }
                             }
+                        } catch (_: Exception) { "" }
+                        offset = length
+                        if (text.isNotEmpty()) {
+                            withContext(Dispatchers.Main) { appendOutput(text) }
                         }
                     }
                 } catch (e: Exception) {

@@ -92,17 +92,15 @@ object TermuxChecker {
         } catch (_: Exception) { true }
     }
 
-    fun isAllOk(context: Context): Boolean {
-        return isInstalled(context) && isVersionOk(context) && isRunCommandGranted(context) && isStorageSetup(context)
-    }
+    /**
+     * Legacy: вбудований термінал не потребує зовнішнього Termux,
+     * тому завжди повертаємо true щоб жоден gate не блокував додаток.
+     */
+    @Deprecated("Вбудований термінал завжди OK")
+    fun isAllOk(context: Context): Boolean = true
 
-    fun getGateReason(context: Context): GateReason {
-        if (!isInstalled(context)) return GateReason.NOT_INSTALLED
-        if (!isVersionOk(context)) return GateReason.OUTDATED_PLAY_STORE
-        if (!isRunCommandGranted(context)) return GateReason.PERMISSION_DENIED
-        if (!isStorageSetup(context)) return GateReason.STORAGE_NOT_SETUP
-        return GateReason.OK
-    }
+    @Deprecated("Вбудований термінал завжди OK")
+    fun getGateReason(context: Context): GateReason = GateReason.OK
 
     enum class GateReason {
         OK,

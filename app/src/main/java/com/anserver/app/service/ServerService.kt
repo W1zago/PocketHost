@@ -4,20 +4,18 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.net.Uri
 import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.documentfile.provider.DocumentFile
 import com.anserver.app.ANServerApplication
 import com.anserver.app.R
-import com.anserver.app.termux.SafHelper
-import com.anserver.app.termux.TermuxBridge
-import com.anserver.app.termux.TermuxPaths
+import com.anserver.app.embedded.EmbeddedBootstrap
+import com.anserver.app.embedded.EmbeddedPaths
+import com.anserver.app.embedded.EmbeddedProcessManager
 import com.anserver.app.ui.MainActivity
-import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
 import com.anserver.core.model.ServerType
+import com.anserver.plugins.minecraft.MinecraftServerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,15 +25,24 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.atomic.AtomicInteger
+import java.io.File
 
+/**
+ * Вбудований сервіс запуску серверів.
+ * БЕЗ зовнішнього Termux, БЕЗ RUN_COMMAND, БЕЗ SAF.
+ * Все виконується в приватній папці додатку через EmbeddedProcessManager.
+ */
 class ServerService : Service() {
 
     private val binder = ServerBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val runningServers = mutableMapOf<String, TermuxBridge.TermuxSession>()
     private val startMutex = Mutex()
-    private val executionCounter = AtomicInteger(1000)
+    // Кеш робочих папок: логи мають писатись у справжню папку сервера
+    // (включно з кастомною), а не вгадуватись через probe.
+    private val workDirCache = java.util.concurrent.ConcurrentHashMap<String, File>()
+    // Сервери що зараз проходять довге завантаження (jar/JRE) поза локом.
+    // Захищено startMutex.
+    private val startingIds = mutableSetOf<String>()
     private val repository = ANServerApplication.serverRepository
 
     inner class ServerBinder : Binder() {
@@ -65,213 +72,274 @@ class ServerService : Service() {
 
     private fun startServer(serverId: String) {
         serviceScope.launch {
-            startMutex.withLock {
+            // 1. Швидка фаза під локом: перевірки + резерв слота, без мережевого I/O.
+            val reservedWorkDir: File? = startMutex.withLock {
                 try {
-                    android.util.Log.d("ServerService", "startServer $serverId")
+                    android.util.Log.d("ServerService", "startServer embedded $serverId")
+                    if (startingIds.contains(serverId)) {
+                        log(serverId, "Сервер вже запускається")
+                        return@withLock null
+                    }
                     val server = repository.getServer(serverId).first()
                     if (server == null) {
                         android.util.Log.e("ServerService", "Server not found $serverId")
-                        return@withLock
+                        return@withLock null
                     }
                     if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) {
-                        logToConsole(serverId, "Сервер вже запущений")
-                        return@withLock
+                        log(serverId, "Сервер вже запущений")
+                        return@withLock null
                     }
-                    if (runningServers.size >= 2) {
-                        logToConsole(serverId, "Зупини перший сервер (максимум 2)")
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
+                    if (EmbeddedProcessManager.runningCount() >= EmbeddedProcessManager.MAX_SERVERS) {
+                        log(serverId, "Зупини перший сервер (максимум ${EmbeddedProcessManager.MAX_SERVERS})")
+                        // не блокуємо мʼютекс на persist
+                        serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.ERROR) }
+                        return@withLock null
                     }
-                    if (runningServers.containsKey(serverId)) {
-                        logToConsole(serverId, "Сервер вже в runningServers")
-                        return@withLock
+                    if (EmbeddedProcessManager.isRunning(serverId)) {
+                        log(serverId, "Сервер вже запущений")
+                        return@withLock null
                     }
+                    startingIds.add(serverId)
+                    // статус STARTING виставляємо одразу щоб UI відреагував
+                    serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.STARTING) }
 
-                    // SAF persisted permission check
-                    val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-                    if (uriStr.isEmpty() || uriStr.startsWith("/")) {
-                        logToConsole(serverId, "ERROR: SAF папка не вибрана. Створіть сервер заново в SAF")
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
-                    }
-                    val uri = try { Uri.parse(uriStr) } catch (_: Exception) { null }
-                    if (uri == null) {
-                        logToConsole(serverId, "ERROR: невірний URI $uriStr")
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
-                    }
-                    // Check persisted permission - try to find matching persisted uri
-                    val hasPerm = try {
-                        val persisted = applicationContext.contentResolver.persistedUriPermissions
-                        persisted.any { it.uri.toString() == uriStr || uriStr.startsWith(it.uri.toString()) }
-                    } catch (_: Exception) { false }
-                    if (!hasPerm) {
-                        // Also check via SafHelper for primary storage - if doc can't be opened, treat as revoked
-                        val docCheck = DocumentFile.fromTreeUri(this@ServerService, uri)
-                        if (docCheck == null || !docCheck.canWrite()) {
-                            logToConsole(serverId, "ERROR: Доступ до SAF папки втрачено. Виберіть знову")
-                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                            return@withLock
-                        }
-                    }
-                    val docDir = DocumentFile.fromTreeUri(this@ServerService, uri)
-                    if (docDir == null || !docDir.exists()) {
-                        logToConsole(serverId, "ERROR: Папка видалена")
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
-                    }
-                    if (!docDir.canWrite()) {
-                        logToConsole(serverId, "ERROR: Нема запису в папку")
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
-                    }
-
-                    repository.updateServerStatus(serverId, ServerStatus.STARTING)
-                    logToConsole(serverId, "Запуск сервера...")
-                    logToConsole(serverId, "Сервер: ${server.name} type=${server.type} port=${server.port}")
-                    logToConsole(serverId, "SAF: $uriStr")
-                    logToConsole(serverId, "Display: ${server.displayPath}")
-
-                    // Ensure server.log exists
-                    try {
-                        val existingLog = docDir.findFile("server.log")
-                        if (existingLog == null) {
-                            docDir.createFile("text/plain", "server.log")
-                        }
-                        // Clear or rotate? We keep as is, Termux command will rotate if >5MB
-                    } catch (_: Exception) {}
-
-                    // Minecraft provisioning check: ensure jar exists if MC
-                    if (server.type == ServerType.MINECRAFT) {
-                        val expectedJar = when (server.config.minecraftLoader) {
-                            com.anserver.core.model.MinecraftLoader.VANILLA -> "server.jar"
-                            com.anserver.core.model.MinecraftLoader.PAPER -> "paper.jar"
-                            com.anserver.core.model.MinecraftLoader.PURPUR -> "purpur.jar"
-                            com.anserver.core.model.MinecraftLoader.FABRIC -> "fabric-server-launch.jar"
-                            else -> "paper.jar"
-                        }
-                        val hasJar = docDir.listFiles().any { it.name == expectedJar || it.name == "server.jar" || it.name == "paper.jar" }
-                        if (!hasJar) {
-                            logToConsole(serverId, "Попередження: jar $expectedJar не знайдено, спроба завантаження при старті через Termux/Provisioner")
-                        }
-                    }
-
-                    // Space check >2GB
-                    try {
-                        val stat = android.os.StatFs(applicationContext.filesDir.absolutePath)
-                        if (stat.availableBytes < 2L * 1024 * 1024 * 1024) {
-                            logToConsole(serverId, "Попередження: мало місця <2GB")
-                        }
-                    } catch (_: Exception) {}
-
-                    val termuxPath = server.termuxPath.ifEmpty { TermuxPaths.safToTermux(this@ServerService, uri) }
-                    val execId = executionCounter.incrementAndGet()
-                    val session = TermuxBridge.TermuxSession(server.id, execId, uriStr, termuxPath)
-                    runningServers[serverId] = session
-                    repository.updateTermuxExecutionId(serverId, execId)
-
-                    // Termux wake-lock
-                    TermuxBridge.sendRawCommand(this@ServerService, termuxPath, "termux-wake-lock 2>/dev/null || true")
-
-                    val ok = TermuxBridge.start(this@ServerService, server.copy(termuxPath = termuxPath), true)
-                    if (!ok) {
-                        logToConsole(serverId, "ERROR: Не вдалося відправити RUN_COMMAND. Перевір Termux.")
-                        runningServers.remove(serverId)
-                        repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                        return@withLock
-                    }
-                    repository.updateServerStatus(serverId, ServerStatus.RUNNING)
-                    logToConsole(serverId, "Сервер запущено (Termux) exec=$execId path=$termuxPath")
-                    startLivenessPoll(serverId, session)
-                    if (server.type == ServerType.UBUNTU_SERVER) {
-                        val ip = getDeviceIp()
-                        logRaw(serverId, "\nUbuntu старт через proot-distro. IP: $ip\n")
-                    }
+                    val workDir = EmbeddedPaths.resolveWorkDir(
+                        this@ServerService, serverId,
+                        server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                    )
+                    workDir
                 } catch (e: Exception) {
-                    android.util.Log.e("ServerService", "startServer error", e)
-                    logToConsole(serverId, "EXCEPTION: ${e.message}")
-                    try { repository.updateServerStatus(serverId, ServerStatus.ERROR) } catch (_: Exception) {}
+                    android.util.Log.e("ServerService", "startServer reserve error", e)
+                    log(serverId, "EXCEPTION: ${e.message}")
+                    null
+                }
+            }
+            if (reservedWorkDir == null) return@launch
+
+            // 2. Довга фаза ПОЗА локом: файли, завантаження jar/JRE, запуск процесу.
+            try {
+                val server = repository.getServer(serverId).first()
+                if (server == null) {
+                    startMutex.withLock { startingIds.remove(serverId) }
+                    return@launch
+                }
+                reservedWorkDir.mkdirs()
+                workDirCache[serverId] = reservedWorkDir
+                EmbeddedBootstrap.ensureServerDirReady(reservedWorkDir)
+
+                // Сховище могли втратити після створення сервера (витягнута SD,
+                // відкликаний доступ до всіх файлів). Стартувати в чужій/пустій
+                // папці не можна — чесно відмовляємо.
+                val storedUri = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                when (EmbeddedPaths.kindOfUri(storedUri)) {
+                    EmbeddedPaths.StorageKind.EXTERNAL -> {
+                        if (!EmbeddedPaths.isExternalStorageAvailable(this@ServerService)) {
+                            log(serverId, "ERROR: зовнішнє сховище недоступне (витягнута SD-карта?). Встав карту або перенеси сервер у внутрішнє сховище.")
+                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                            return@launch
+                        }
+                    }
+                    EmbeddedPaths.StorageKind.CUSTOM -> {
+                        if (!EmbeddedPaths.hasAllFilesAccess(this@ServerService)) {
+                            log(serverId, "ERROR: нема доступу до папки сервера. Надай «доступ до всіх файлів» у системних налаштуваннях і спробуй ще раз.")
+                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                            return@launch
+                        }
+                    }
+                    else -> {}
+                }
+                if (!EmbeddedPaths.isDirWritable(reservedWorkDir)) {
+                    log(serverId, "ERROR: папка недоступна для запису: ${reservedWorkDir.absolutePath}")
+                    repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                    return@launch
+                }
+
+                log(serverId, "Запуск сервера (вбудований термінал)...")
+                log(serverId, "Сервер: ${server.name} type=${server.type} port=${server.port}")
+                log(serverId, "Папка: ${reservedWorkDir.absolutePath}")
+
+                try {
+                    val stat = android.os.StatFs(reservedWorkDir.absolutePath)
+                    if (stat.availableBytes < 512L * 1024 * 1024) {
+                        log(serverId, "Попередження: мало місця <512MB")
+                    }
+                } catch (_: Exception) {}
+
+                when (server.type) {
+                    ServerType.MINECRAFT -> startMinecraft(serverId, reservedWorkDir)
+                    ServerType.UBUNTU_SERVER -> startUbuntu(serverId, reservedWorkDir)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ServerService", "startServer error", e)
+                log(serverId, "EXCEPTION: ${e.message}")
+                try { repository.updateServerStatus(serverId, ServerStatus.ERROR) } catch (_: Exception) {}
+            } finally {
+                startMutex.withLock { startingIds.remove(serverId) }
+            }
+        }
+    }
+
+    private suspend fun startMinecraft(serverId: String, workDir: File) {
+        val server = repository.getServer(serverId).first() ?: return
+
+        // eula + properties у внутрішній папці
+        try {
+            val eula = File(workDir, "eula.txt")
+            if (!eula.exists()) eula.writeText("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://account.mojang.com/documents/minecraft_eula).\neula=true")
+            val props = File(workDir, "server.properties")
+            if (!props.exists()) {
+                props.writeText(
+                    "server-port=${server.port}\nmax-players=20\ngamemode=survival\ndifficulty=normal\n" +
+                        "pvp=true\nonline-mode=true\nmotd=A Minecraft Server - ${server.name}\nview-distance=8\n" +
+                        "spawn-protection=16\nenable-command-block=false\nallow-flight=false\nwhite-list=false\nenforce-whitelist=false\n"
+                )
+            }
+        } catch (_: Exception) {}
+
+        // Provision jar у внутрішню папку (звичайний File I/O, без SAF)
+        val version = server.config.minecraftVersion ?: "1.21.4"
+        val loader = server.config.minecraftLoader
+        val manager = MinecraftServerManager(workDir.parent ?: workDir.absolutePath)
+        val hasJarBefore = EmbeddedProcessManager.findExistingJar(
+            workDir, EmbeddedProcessManager.guessJarName(loader?.name)
+        ) != null
+        if (!hasJarBefore) {
+            log(serverId, "Завантаження ${loader ?: "PAPER"} $version (~50-100 MB)...")
+            val ok = try {
+                manager.provisionIfNeeded(
+                    workDir.absolutePath, version, loader,
+                    server.config.maxMemory, server.config.minMemory, server.port
+                ) { msg -> log(serverId, msg) }
+            } catch (e: Exception) {
+                log(serverId, "Provision error: ${e.message}")
+                false
+            }
+            if (!ok) {
+                val stillMissing = EmbeddedProcessManager.findExistingJar(
+                    workDir, EmbeddedProcessManager.guessJarName(loader?.name)
+                ) == null
+                if (stillMissing) {
+                    log(serverId, "ERROR: не вдалося завантажити jar. Відкрий Console/Files щоб побачити причину (HTTP-код) вище. Якщо інтернет є - спробуй VANILLA/PURPUR/FABRIC.")
+                    repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                    return
                 }
             }
         }
+
+        // Java з вбудованого середовища (без Termux!)
+        log(serverId, "Пошук вбудованої Java...")
+        val javaPath = EmbeddedBootstrap.ensureJava(this@ServerService, version) { msg -> log(serverId, msg) }
+        if (javaPath == null) {
+            log(serverId, "ERROR: Java недоступна. Дивись причину вище (HTTP-код). Деталі в Console.")
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+
+        val preferred = EmbeddedProcessManager.guessJarName(loader?.name)
+        val jar = EmbeddedProcessManager.findExistingJar(workDir, preferred)
+        if (jar == null) {
+            log(serverId, "ERROR: jar не знайдено в ${workDir.absolutePath}")
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+
+        // W^X: прямий exec з папки додатку заборонений політикою Android для
+        // targetSdk 29+ (error=13). Підбираємо робочу форму команди на пристрої.
+        val launch = com.anserver.app.embedded.EmbeddedJava.probeJava(javaPath) { msg -> log(serverId, msg) }
+        if (!launch.works) {
+            log(serverId, "ERROR: Java не запускається ні напряму, ні через системний лінкер (деталі вище).")
+            log(serverId, "Причина — заборона exec з папки додатку (Android 10+, targetSdk 29+). Варіанти: ручний JRE з системним java або збірка з targetSdk 28.")
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+        if (launch.useLinker) {
+            log(serverId, "Java: ${launch.version} (через системний лінкер — прямий запуск заборонений політикою Android)")
+        } else {
+            log(serverId, "Java: ${launch.version} (прямий запуск)")
+        }
+
+        val cmd = EmbeddedProcessManager.buildMinecraftCommand(
+            javaPath, jar, server.config.maxMemory, server.config.minMemory,
+            server.config.javaArgs, launch.prefix
+        )
+        val startEnv = mutableMapOf("MC_PORT" to server.port.toString())
+        // Оточення, з яким спрацював probe (LD_LIBRARY_PATH/JAVA_HOME для лінкера).
+        startEnv.putAll(launch.env)
+        log(serverId, "Старт: java -Xmx${server.config.maxMemory}M -jar $jar nogui")
+
+        val ok = EmbeddedProcessManager.start(
+            this@ServerService, serverId, cmd, workDir,
+            startEnv
+        )
+        if (!ok) {
+            log(serverId, "ERROR: не вдалося запустити процес")
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+        repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
+        repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+        log(serverId, "Сервер запущено (вбудований термінал) jar=$jar")
+        startLivenessPoll(serverId)
+    }
+
+    private suspend fun startUbuntu(serverId: String, workDir: File) {
+        val ip = getDeviceIp()
+        EmbeddedBootstrap.ensureUbuntu(this@ServerService) { msg -> log(serverId, msg) }
+        // Вбудований інтерактивний shell - ввід/вивід через ConsoleActivity без жодних дозволів
+        val ok = EmbeddedProcessManager.startInteractiveShell(this@ServerService, serverId, workDir)
+        if (!ok) {
+            log(serverId, "ERROR: не вдалося запустити shell")
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+        repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
+        repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+        log(serverId, "\nВбудований Linux-shell запущено. IP: $ip\n")
+        log(serverId, "Вводь команди в консолі нижче (sh -i). Повний Ubuntu rootfs - в наступних оновленнях.\n")
+        startLivenessPoll(serverId)
     }
 
     private fun stopServer(serverId: String) {
         serviceScope.launch {
+            // Ввічливий stop через stdin + пауза ПОЗА локом щоб не блокувати start().
+            val wasRunning = EmbeddedProcessManager.isRunning(serverId)
+            if (wasRunning) {
+                try {
+                    EmbeddedProcessManager.sendInput(serverId, "stop")
+                    delay(2000)
+                } catch (_: Exception) {}
+            }
             startMutex.withLock {
                 try {
-                    android.util.Log.d("ServerService", "stopServer $serverId")
-                    val session = runningServers[serverId]
-                    if (session == null) {
-                        logToConsole(serverId, "Сервер не запущений")
+                    android.util.Log.d("ServerService", "stopServer embedded $serverId")
+                    if (!EmbeddedProcessManager.isRunning(serverId)) {
+                        log(serverId, "Сервер не запущений")
                         repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                         return@withLock
                     }
                     repository.updateServerStatus(serverId, ServerStatus.STOPPING)
-                    logToConsole(serverId, "Зупинка сервера...")
-
-                    TermuxBridge.stop(this@ServerService, session)
-                    // Additional fifo cleanup via Termux
-                    TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "rm -f input.fifo; pkill -f java 2>/dev/null; echo stopped >> server.log")
-
-                    runningServers.remove(serverId)
+                    log(serverId, "Зупинка сервера...")
+                    EmbeddedProcessManager.stop(serverId)
                     repository.updateTermuxExecutionId(serverId, null)
                     repository.updateServerStatus(serverId, ServerStatus.STOPPED)
-                    logToConsole(serverId, "Сервер зупинено")
-                    // Wake unlock if no servers
-                    if (runningServers.isEmpty()) {
-                        TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "termux-wake-unlock 2>/dev/null || true")
-                    }
+                    log(serverId, "Сервер зупинено")
                 } catch (e: Exception) {
                     android.util.Log.e("ServerService", "stop error", e)
-                    logToConsole(serverId, "Error stopping: ${e.message}")
+                    log(serverId, "Error stopping: ${e.message}")
                 }
             }
         }
     }
 
-    private fun logToConsole(serverId: String, message: String) {
+    private fun log(serverId: String, message: String) {
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val line = "[$timestamp] $message\n"
-        serviceScope.launch {
-            try {
-                val server = repository.getServer(serverId).first() ?: return@launch
-                val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-                if (uriStr.isEmpty()) return@launch
-                val dirUri = Uri.parse(uriStr)
-                val dir = DocumentFile.fromTreeUri(this@ServerService, dirUri) ?: return@launch
-                var logFile = dir.findFile("server.log")
-                if (logFile == null) logFile = dir.createFile("text/plain", "server.log")
-                logFile?.let {
-                    try {
-                        contentResolver.openOutputStream(it.uri, "wa")?.use { out -> out.write(line.toByteArray()) }
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ServerService", "log write fail", e)
-            }
-        }
-    }
-
-    private fun logRaw(serverId: String, text: String) {
-        serviceScope.launch {
-            try {
-                val server = repository.getServer(serverId).first() ?: return@launch
-                val uriStr = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-                val dirUri = Uri.parse(uriStr)
-                val dir = DocumentFile.fromTreeUri(this@ServerService, dirUri) ?: return@launch
-                var logFile = dir.findFile("server.log")
-                if (logFile == null) logFile = dir.createFile("text/plain", "server.log")
-                logFile?.let {
-                    contentResolver.openOutputStream(it.uri, "wa")?.use { out ->
-                        out.write(text.toByteArray())
-                        if (!text.endsWith("\n")) out.write("\n".toByteArray())
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("ServerService", "logRaw fail", e)
-            }
-        }
+        // пишемо одразу у файл справжньої робочої папки (без SAF!)
+        try {
+            val dir = workDirCache[serverId]
+                ?: EmbeddedPaths.lookupServerDir(this@ServerService, serverId)
+            EmbeddedProcessManager.appendLogToDir(dir, line)
+        } catch (_: Exception) {}
     }
 
     private fun getDeviceIp(): String {
@@ -296,30 +364,24 @@ class ServerService : Service() {
         } catch (_: Exception) { "192.168.0.100" }
     }
 
-    private fun startLivenessPoll(serverId: String, session: TermuxBridge.TermuxSession) {
+    private fun startLivenessPoll(serverId: String) {
         serviceScope.launch {
-            var deadCount = 0
-            while (runningServers.containsKey(serverId)) {
+            var emptyCount = 0
+            while (true) {
                 delay(5000)
-                // Heuristic: if log file not growing and ps check would be needed, we currently just check if SAF still exists
                 try {
                     val server = repository.getServer(serverId).first()
                     if (server == null || server.status != ServerStatus.RUNNING) break
-                    val uri = Uri.parse(server.effectiveWorkDirUri)
-                    val dir = DocumentFile.fromTreeUri(this@ServerService, uri)
-                    if (dir == null || !dir.exists()) {
-                        deadCount++
-                        if (deadCount >= 3) {
-                            logToConsole(serverId, "Process exited (папка недоступна)")
-                            runningServers.remove(serverId)
+                    if (!EmbeddedProcessManager.isRunning(serverId)) {
+                        emptyCount++
+                        if (emptyCount >= 2) {
+                            log(serverId, "Процес завершено")
                             repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                             break
                         }
                     } else {
-                        deadCount = 0
+                        emptyCount = 0
                     }
-                    // Optional: send ps check via TermuxBridge (async, result via ResultsService not yet parsed)
-                    // TermuxBridge.sendRawCommand(this@ServerService, session.termuxPath, "ps aux | grep -q '[j]ava' || echo dead >> server.log")
                 } catch (_: Exception) {}
             }
         }
@@ -330,7 +392,7 @@ class ServerService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, ANServerApplication.NOTIFICATION_CHANNEL_ID)
             .setContentTitle("PocketHost")
-            .setContentText("Server service is running")
+            .setContentText("Вбудований термінал працює")
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -340,13 +402,7 @@ class ServerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-        // Stop all via copy to avoid concurrent modification
-        val toStop = runningServers.keys.toList()
-        toStop.forEach { id ->
-            val session = runningServers[id]
-            if (session != null) TermuxBridge.stop(this, session)
-        }
-        runningServers.clear()
+        EmbeddedProcessManager.stopAll()
     }
 
     companion object {
