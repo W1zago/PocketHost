@@ -35,6 +35,7 @@
 - [ ] Notification actions (start/stop from notification)
 - [ ] Swipe gestures for server cards
 - [ ] Search and filter servers
+- [ ] General interface overhaul (DEFERRED per user request 08.09.2026 — do later, not now): unify styling/spacing across creation/detail/console screens, Material3 polish pass, Ukrainian strings review
 
 ### Features
 - [ ] Server templates library
@@ -295,7 +296,7 @@
 
 ---
 
-**Last Updated**: 2026-05-04
+**Last Updated**: 2026-09-08
 
 **Maintainer**: ANServer Development Team
 

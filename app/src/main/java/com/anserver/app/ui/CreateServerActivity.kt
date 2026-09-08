@@ -129,12 +129,21 @@ class CreateServerActivity : AppCompatActivity() {
         )
         val verAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, versions)
         binding.spinnerMinecraftVersion.setAdapter(verAdapter)
-        binding.spinnerMinecraftVersion.setText("1.21.4", false)
+        // Default 1.20.4: вбудований JRE17 запускає лише Minecraft <=1.20.4
+        // (1.20.5+ потребує Java 21). Список лишаємо повним — для 1.21.x
+        // старт чесно відмовить з підказкою про JRE 21.
+        binding.spinnerMinecraftVersion.setText("1.20.4", false)
 
         val loaders = MinecraftLoader.values().map { it.name }
         val loaderAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, loaders)
         binding.spinnerMinecraftLoader.setAdapter(loaderAdapter)
         binding.spinnerMinecraftLoader.setText(MinecraftLoader.PAPER.name, false)
+
+        // Дальність промальовки: живий підпис під повзунком
+        binding.tvViewDistance.text = viewDistanceLabel(binding.sliderViewDistance.value.toInt())
+        binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
+            binding.tvViewDistance.text = viewDistanceLabel(value.toInt())
+        }
 
         // Памʼять пристрою (не heap додатку!): дочірній java-процес має власну купу.
         fun deviceTotalMb(): Int {
@@ -185,6 +194,9 @@ class CreateServerActivity : AppCompatActivity() {
         })
         updateCreateButtonState()
     }
+
+    private fun viewDistanceLabel(chunks: Int): String =
+        "Дальність промальовки: $chunks чанків"
 
     private fun storageShortName(kind: EmbeddedPaths.StorageKind): String = when (kind) {
         EmbeddedPaths.StorageKind.EXTERNAL -> "зовнішньому"
@@ -444,9 +456,14 @@ class CreateServerActivity : AppCompatActivity() {
     private fun proceedCreateMinecraft(name: String, port: Int) {
         val maxMemory = binding.etMaxMemory.text.toString().toIntOrNull() ?: 1024
         val minMemory = binding.etMinMemory.text.toString().toIntOrNull() ?: 512
-        val version = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.21.4" }
+        val version = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.20.4" }
         val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
         val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
+
+        // Піратка = вимкнена перевірка ліцензії (online-mode=false).
+        // Промальовка 2..32 чанки, дефолт 10.
+        val allowPirate = binding.switchPirate.isChecked
+        val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
 
         binding.btnCreate.isEnabled = false
         binding.btnCreate.text = "Створення..."
@@ -464,7 +481,9 @@ class CreateServerActivity : AppCompatActivity() {
             maxMemory = maxMemory,
             minMemory = minMemory,
             minecraftVersion = version,
-            minecraftLoader = loader
+            minecraftLoader = loader,
+            onlineMode = !allowPirate,
+            viewDistance = viewDistance
         )
         val server = Server(
             id = serverId,
@@ -487,9 +506,9 @@ class CreateServerActivity : AppCompatActivity() {
                     gamemode=survival
                     difficulty=normal
                     pvp=true
-                    online-mode=true
+                    online-mode=${!allowPirate}
                     motd=A Minecraft Server - $name
-                    view-distance=8
+                    view-distance=$viewDistance
                     spawn-protection=16
                     enable-command-block=false
                     allow-flight=false
@@ -568,7 +587,7 @@ class CreateServerActivity : AppCompatActivity() {
 
     private suspend fun provisionInternal(server: Server, dir: File, log: (String) -> Unit): Boolean {
         return try {
-            val version = server.config.minecraftVersion ?: "1.21.4"
+            val version = server.config.minecraftVersion ?: "1.20.4"
             val loader = server.config.minecraftLoader ?: MinecraftLoader.PAPER
             val manager = com.anserver.plugins.minecraft.MinecraftServerManager(dir.parent ?: dir.absolutePath)
             manager.provisionIfNeeded(dir.absolutePath, version, loader, server.config.maxMemory, server.config.minMemory, server.port, log)

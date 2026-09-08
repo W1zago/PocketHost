@@ -14,7 +14,8 @@ object MinecraftProvisioner {
         log: (String) -> Unit
     ): Boolean {
         if (server.type != ServerType.MINECRAFT) return true
-        val version = server.config.minecraftVersion ?: "1.21.4"
+        // Default 1.20.4: вбудований JRE17 запускає лише Minecraft <=1.20.4.
+        val version = server.config.minecraftVersion ?: "1.20.4"
         val loader = server.config.minecraftLoader
         val maxMem = server.config.maxMemory
         val minMem = server.config.minMemory

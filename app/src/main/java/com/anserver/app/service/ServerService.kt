@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import com.anserver.app.ANServerApplication
 import com.anserver.app.R
 import com.anserver.app.embedded.EmbeddedBootstrap
+import com.anserver.app.embedded.EmbeddedJava
 import com.anserver.app.embedded.EmbeddedPaths
 import com.anserver.app.embedded.EmbeddedProcessManager
 import com.anserver.app.ui.MainActivity
@@ -97,6 +98,14 @@ class ServerService : Service() {
                     }
                     if (EmbeddedProcessManager.isRunning(serverId)) {
                         log(serverId, "Сервер вже запущений")
+                        // FAIL 17:44: reserve мовчки блокував рестарт ("Сервер вже
+                        // запущений", порт порожній). Факти в logcat показують чому.
+                        try {
+                            android.util.Log.i(
+                                "ServerService",
+                                "start reserve blocked $serverId facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                            )
+                        } catch (_: Exception) {}
                         return@withLock null
                     }
                     startingIds.add(serverId)
@@ -123,6 +132,20 @@ class ServerService : Service() {
                     startMutex.withLock { startingIds.remove(serverId) }
                     return@launch
                 }
+                // Баг A: stale isRunning після попереднього стопа (Done без Closing)
+                // блокував рестарт в тому ж процесі. Факти вже виправлені в
+                // InProcessServer (свіжий Done + порт-first), тут лише діагностика.
+                try {
+                    val alive = EmbeddedProcessManager.isRunning(serverId) ||
+                        com.anserver.app.jvm.InProcessServer.isRunning(serverId)
+                    val portFree = try {
+                        com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)
+                    } catch (_: Exception) { true }
+                    android.util.Log.i(
+                        "ServerService",
+                        "startMinecraft pre-check $serverId alive=$alive portFree=$portFree status=${server.status} facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                    )
+                } catch (_: Exception) {}
                 reservedWorkDir.mkdirs()
                 workDirCache[serverId] = reservedWorkDir
                 EmbeddedBootstrap.ensureServerDirReady(reservedWorkDir)
@@ -182,27 +205,59 @@ class ServerService : Service() {
     private suspend fun startMinecraft(serverId: String, workDir: File) {
         val server = repository.getServer(serverId).first() ?: return
 
-        // eula + properties у внутрішній папці
+        // eula + properties у внутрішній папці.
+        // online-mode / view-distance беремо зі збереженого конфігу ПРИ КОЖНОМУ
+        // старті (патчимо існуючий файл, решту ключів не чіпаємо) — так повзунки
+        // працюють і для серверів, створених до їх появи.
         try {
             val eula = File(workDir, "eula.txt")
             if (!eula.exists()) eula.writeText("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://account.mojang.com/documents/minecraft_eula).\neula=true")
-            val props = File(workDir, "server.properties")
-            if (!props.exists()) {
-                props.writeText(
-                    "server-port=${server.port}\nmax-players=20\ngamemode=survival\ndifficulty=normal\n" +
-                        "pvp=true\nonline-mode=true\nmotd=A Minecraft Server - ${server.name}\nview-distance=8\n" +
-                        "spawn-protection=16\nenable-command-block=false\nallow-flight=false\nwhite-list=false\nenforce-whitelist=false\n"
-                )
-            }
+            patchServerProperties(
+                workDir,
+                server.port,
+                server.config.effectiveOnlineMode,
+                server.config.effectiveViewDistance,
+                server.name
+            )
         } catch (_: Exception) {}
 
         // Provision jar у внутрішню папку (звичайний File I/O, без SAF)
-        val version = server.config.minecraftVersion ?: "1.21.4"
+        // Default 1.20.4: вбудований JRE17 запускає лише Minecraft <=1.20.4
+        // (1.20.5+ потребує Java 21 — див. advisory нижче).
+        val version = server.config.minecraftVersion ?: "1.20.4"
         val loader = server.config.minecraftLoader
+        if (EmbeddedJava.minJavaForMinecraft(version) > 17) {
+            log(serverId, "УВАГА: $version потребує Java 21+, а вбудований JRE — Java 17. Старт швидше за все не вдасться; рекомендовано 1.20.4 (або імпортуй JRE 21 вручну в tools/jre21/ через Files).")
+        }
+        // Зайнятий порт: якщо це НАШ живий сервер — no-op, інакше ERROR.
+        // Без цього повторний Start запускав другий Paper поверх залоченого
+        // світу -> OverlappingFileLockException.
+        try {
+            if (!com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)) {
+                if (EmbeddedProcessManager.isRunning(serverId) ||
+                    com.anserver.app.jvm.InProcessServer.isRunning(serverId)
+                ) {
+                    log(serverId, "Сервер вже запущений (порт ${server.port} зайнятий ним) — повторний старт пропущено")
+                    try {
+                        val cur = repository.getServer(serverId).first()
+                        if (cur?.status != ServerStatus.RUNNING) {
+                            repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+                        }
+                    } catch (_: Exception) {}
+                    return
+                }
+                log(serverId, "ERROR: порт ${server.port} вже зайнятий іншим процесом. Зміни порт у налаштуваннях сервера.")
+                repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                return
+            }
+        } catch (_: Exception) {}
         val manager = MinecraftServerManager(workDir.parent ?: workDir.absolutePath)
-        val hasJarBefore = EmbeddedProcessManager.findExistingJar(
+        val foundBefore = EmbeddedProcessManager.findExistingJar(
             workDir, EmbeddedProcessManager.guessJarName(loader?.name)
-        ) != null
+        )
+        // Наявність файлу ≠ цілісність: обірваний jar чистимо через provision заново.
+        val hasJarBefore = foundBefore != null &&
+            MinecraftServerManager.isValidServerJar(java.io.File(workDir, foundBefore))
         if (!hasJarBefore) {
             log(serverId, "Завантаження ${loader ?: "PAPER"} $version (~50-100 MB)...")
             val ok = try {
@@ -244,7 +299,160 @@ class ServerService : Service() {
         }
 
         // W^X: прямий exec з папки додатку заборонений політикою Android для
-        // targetSdk 29+ (error=13). Підбираємо робочу форму команди на пристрої.
+        // targetSdk 29+ (error=13). Основний шлях — in-process JVM як у MojoLauncher
+        // (dlopen libjvm.so + JNI_CreateJavaVM, без exec взагалі).
+        // Legacy exec через системний лінкер лишено як fallback для retryable-помилок.
+        val jarFile = java.io.File(workDir, jar)
+        val inProcessResult = try {
+            log(serverId, "Старт in-process JVM (Mojo-підхід, без exec)...")
+            com.anserver.app.jvm.InProcessServer.start(
+                this@ServerService, serverId, jarFile, workDir,
+                server.config.maxMemory, server.config.minMemory,
+                server.config.javaArgs, version,
+                { msg -> log(serverId, msg) },
+                server.port,
+                javaPath
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("ServerService", "in-process start failed, fallback to exec", e)
+            log(serverId, "In-process старт не вдався (${e.message}), пробую legacy exec...")
+            com.anserver.app.jvm.InProcessServer.StartResult.FAILED_RETRYABLE
+        }
+        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.ALREADY_RUNNING) {
+            // No-op: живий сервер вже є (Paperclip main повернувся, але факти
+            // живі). Статус лишається RUNNING, другий Paper не стартуємо.
+            log(serverId, "Сервер вже запущений — повторний старт пропущено")
+            try {
+                val cur = repository.getServer(serverId).first()
+                if (cur?.status != ServerStatus.RUNNING) {
+                    repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+                }
+            } catch (_: Exception) {}
+            startLivenessPoll(serverId)
+            return
+        }
+        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.STARTED) {
+            repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
+            repository.updateServerStatus(serverId, ServerStatus.RUNNING)
+            log(serverId, "Сервер запущено (in-process JVM) jar=$jar")
+            startLivenessPoll(serverId)
+            // Швидкий крах (несумісна Java, кривий світ, повторний бінд порту):
+            // не висіти в RUNNING — причина вже в логу вище, фіксуємо ERROR.
+            // Paperclip-вікно враховано: isRunning() тепер факти-залежний
+            // (порт + Done-маркер), тож живий сервер сюди не потрапить.
+            // Затримку збільшено до 15с — повільні телефони довго вантажать світ.
+            serviceScope.launch {
+                delay(15000)
+                try {
+                    val s = repository.getServer(serverId).first()
+                    if (s?.status == ServerStatus.RUNNING && !EmbeddedProcessManager.isRunning(serverId)) {
+                        // Подвійна перевірка фактів перед ERROR: порт або Done
+                        // означають "живий, просто повільний старт".
+                        var looksAlive = false
+                        try {
+                            if (!com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)) {
+                                looksAlive = true
+                            }
+                        } catch (_: Exception) {}
+                        if (!looksAlive) {
+                            try {
+                                val lf = java.io.File(workDir, "server.log")
+                                if (lf.isFile) {
+                                    val len = lf.length()
+                                    val tailLen = if (len > 64 * 1024) 64 * 1024 else len.toInt()
+                                    java.io.RandomAccessFile(lf, "r").use { raf ->
+                                        raf.seek(len - tailLen)
+                                        val buf = ByteArray(tailLen)
+                                        var tot = 0
+                                        while (tot < tailLen) {
+                                            val r = raf.read(buf, tot, tailLen - tot)
+                                            if (r <= 0) break
+                                            tot += r
+                                        }
+                                        val tail = String(buf, 0, tot)
+                                        // Баг A: тільки СВІЖИЙ Done (після останнього
+                                        // Closing/stop/смерті), інакше stale Done
+                                        // попереднього бута маскує крах як "живий".
+                                        val donePos = tail.lastIndexOf("Done (")
+                                        fun lastOf(vararg ms: String): Int {
+                                            var b = -1
+                                            for (m in ms) {
+                                                val p = tail.lastIndexOf(m)
+                                                if (p > b) b = p
+                                            }
+                                            return b
+                                        }
+                                        val stopPos = lastOf(
+                                            "Stopping the server", "Stopping server",
+                                            "Saving worlds", "All dimensions are saved",
+                                            "Closing Server", "Server stopped",
+                                            "[зупинено користувачем]",
+                                            "[очікування сервера завершено"
+                                        )
+                                        val deathPos = tail.lastIndexOf("[процес завершено")
+                                        if (donePos >= 0 && donePos > stopPos && donePos > deathPos &&
+                                            tail.indexOf("For help, type", donePos) > stopPos
+                                        ) {
+                                            looksAlive = true
+                                        } else {
+                                            val startPos = lastOf(
+                                                "Starting org.bukkit",
+                                                "Starting minecraft server",
+                                                "Loading libraries",
+                                                "This server is running"
+                                            )
+                                            if (startPos >= 0 && startPos > stopPos &&
+                                                startPos > deathPos
+                                            ) looksAlive = true
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        if (!looksAlive) {
+                            // STOP->START FIX 2026-09-07: чесна відмова -11 (старий
+                            // потік ще виходив, новий Paper не стартував) — це не
+                            // крах: STOPPED + просимо ретрай, а не ERROR.
+                            var sawBusyPrev = false
+                            try {
+                                val lf = java.io.File(workDir, "server.log")
+                                if (lf.isFile && lf.length() > 0) {
+                                    val n = if (lf.length() > 8192) 8192 else lf.length().toInt()
+                                    java.io.RandomAccessFile(lf, "r").use { raf ->
+                                        raf.seek(lf.length() - n)
+                                        val b = ByteArray(n)
+                                        var t = 0
+                                        while (t < n) {
+                                            val r = raf.read(b, t, n - t)
+                                            if (r <= 0) break
+                                            t += r
+                                        }
+                                        if (String(b, 0, t).contains("код -11")) sawBusyPrev = true
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                            if (sawBusyPrev) {
+                                log(serverId, "Попередній потік ще завершувався — тисни Start ще раз.")
+                                repository.updateServerStatus(serverId, ServerStatus.STOPPED)
+                            } else {
+                                log(serverId, "Сервер завершився одразу після старту — дивись причину вище (часто: зайнятий порт або несумісна Java).")
+                                repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                            }
+                        } else {
+                            log(serverId, "Сервер ще стартує (повільний пристрій) — чекаю далі...")
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            return
+        }
+        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.FAILED_DEFINITIVE) {
+            // Битий jar / стара Java / зайнята JVM — legacy exec не виправить.
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+
+        log(serverId, "Fallback: legacy exec через системний лінкер...")
         val launch = com.anserver.app.embedded.EmbeddedJava.probeJava(javaPath) { msg -> log(serverId, msg) }
         if (!launch.works) {
             log(serverId, "ERROR: Java не запускається ні напряму, ні через системний лінкер (деталі вище).")
@@ -282,6 +490,24 @@ class ServerService : Service() {
         startLivenessPoll(serverId)
     }
 
+    /**
+     * Створює server.properties якщо нема, інакше точково оновлює ключі,
+     * якими керує UI (online-mode, view-distance, server-port).
+     * Решту файла (motd гравця, сид світу тощо) не чіпає.
+     * Логіка винесена в [com.anserver.app.util.ServerProperties].
+     */
+    private fun patchServerProperties(
+        workDir: File,
+        port: Int,
+        onlineMode: Boolean,
+        viewDistance: Int,
+        serverName: String
+    ) {
+        com.anserver.app.util.ServerProperties.patch(
+            workDir, port, onlineMode, viewDistance, serverName
+        )
+    }
+
     private suspend fun startUbuntu(serverId: String, workDir: File) {
         val ip = getDeviceIp()
         EmbeddedBootstrap.ensureUbuntu(this@ServerService) { msg -> log(serverId, msg) }
@@ -301,19 +527,64 @@ class ServerService : Service() {
 
     private fun stopServer(serverId: String) {
         serviceScope.launch {
-            // Ввічливий stop через stdin + пауза ПОЗА локом щоб не блокувати start().
+            // Ввічливий stop через stdin + очікування ПОЗА локом щоб не блокувати start().
+            // In-process серверу треба більше часу (збереження світу + System.exit
+            // пастка + Paperclip-паркування), тому чекаємо до 60с.
+            // "stop" шлемо за фактом живого JVM (isRunning факти-залежний),
+            // інакше консоль відмовляла в Paperclip-вікні.
             val wasRunning = EmbeddedProcessManager.isRunning(serverId)
             if (wasRunning) {
                 try {
+                    android.util.Log.i(
+                        "ServerService",
+                        "stopServer: sending stop to $serverId facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                    )
+                    // FAIL 17:44: phase1 МАЄ ставити stopRequested одразу.
+                    // sendInput("stop") сам флага не ставив -> 60с stopReq=false,
+                    // гілка stopRequested+portFree мертва, fast-path тримав alive=true.
+                    try {
+                        com.anserver.app.jvm.InProcessServer.requestStop(serverId)
+                    } catch (_: Exception) {}
                     EmbeddedProcessManager.sendInput(serverId, "stop")
-                    delay(2000)
+                    var waited = 0
+                    while (waited < 60000 && EmbeddedProcessManager.isRunning(serverId)) {
+                        delay(1000)
+                        waited += 1000
+                        // Діагностика кожні 5с (Баг B + FAIL 17:44): факти з
+                        // donePos/stopPos щоб Observer бачив Closing після Done,
+                        // а не тільки "alive=true".
+                        if (waited % 5000 == 0) {
+                            try {
+                                android.util.Log.i(
+                                    "ServerService",
+                                    "stopServer wait ${waited}ms $serverId alive=${EmbeddedProcessManager.isRunning(serverId)} facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    if (EmbeddedProcessManager.isRunning(serverId)) {
+                        log(serverId, "Сервер не відповів на stop за 60с — чекаю далі у фоні (світ може зберігатись)")
+                        try {
+                            android.util.Log.w("ServerService", "stopServer timeout $serverId still alive after 60s")
+                        } catch (_: Exception) {}
+                    } else {
+                        try {
+                            android.util.Log.i("ServerService", "stopServer graceful in ${waited}ms $serverId")
+                        } catch (_: Exception) {}
+                    }
                 } catch (_: Exception) {}
             }
             startMutex.withLock {
                 try {
                     android.util.Log.d("ServerService", "stopServer embedded $serverId")
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
-                        log(serverId, "Сервер не запущений")
+                        // Сюди потрапляємо і після ввічливого стопа в phase1
+                        // (порт вільний + Closing): це успіх, а не "не запущений".
+                        if (wasRunning) {
+                            log(serverId, "Сервер зупинено")
+                        } else {
+                            log(serverId, "Сервер не запущений")
+                        }
                         repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                         return@withLock
                     }
@@ -365,14 +636,27 @@ class ServerService : Service() {
     }
 
     private fun startLivenessPoll(serverId: String) {
+        // STOP->START FIX 2026-09-07: старий poll вбивав свіжий старт.
+        // Два захисти: (а) stale-poll guard за seq — poll попереднього бута
+        // мовчки виходить коли seq змінився (новий бут моніторить свій poll);
+        // (б) grace 30с — свіжий Paper пише маркери/биндить порт до ~30с, а в
+        // перші секунди фактів ще нема (нема Done/порту) — не вбивати.
+        // Без цього: тиша нового старту 10с -> "Процес завершено" -> STOPPED.
+        val mySeq = try { com.anserver.app.jvm.InProcessServer.currentSeq() } catch (_: Exception) { -1L }
         serviceScope.launch {
             var emptyCount = 0
+            var ticks = 0
             while (true) {
                 delay(5000)
                 try {
                     val server = repository.getServer(serverId).first()
                     if (server == null || server.status != ServerStatus.RUNNING) break
+                    try {
+                        if (com.anserver.app.jvm.InProcessServer.currentSeq() != mySeq) break
+                    } catch (_: Exception) {}
+                    ticks++
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
+                        if (ticks <= 6) continue
                         emptyCount++
                         if (emptyCount >= 2) {
                             log(serverId, "Процес завершено")

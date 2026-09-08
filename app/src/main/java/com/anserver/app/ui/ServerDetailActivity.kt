@@ -13,6 +13,7 @@ import com.anserver.app.embedded.EmbeddedPaths
 import com.anserver.app.service.ServerService
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
+import com.anserver.core.model.ServerType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -26,6 +27,9 @@ class ServerDetailActivity : AppCompatActivity() {
     private lateinit var binding: ActivityServerDetailBinding
     private val repository = ANServerApplication.serverRepository
     private var serverId: String? = null
+    private var currentServer: Server? = null
+    // Блокує збереження під час програмного заповнення контролів у updateUI
+    private var suppressSettingsSave = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +40,7 @@ class ServerDetailActivity : AppCompatActivity() {
 
         setupToolbar()
         setupButtons()
+        setupMinecraftSettings()
         observeServer()
         updateIpAddress()
         startResourceMonitoring()
@@ -54,6 +59,82 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnConsole.setOnClickListener { openConsole() }
         binding.btnFiles.setOnClickListener { openFileManager() }
         binding.btnDelete.setOnClickListener { deleteServer() }
+    }
+
+    private fun setupMinecraftSettings() {
+        binding.switchPirate.setOnCheckedChangeListener { _, _ ->
+            if (suppressSettingsSave) return@setOnCheckedChangeListener
+            saveMinecraftSettings()
+        }
+        binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
+            binding.tvViewDistance.text = "Дальність промальовки: ${value.toInt()} чанків"
+        }
+        // Зберігаємо лише коли палець відпущено, а не на кожен тік
+        binding.sliderViewDistance.addOnSliderTouchListener(
+            object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {}
+                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                    if (suppressSettingsSave) return
+                    saveMinecraftSettings()
+                }
+            }
+        )
+    }
+
+    /**
+     * Зберігає тумблер/повзунок у конфіг сервера.
+     * На зупиненому — одразу патчить server.properties,
+     * на запущеному — застосується при наступному старті (сервіс патчить сам).
+     */
+    private fun saveMinecraftSettings() {
+        val server = currentServer ?: return
+        if (server.type != ServerType.MINECRAFT) return
+        val allowPirate = binding.switchPirate.isChecked
+        val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
+        lifecycleScope.launch {
+            try {
+                val updated = server.copy(
+                    config = server.config.copy(
+                        onlineMode = !allowPirate,
+                        viewDistance = viewDistance
+                    )
+                )
+                repository.updateServer(updated)
+                currentServer = updated
+                if (server.status == ServerStatus.RUNNING ||
+                    server.status == ServerStatus.STARTING
+                ) {
+                    android.widget.Toast.makeText(
+                        this@ServerDetailActivity,
+                        "Збережено. Застосується після рестарту сервера.",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    try {
+                        val workDir = EmbeddedPaths.resolveWorkDir(
+                            this@ServerDetailActivity, server.id,
+                            server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+                        )
+                        com.anserver.app.util.ServerProperties.patch(
+                            workDir,
+                            server.port,
+                            !allowPirate,
+                            viewDistance,
+                            server.name
+                        )
+                        android.widget.Toast.makeText(
+                            this@ServerDetailActivity,
+                            "Збережено і застосовано.",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    } catch (e: Exception) {
+                        android.util.Log.w("ServerDetail", "props patch failed", e)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ServerDetail", "save settings failed", e)
+            }
+        }
     }
 
     private fun observeServer() {
@@ -124,6 +205,7 @@ class ServerDetailActivity : AppCompatActivity() {
 
     private fun updateUI(server: Server) {
         android.util.Log.d("ServerDetailActivity", "updateUI ${server.status}")
+        currentServer = server
         binding.apply {
             serverName.text = server.name
             serverType.text = server.type.name
@@ -148,6 +230,22 @@ class ServerDetailActivity : AppCompatActivity() {
                 ).absolutePath
             } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
             serverIpAddress.text = "Папка: $workDirStr"
+            // Картка налаштувань — лише для Minecraft, значення зі збереженого конфігу
+            if (server.type == ServerType.MINECRAFT) {
+                minecraftSettingsCard.visibility = android.view.View.VISIBLE
+                suppressSettingsSave = true
+                try {
+                    switchPirate.isChecked = !server.config.effectiveOnlineMode
+                    sliderViewDistance.value = server.config.effectiveViewDistance.toFloat()
+                    tvViewDistance.text =
+                        "Дальність промальовки: ${server.config.effectiveViewDistance} чанків"
+                } catch (_: Exception) {
+                } finally {
+                    suppressSettingsSave = false
+                }
+            } else {
+                minecraftSettingsCard.visibility = android.view.View.GONE
+            }
         }
     }
 
@@ -171,7 +269,24 @@ class ServerDetailActivity : AppCompatActivity() {
         }
     }
 
-    private fun restartServer() { stopServer(); lifecycleScope.launch { delay(1000); startServer() } }
+    private fun restartServer() {
+        stopServer()
+        lifecycleScope.launch {
+            // FAIL 17:44: рестарт через 1с впирався в reserve "Сервер вже
+            // запущений" (запаркований future). Чекаємо реальної смерті за
+            // фактами (новий isRunning без fast-path) до 15с, потім старт.
+            var waited = 0
+            while (waited < 15000) {
+                delay(1000)
+                waited += 1000
+                try {
+                    val id = serverId ?: break
+                    if (!com.anserver.app.embedded.EmbeddedProcessManager.isRunning(id)) break
+                } catch (_: Exception) { break }
+            }
+            startServer()
+        }
+    }
 
     private fun openConsole() {
         serverId?.let { id ->
@@ -246,6 +361,35 @@ class ServerDetailActivity : AppCompatActivity() {
                 } catch (_: Exception) {}
                 repository.deleteServer(id)
                 finish()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Дрібниця (Баг A): детальний екран кешував RUNNING після стопа —
+        // оновлюємо статус при поверненні (Flow міг пропустити емісію у фоні).
+        serverId?.let { id ->
+            lifecycleScope.launch {
+                try {
+                    val s = repository.getServer(id).first()
+                    if (s != null) updateUI(s)
+                    // FAIL 17:44: статус RUNNING при мертвих фактах (порт вільний +
+                    // Closing після Done, новий isRunning без fast-path = false) —
+                    // не показуємо stale RUNNING, синхронізуємо в STOPPED одразу,
+                    // не чекаючи 10с liveness-poll сервіса.
+                    try {
+                        if (s != null && s.status == ServerStatus.RUNNING &&
+                            !com.anserver.app.embedded.EmbeddedProcessManager.isRunning(id)
+                        ) {
+                            android.util.Log.i(
+                                "ServerDetailActivity",
+                                "onResume: facts dead but status RUNNING, syncing STOPPED $id"
+                            )
+                            repository.updateServerStatus(id, ServerStatus.STOPPED)
+                        }
+                    } catch (_: Exception) {}
+                } catch (_: Exception) {}
             }
         }
     }

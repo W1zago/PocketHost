@@ -2,6 +2,7 @@ package com.anserver.app.embedded
 
 import android.content.Context
 import android.util.Log
+import com.anserver.app.jvm.InProcessServer
 import java.io.File
 
 /**
@@ -36,6 +37,8 @@ object EmbeddedProcessManager {
     private val running = mutableMapOf<String, RunningProcess>()
 
     fun isRunning(serverId: String): Boolean = synchronized(lock) {
+        // In-process JVM (Mojo-підхід) живе окремо від ProcessBuilder-мапи
+        if (InProcessServer.isRunning(serverId)) return true
         val r = running[serverId] ?: return false
         try { r.process.isAlive } catch (_: Exception) { false }
     }
@@ -44,10 +47,13 @@ object EmbeddedProcessManager {
         // чистимо мертві
         val dead = running.filterValues { try { !it.process.isAlive } catch (_: Exception) { true } }.keys.toList()
         dead.forEach { running.remove(it) }
-        running.size
+        running.size + (if (InProcessServer.isRunning()) 1 else 0)
     }
 
     fun getSession(serverId: String): EmbeddedSession? = synchronized(lock) {
+        if (InProcessServer.isRunning(serverId)) {
+            return EmbeddedSession(serverId, null)
+        }
         running[serverId]?.session
     }
 
@@ -193,6 +199,10 @@ object EmbeddedProcessManager {
     }
 
     fun sendInput(serverId: String, data: String): Boolean {
+        // In-process сервер читає System.in JVM, а не трубу процесу
+        if (InProcessServer.isRunning(serverId)) {
+            return InProcessServer.sendInput(serverId, data)
+        }
         val holder = synchronized(lock) { running[serverId] } ?: return false
         return try {
             val raw = if (data.endsWith("\n")) data else "$data\n"
@@ -208,6 +218,9 @@ object EmbeddedProcessManager {
 
     /** Надіслати сирі байти без додавання \n (для Ctrl/C, Esc-послідовностей) */
     fun sendRaw(serverId: String, bytes: ByteArray): Boolean {
+        if (InProcessServer.isRunning(serverId)) {
+            return InProcessServer.sendRaw(serverId, bytes)
+        }
         val holder = synchronized(lock) { running[serverId] } ?: return false
         return try {
             val out = holder.process.outputStream
@@ -221,6 +234,11 @@ object EmbeddedProcessManager {
     }
 
     fun stop(serverId: String): Boolean {
+        // In-process сервер зупиняється через "stop" в System.in (System.exit пастка),
+        // вбити JVM-нитку примусово безпечно неможливо — як і в Mojo.
+        if (InProcessServer.isRunning(serverId)) {
+            return InProcessServer.stop(serverId)
+        }
         val holder = synchronized(lock) { running.remove(serverId) } ?: return false
         return try {
             // ввічливе завершення: спроба через stdin

@@ -50,8 +50,17 @@ data class ServerConfig(
     // Minecraft specific
     val minecraftVersion: String? = null,
     val minecraftLoader: MinecraftLoader? = null,
-    val loaderVersion: String? = null
-)
+    val loaderVersion: String? = null,
+    // Nullable для Gson-сумісності зі старими збереженнями (відсутнє поле -> null -> дефолт).
+    // onlineMode: null -> true (перевірка ліцензії Mojang увімкнена).
+    // false = "піратка": заходити можуть гравці без ліцензії.
+    val onlineMode: Boolean? = null,
+    // viewDistance: null -> 10 (дефолт сервера). Діапазон 2..32.
+    val viewDistance: Int? = null
+) {
+    val effectiveOnlineMode: Boolean get() = onlineMode ?: true
+    val effectiveViewDistance: Int get() = (viewDistance ?: 10).coerceIn(2, 32)
+}
 
 enum class MinecraftLoader {
     VANILLA,

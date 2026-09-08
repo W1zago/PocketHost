@@ -20,17 +20,55 @@ object EmbeddedJava {
 
     fun bundledJreDir(context: Context): File = File(EmbeddedPaths.toolsDir(context), "jre")
 
+    /**
+     * Дім JRE 21 (для Minecraft 1.20.5+). Автозавантаження стабільного JRE21
+     * нема (Pojav-реліз архівовано, JRE21 лише CI-артефакти), тому сюди
+     * користувач кладе JRE21 вручну через Files: tools/jre21/bin/java.
+     * In-process і prepare вибирають його автоматично за версією гри.
+     */
+    fun bundledJre21Dir(context: Context): File = File(EmbeddedPaths.toolsDir(context), "jre21")
+
     fun bundledJavaBinary(context: Context): File = File(bundledJreDir(context), "bin/java")
 
+    fun bundledJava21Binary(context: Context): File = File(bundledJre21Dir(context), "bin/java")
+
+    /** Дім JRE за шляхом до bin/java (…/jre21/bin/java -> …/jre21). null якщо не схоже на JRE. */
+    fun runtimeHomeFor(javaPath: String?): File? {
+        return try {
+            if (javaPath.isNullOrEmpty()) return null
+            val bin = File(javaPath).parentFile ?: return null
+            if (bin.name != "bin") return null
+            val home = bin.parentFile ?: return null
+            if (!home.isDirectory) return null
+            home
+        } catch (_: Exception) { null }
+    }
+
+    private fun bundledCandidate(f: File): String? {
+        return try {
+            if (!f.exists()) return null
+            try { f.setExecutable(true) } catch (_: Exception) {}
+            if (f.canExecute()) return f.absolutePath
+            // Файл є але exec заборонено W^X: для in-process все одно придатний
+            // (libjvm читається через dlopen, exec не потрібен).
+            if (f.isFile) return f.absolutePath
+            null
+        } catch (_: Exception) { null }
+    }
+
     fun findJava(context: Context): String? {
-        // 1. вбудований JRE
+        // 1. вбудований JRE (спочатку 21 щоб новий рантайм мав пріоритет,
+        // якщо користувач поклав обидва вручну)
         try {
+            bundledCandidate(bundledJava21Binary(context))?.let { return it }
             val bundled = bundledJavaBinary(context)
             if (bundled.exists() && bundled.canExecute()) return bundled.absolutePath
             // може бути не виставлений +x після розпакування
             if (bundled.exists()) {
                 try { bundled.setExecutable(true) } catch (_: Exception) {}
                 if (bundled.canExecute()) return bundled.absolutePath
+                // W^X: exec заборонено, але in-process (dlopen) все одно спрацює
+                return bundled.absolutePath
             }
             // legacy місце
             val legacy = File(context.filesDir, "jre/bin/java")
@@ -68,6 +106,24 @@ object EmbeddedJava {
     }
 
     fun isJavaAvailable(context: Context): Boolean = findJava(context) != null
+
+    /**
+     * Java під конкретну версію Minecraft.
+     * 1.20.5+ (need 21): спочатку tools/jre21, потім звичайний пошук
+     * (JRE17 повернеться як fallback — prepare чесно відмовить з Definitive
+     * і підказкою про ручний імпорт JRE21, замість мовчазного -8).
+     * <=1.20.4: tools/jre21 теж підійде (Java 21 запускає старі версії),
+     * але пріоритет у JRE17 щоб не ламати перевірене.
+     */
+    fun findJavaForVersion(context: Context, minecraftVersion: String?): String? {
+        val need = try { minJavaForMinecraft(minecraftVersion) } catch (_: Exception) { 17 }
+        if (need >= 21) {
+            try {
+                bundledCandidate(bundledJava21Binary(context))?.let { return it }
+            } catch (_: Exception) {}
+        }
+        return findJava(context)
+    }
 
     /**
      * Спосіб запуску java.

@@ -23,6 +23,8 @@ class MinecraftServerManager(private val baseDirectory: String) {
         port: Int = 25565,
         maxMemory: Int = 2048,
         minMemory: Int = 1024,
+        onlineMode: Boolean = true,
+        viewDistance: Int = 10,
         log: ((String) -> Unit)? = null
     ): MinecraftServer? = withContext(Dispatchers.IO) {
         try {
@@ -42,7 +44,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
 
             val jarName = getJarName(software)
             val jarFile = File("$serverDir/$jarName")
-            if (!jarFile.exists() || jarFile.length() < 1024 * 1024) {
+            if (!isValidServerJar(jarFile)) {
                 log?.invoke("Downloading $software $version ...")
                 val downloaded = downloadServerJar(serverDir, version, software, log)
                 if (downloaded == null) {
@@ -55,7 +57,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             }
 
             createEula(serverDir)
-            createServerProperties(serverDir, availablePort)
+            createServerProperties(serverDir, availablePort, onlineMode, viewDistance)
             createStartScript(serverDir, jarName, maxMemory, minMemory)
 
             val config = ServerConfig(
@@ -65,7 +67,9 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 minMemory = minMemory,
                 javaArgs = listOf("-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled"),
                 minecraftVersion = version,
-                minecraftLoader = mapToLoader(software)
+                minecraftLoader = mapToLoader(software),
+                onlineMode = onlineMode,
+                viewDistance = viewDistance.coerceIn(2, 32)
             )
 
             val server = Server(
@@ -104,7 +108,16 @@ class MinecraftServerManager(private val baseDirectory: String) {
             val jarFile = File("$serverDir/$jarName")
             // Also check generic server.jar for backward compat
             val genericJar = File("$serverDir/server.jar")
-            val hasJar = (jarFile.exists() && jarFile.length() > 1024 * 1024) || (genericJar.exists() && genericJar.length() > 1024 * 1024)
+            // Битий/обірваний jar (>1MB, але не zip) маскувався б під готовий і вбивав
+            // старт пізніше з "без Main-Class". Перевіряємо цілісність одразу:
+            // невалідний видаляємо щоб наступний крок скачав заново.
+            for (candidate in listOf(jarFile, genericJar)) {
+                if (candidate.exists() && !isValidServerJar(candidate)) {
+                    log("Знайдено битий jar ${candidate.name} (${candidate.length() / 1024} KB) — видаляю, качаю заново...")
+                    try { candidate.delete() } catch (_: Exception) {}
+                }
+            }
+            val hasJar = isValidServerJar(jarFile) || isValidServerJar(genericJar)
             if (!hasJar) {
                 log("Minecraft jar not found, downloading $software $version...")
                 val downloaded = downloadServerJar(serverDir, version, software, log)
@@ -117,7 +130,8 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     return@withContext false
                 }
             } else {
-                log("Found existing jar: ${if (jarFile.exists()) jarName else "server.jar"}")
+                val existingName = if (isValidServerJar(jarFile)) jarName else "server.jar"
+                log("Found existing jar: $existingName")
             }
             // Ensure eula and properties
             val eulaFile = File("$serverDir/eula.txt")
@@ -214,8 +228,9 @@ class MinecraftServerManager(private val baseDirectory: String) {
             }
 
             val len = File(jarPath).length()
-            if (!File(jarPath).exists() || len < 1024 * 1024) {
-                log?.invoke("Downloaded file invalid (${len / 1024} KB). Можливо обрив зʼєднання - спробуй ще раз або VANILLA/PURPUR.")
+            if (!isValidServerJar(File(jarPath))) {
+                log?.invoke("Downloaded file invalid (${len / 1024} KB або битий zip). Можливо обрив зʼєднання - спробуй ще раз або VANILLA/PURPUR.")
+                try { File(jarPath).takeIf { it.exists() }?.delete() } catch (_: Exception) {}
                 return@withContext null
             }
 
@@ -337,6 +352,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             if (latestJson != null) {
                 try {
                     val obj = JSONObject(latestJson)
+                    val channel = obj.optString("channel", "STABLE")
                     val downloads = obj.getJSONObject("downloads")
                     // Ключ змінився у v3: application -> server:default
                     val downloadObj = when {
@@ -346,8 +362,14 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     }
                     val url = downloadObj?.optString("url", null)
                     if (!url.isNullOrEmpty()) {
-                        log?.invoke("Paper URL (Fill v3): $url")
-                        return url
+                        // latest може бути ALPHA/EXPERIMENTAL (напр. 1.21.9-47):
+                        // нестабільний беремо лише якщо STABLE взагалі нема нижче.
+                        if (channel == "STABLE") {
+                            log?.invoke("Paper URL (Fill v3): $url")
+                            return url
+                        } else {
+                            log?.invoke("Fill v3 latest — $channel (не STABLE), шукаю стабільний білд у списку...")
+                        }
                     } else {
                         log?.invoke("Fill v3: no download url in response, trying builds list")
                     }
@@ -355,24 +377,34 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     log?.invoke("Fill v3 parse failed: ${e.message}, trying builds list")
                 }
             }
-            // Fallback: список білдів (Fill v3 повертає newest-first), беремо перший STABLE
+            // Fallback: список білдів (Fill v3 повертає newest-first).
+            // Прохід 1 — тільки STABLE; прохід 2 — будь-який (з попередженням).
             try {
                 val buildsJson = httpGet("https://fill.papermc.io/v3/projects/paper/versions/$version/builds")
                 if (buildsJson != null) {
                     val arr = org.json.JSONArray(buildsJson)
-                    for (i in 0 until arr.length()) {
-                        val buildObj = arr.getJSONObject(i)
+                    fun urlOf(buildObj: org.json.JSONObject): Pair<String?, String> {
                         val channel = buildObj.optString("channel", "STABLE")
-                        if (channel != "STABLE" && i != arr.length() - 1) continue
-                        val downloads = buildObj.optJSONObject("downloads") ?: continue
+                        val downloads = buildObj.optJSONObject("downloads") ?: return Pair(null, channel)
                         val downloadObj = when {
                             downloads.has("server:default") -> downloads.optJSONObject("server:default")
                             downloads.has("application") -> downloads.optJSONObject("application")
                             else -> null
                         }
-                        val url = downloadObj?.optString("url", null)
-                        if (!url.isNullOrEmpty()) {
-                            log?.invoke("Paper URL (Fill v3 list, build ${buildObj.optInt("id", -1)}, $channel): $url")
+                        return Pair(downloadObj?.optString("url", null)?.takeIf { it.isNotEmpty() }, channel)
+                    }
+                    for (i in 0 until arr.length()) {
+                        val buildObj = arr.getJSONObject(i)
+                        val (url, channel) = urlOf(buildObj)
+                        if (channel != "STABLE" || url == null) continue
+                        log?.invoke("Paper URL (Fill v3 list, build ${buildObj.optInt("id", -1)}, $channel): $url")
+                        return url
+                    }
+                    for (i in 0 until arr.length()) {
+                        val buildObj = arr.getJSONObject(i)
+                        val (url, channel) = urlOf(buildObj)
+                        if (url != null) {
+                            log?.invoke("УВАГА: STABLE білда нема, беру $channel build ${buildObj.optInt("id", -1)}: $url")
                             return url
                         }
                     }
@@ -450,6 +482,19 @@ class MinecraftServerManager(private val baseDirectory: String) {
         // Fill v3 вимагає ідентифікуючий User-Agent з контактом, інакше 403/rate-limit.
         // https://docs.papermc.io/misc/downloads-service/
         private const val USER_AGENT = "PocketHost/1.0 (Android; +https://github.com/anserver/pockethost)"
+
+        /**
+         * Мінімальна цілісність серверного jar: розмір + валідний zip-центрокаталог.
+         * Обірване завантаження (>1MB сміття) ZipFile не відкриє — такий файл
+         * треба видалити і скачати заново, а не везти до старту JVM.
+         */
+        fun isValidServerJar(f: File): Boolean {
+            return try {
+                if (!f.isFile || f.length() < 1024 * 1024) return false
+                java.util.zip.ZipFile(f).use { z -> z.size() > 0 }
+                true
+            } catch (_: Exception) { false }
+        }
     }
 
     private fun httpGet(urlStr: String): String? {
@@ -550,16 +595,21 @@ class MinecraftServerManager(private val baseDirectory: String) {
         FileUtils.writeFile("$serverDir/eula.txt", eulaContent)
     }
 
-    private fun createServerProperties(serverDir: String, port: Int) {
+    private fun createServerProperties(
+        serverDir: String,
+        port: Int,
+        onlineMode: Boolean = true,
+        viewDistance: Int = 10
+    ) {
         val properties = """
             server-port=$port
             max-players=20
             gamemode=survival
             difficulty=normal
             pvp=true
-            online-mode=true
+            online-mode=$onlineMode
             motd=A Minecraft Server
-            view-distance=10
+            view-distance=${viewDistance.coerceIn(2, 32)}
             spawn-protection=16
             enable-command-block=false
             allow-flight=false
@@ -598,7 +648,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             pvp=${minecraftServer.pvp}
             online-mode=${minecraftServer.onlineMode}
             motd=${minecraftServer.motd}
-            view-distance=${minecraftServer.viewDistance}
+            view-distance=${minecraftServer.viewDistance.coerceIn(2, 32)}
             spawn-protection=${minecraftServer.spawnProtection}
             enable-command-block=${minecraftServer.enableCommandBlock}
         """.trimIndent()

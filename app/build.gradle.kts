@@ -15,6 +15,22 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // In-process JVM launcher (порт Mojo jre_launcher): збірка libpockethost_jvm.so
+        externalNativeBuild {
+            cmake {
+                cFlags += "-std=c11 -Wall"
+                cppFlags += "-Wall"
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {

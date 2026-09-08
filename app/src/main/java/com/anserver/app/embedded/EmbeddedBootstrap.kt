@@ -63,11 +63,31 @@ object EmbeddedBootstrap {
         log: (String) -> Unit = {}
     ): String? =
         withContext(Dispatchers.IO) {
-            val existing = EmbeddedJava.findJava(context)
+            val existing = EmbeddedJava.findJavaForVersion(context, minecraftVersion)
             if (existing != null) {
                 val ver = EmbeddedJava.javaVersion(existing) ?: "?"
                 log("Java: $existing ($ver)")
-                warnIfJavaTooOld(existing, minecraftVersion, log)
+                // Для 1.20.5+ перевіряємо що це справді 21+: JRE17 тут не запуститься.
+                // findJavaForVersion вже віддав jre21 якщо він є; якщо нема —
+                // чесно кажемо де його взяти, а prepare нижче відмовить з Definitive.
+                if (minecraftVersion != null) {
+                    try {
+                        val need = EmbeddedJava.minJavaForMinecraft(minecraftVersion)
+                        if (need > 17) {
+                            val home = EmbeddedJava.runtimeHomeFor(existing)
+                            val have = if (home != null) com.anserver.app.jvm.PocketJvm.readJreMajor(home) else null
+                            if (have != null && have < need) {
+                                log("Java 21 не знайдена (є лише Java $have). Поклади JRE21 вручну через Files у tools/jre21/ (щоб з'явився tools/jre21/bin/java) і натисни Start ще раз. Стабільного автозавантаження JRE21 нема — Pojav-реліз архівовано.")
+                            } else {
+                                warnIfJavaTooOld(existing, minecraftVersion, log)
+                            }
+                        } else {
+                            warnIfJavaTooOld(existing, minecraftVersion, log)
+                        }
+                    } catch (_: Exception) {
+                        warnIfJavaTooOld(existing, minecraftVersion, log)
+                    }
+                }
                 return@withContext existing
             }
             log(EmbeddedJava.installHint())
@@ -93,7 +113,7 @@ object EmbeddedBootstrap {
         if (have != null && have < need) {
             log("УВАГА: Minecraft $minecraftVersion потребує Java $need+, а знайдено Java $have.")
             log("Вбудований JRE17 запустить лише Minecraft <=1.20.4.")
-            log("Варіанти: обери версію 1.20.4 (VANILLA/PAPER), або імпортуй JRE21 вручну в tools/jre/ через Files.")
+            log("Варіанти: обери версію 1.20.4 (VANILLA/PAPER), або імпортуй JRE21 вручну в tools/jre21/ через Files.")
         }
     }
 

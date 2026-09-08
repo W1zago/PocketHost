@@ -30,6 +30,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ANServer"
         android:requestLegacyExternalStorage="true"
+        android:memtagMode="off"
         tools:targetApi="31">
 
         <activity
