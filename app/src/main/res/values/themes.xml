@@ -1,13 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ANServer" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/purple_700</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorSecondaryVariant">@color/teal_700</item>
-        <item name="colorOnSecondary">@color/black</item>
-        <item name="android:statusBarColor">@color/purple_700</item>
+    <!-- PocketHost dark theme. Name kept (referenced from AndroidManifest). -->
+    <style name="Theme.ANServer" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorPrimaryContainer">@color/primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/on_primary_container</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorOnSecondary">@color/on_secondary</item>
+        <item name="colorSecondaryContainer">@color/secondary_container</item>
+        <item name="colorTertiary">@color/tertiary</item>
+        <item name="colorOnTertiary">@color/on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/tertiary_container</item>
+        <item name="colorError">@color/error</item>
+        <item name="colorErrorContainer">@color/error_container</item>
+        <item name="colorOnErrorContainer">@color/on_error_container</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="colorSurfaceVariant">@color/surface_high</item>
+        <item name="colorOnSurfaceVariant">@color/on_surface_variant</item>
+        <item name="colorOutline">@color/outline</item>
+        <item name="colorOutlineVariant">@color/outline_variant</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/surface_lowest</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- Reusable PocketHost components (rounded per design: cards 16dp, controls 8dp, pills full) -->
+    <style name="PocketHost.Card" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/surface_container</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeColor">@color/outline_variant</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="contentPadding">16dp</item>
+    </style>
+
+    <style name="PocketHost.Button.Primary" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/primary</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PocketHost.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
+        <item name="backgroundTint">@color/surface_high</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="strokeColor">@color/surface_highest</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+
+    <style name="PocketHost.Button.Destructive" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="backgroundTint">@color/badge_error_bg</item>
+        <item name="android:textColor">@color/error</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="strokeColor">@color/error_container</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+
+    <style name="PocketHost.Button.Start" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@color/primary_container</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PocketHost.Search" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxBackgroundColor">@color/surface_high</item>
+        <item name="boxStrokeColor">@color/outline_variant</item>
+        <item name="hintTextColor">@color/on_surface_variant</item>
+    </style>
+
+    <style name="PocketHost.Chip.Filter" parent="Widget.Material3.Chip.Filter">
+        <item name="chipBackgroundColor">@color/surface_high</item>
+        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="chipStrokeColor">@color/outline_variant</item>
+        <item name="chipStrokeWidth">1dp</item>
     </style>
 
     <style name="ExtraKey">

@@ -19,8 +19,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,7 +34,8 @@ import java.net.URL
 class DeviceScanActivity : AppCompatActivity() {
 
     private lateinit var container: LinearLayout
-    private val scope = CoroutineScope(Dispatchers.Main)
+    // H6: був CoroutineScope(Dispatchers.Main) з витоком при знищенні Activity —
+    // тепер lifecycleScope всюди (авто-cancel в onDestroy).
 
     private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) Toast.makeText(this, "Сповіщення дозволено", Toast.LENGTH_SHORT).show()
@@ -48,6 +49,7 @@ class DeviceScanActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         val scroll = ScrollView(this)
+        scroll.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.background))
         container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 32, 32, 64)
@@ -87,9 +89,10 @@ class DeviceScanActivity : AppCompatActivity() {
             text = "Перевірка..."
             gravity = Gravity.CENTER
             setPadding(0, 24, 0, 24)
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface_variant))
         }
         container.addView(loading)
-        scope.launch(Dispatchers.IO) {
+        lifecycleScope.launch(Dispatchers.IO) {
             val shellOk = checkEmbeddedShell()
             val storageOk = checkInternalStorage()
             val javaPath = try { com.anserver.app.embedded.EmbeddedJava.findJava(this@DeviceScanActivity) } catch (_: Exception) { null }
@@ -114,7 +117,8 @@ class DeviceScanActivity : AppCompatActivity() {
                         container.addView(TextView(this@DeviceScanActivity).apply {
                             text = "Java: ${res.javaPath}"
                             textSize = 11f
-                            setTextColor(0xFF666666.toInt())
+                            typeface = android.graphics.Typeface.MONOSPACE
+                            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface_variant))
                         })
                     }
                     addActions()
@@ -127,14 +131,17 @@ class DeviceScanActivity : AppCompatActivity() {
         val title = TextView(this).apply {
             text = "PocketHost — вбудований термінал"
             textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, 8)
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface))
         }
         val subtitle = TextView(this).apply {
             text = "Зовнішній Termux НЕ потрібен. Все працює всередині додатку без дозволу «керування Termux»."
-            textSize = 13f
+            textSize = 12f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 16)
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface_variant))
         }
         container.addView(title)
         container.addView(subtitle)
@@ -156,6 +163,7 @@ class DeviceScanActivity : AppCompatActivity() {
             text = "Примітка: SAF-папки та RUN_COMMAND більше не використовуються. Старі SAF-сервери запускаються в міграційному режимі у внутрішній папці."
             textSize = 12f
             setPadding(0, 24, 0, 0)
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface_variant))
         }
         container.addView(info)
     }
@@ -164,17 +172,25 @@ class DeviceScanActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 8, 0, 8)
+            setBackgroundResource(com.anserver.app.R.drawable.bg_section_card)
+            setPadding(24, 20, 24, 20)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 8) }
         }
+        val okColor = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.tertiary)
+        val errColor = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.error)
         val indicator = TextView(this).apply {
             text = if (ok) "✓" else "✗"
             textSize = 20f
-            setTextColor(if (ok) 0xFF2E7D32.toInt() else 0xFFC62828.toInt())
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(if (ok) okColor else errColor)
             setPadding(0, 0, 16, 0)
         }
         val label = TextView(this).apply {
             text = title
             textSize = 14f
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface))
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         val btn = MaterialButton(this).apply {
@@ -191,12 +207,11 @@ class DeviceScanActivity : AppCompatActivity() {
         val detail = TextView(this).apply {
             text = getDetail(title, ok)
             textSize = 11f
-            setPadding(48, 0, 0, 8)
-            setTextColor(0xFF666666.toInt())
+            setPadding(16, 0, 0, 12)
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.anserver.app.R.color.on_surface_variant))
         }
         container.addView(detail)
-        val divider = TextView(this).apply { text = "─".repeat(50); textSize = 8f; setTextColor(0xFFDDDDDD.toInt()) }
-        container.addView(divider)
     }
 
     private fun getDetail(title: String, ok: Boolean): String {
@@ -276,7 +291,7 @@ class DeviceScanActivity : AppCompatActivity() {
     }
 
     private fun refreshWithInternet() {
-        scope.launch {
+        lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) { checkInternet() }
             internetCache = result
             refresh()
@@ -315,7 +330,7 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun installJre() {
         Toast.makeText(this, "Завантаження JRE стартує при першому запуску Minecraft-сервера", Toast.LENGTH_LONG).show()
-        scope.launch(Dispatchers.IO) {
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
                 com.anserver.app.embedded.EmbeddedBootstrap.ensureJava(this@DeviceScanActivity) {}
             } catch (_: Exception) {}

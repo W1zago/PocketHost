@@ -14,7 +14,10 @@ import java.util.*
 class ServerAdapter(
     private val onServerClick: (Server) -> Unit,
     private val onServerStart: (Server) -> Unit,
-    private val onServerStop: (Server) -> Unit
+    private val onServerStop: (Server) -> Unit,
+    private val onServerRestart: (Server) -> Unit = {},
+    private val onServerConsole: (Server) -> Unit = {},
+    private val onServerFiles: (Server) -> Unit = {}
 ) : ListAdapter<Server, ServerAdapter.ServerViewHolder>(ServerDiffCallback()) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ServerViewHolder {
@@ -38,24 +41,74 @@ class ServerAdapter(
             binding.apply {
                 serverName.text = server.name
                 serverType.text = server.type.name
-                serverPort.text = "Port: ${server.port}"
-                serverStatus.text = server.status.name
+                serverPort.text = ":${server.port}"
 
-                val statusColor = when (server.status) {
-                    ServerStatus.RUNNING -> android.graphics.Color.GREEN
-                    ServerStatus.STOPPED -> android.graphics.Color.GRAY
-                    ServerStatus.STARTING -> android.graphics.Color.YELLOW
-                    ServerStatus.STOPPING -> android.graphics.Color.YELLOW
-                    ServerStatus.ERROR -> android.graphics.Color.RED
+                // Letter avatar, tinted by server type (design: icon box per runtime).
+                serverIcon.text = server.name.firstOrNull()?.uppercase() ?: "?"
+                serverIcon.setTextColor(
+                    when (server.type) {
+                        com.anserver.core.model.ServerType.MINECRAFT ->
+                            androidx.core.content.ContextCompat.getColor(root.context, com.anserver.app.R.color.tertiary)
+                        else ->
+                            androidx.core.content.ContextCompat.getColor(root.context, com.anserver.app.R.color.secondary)
+                    }
+                )
+
+                // Status badge: pill bg + dot + label, driven by REAL server state.
+                val ctx = root.context
+                val labelFg: Int
+                val dotDrawable: android.graphics.drawable.Drawable?
+                when (server.status) {
+                    ServerStatus.RUNNING -> {
+                        serverStatus.text = "Running"
+                        labelFg = androidx.core.content.ContextCompat.getColor(ctx, com.anserver.app.R.color.badge_running_fg)
+                        dotDrawable = androidx.core.content.ContextCompat.getDrawable(ctx, com.anserver.app.R.drawable.bg_dot_running)
+                    }
+                    ServerStatus.STARTING -> {
+                        serverStatus.text = "Starting"
+                        labelFg = androidx.core.content.ContextCompat.getColor(ctx, com.anserver.app.R.color.badge_warning_fg)
+                        dotDrawable = androidx.core.content.ContextCompat.getDrawable(ctx, com.anserver.app.R.drawable.bg_dot_warning)
+                    }
+                    ServerStatus.STOPPING -> {
+                        serverStatus.text = "Stopping"
+                        labelFg = androidx.core.content.ContextCompat.getColor(ctx, com.anserver.app.R.color.badge_warning_fg)
+                        dotDrawable = androidx.core.content.ContextCompat.getDrawable(ctx, com.anserver.app.R.drawable.bg_dot_warning)
+                    }
+                    ServerStatus.ERROR -> {
+                        serverStatus.text = "Error"
+                        labelFg = androidx.core.content.ContextCompat.getColor(ctx, com.anserver.app.R.color.badge_error_fg)
+                        dotDrawable = androidx.core.content.ContextCompat.getDrawable(ctx, com.anserver.app.R.drawable.bg_dot_error)
+                    }
+                    else -> {
+                        serverStatus.text = "Stopped"
+                        labelFg = androidx.core.content.ContextCompat.getColor(ctx, com.anserver.app.R.color.badge_idle_fg)
+                        dotDrawable = androidx.core.content.ContextCompat.getDrawable(ctx, com.anserver.app.R.drawable.bg_dot_idle)
+                    }
                 }
-                serverStatus.setTextColor(statusColor)
+                val pillBgRes = when (server.status) {
+                    ServerStatus.RUNNING -> com.anserver.app.R.drawable.bg_status_running
+                    ServerStatus.STARTING, ServerStatus.STOPPING -> com.anserver.app.R.drawable.bg_status_warning
+                    ServerStatus.ERROR -> com.anserver.app.R.drawable.bg_status_error
+                    else -> com.anserver.app.R.drawable.bg_status_idle
+                }
+                statusBadge.setBackgroundResource(pillBgRes)
+                serverStatus.setTextColor(labelFg)
+                statusDot.background = dotDrawable
 
+                // Uptime (real: now - lastStarted while running) + last run.
                 val lastStarted = server.lastStarted
-                if (lastStarted != null) {
-                    val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    serverLastStarted.text = "Last started: ${dateFormat.format(Date(lastStarted))}"
+                if ((server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) && lastStarted != null) {
+                    serverUptime.text = formatUptime(System.currentTimeMillis() - lastStarted)
+                } else if (server.status == ServerStatus.STOPPING) {
+                    serverUptime.text = "…"
                 } else {
-                    serverLastStarted.text = "Never started"
+                    serverUptime.text = "—"
+                }
+                if (lastStarted != null) {
+                    val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                    serverLastStarted.text = dateFormat.format(Date(lastStarted))
+                } else {
+                    serverLastStarted.text = "Never"
                 }
 
                 root.setOnClickListener {
@@ -70,9 +123,34 @@ class ServerAdapter(
                     onServerStop(server)
                 }
 
-                btnStart.isEnabled = server.status == ServerStatus.STOPPED
-                btnStop.isEnabled = server.status == ServerStatus.RUNNING
+                btnRestart.setOnClickListener {
+                    onServerRestart(server)
+                }
+
+                btnConsole.setOnClickListener {
+                    onServerConsole(server)
+                }
+
+                btnFiles.setOnClickListener {
+                    onServerFiles(server)
+                }
+
+                // State machine: buttons follow ACTUAL state (pr.md).
+                btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
+                btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
+                btnRestart.isEnabled = server.status == ServerStatus.RUNNING
             }
+        }
+
+        private fun formatUptime(millis: Long): String {
+            if (millis < 0) return "—"
+            val minutes = millis / 60000
+            if (minutes < 1) return "just now"
+            if (minutes < 60) return "${minutes}m"
+            val hours = minutes / 60
+            if (hours < 24) return "${hours}h ${minutes % 60}m"
+            val days = hours / 24
+            return "${days}d ${hours % 24}h"
         }
     }
 

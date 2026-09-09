@@ -1,19 +1,33 @@
 package com.anserver.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
+import android.os.StatFs
 import android.text.format.Formatter
+import android.util.Log
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
+import com.anserver.app.R
 import com.anserver.app.databinding.ActivityServerDetailBinding
 import com.anserver.app.embedded.EmbeddedPaths
+import com.anserver.app.embedded.EmbeddedProcessManager
 import com.anserver.app.service.ServerService
+import com.anserver.app.util.ServerProperties
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerStatus
 import com.anserver.core.model.ServerType
+import com.google.android.material.slider.Slider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -21,13 +35,27 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.NetworkInterface
 import java.util.Collections
+import java.util.Locale
 
 class ServerDetailActivity : AppCompatActivity() {
 
+    companion object {
+        private const val TAG = "ServerDetailActivity"
+    }
+
     private lateinit var binding: ActivityServerDetailBinding
-    private val repository = ANServerApplication.serverRepository
+    // Уніфіковано з MainActivity/CreateServerActivity: безпечний lazy-доступ.
+    // Якщо Application не встиг проініціалізувати репозиторій (пошкоджений DataStore),
+    // створюємо локальний fallback замість крашу на lateinit.
+    private val repository by lazy {
+        runCatching { ANServerApplication.serverRepository }.getOrElse { e ->
+            Log.e(TAG, "repo not ready, using fallback", e)
+            com.anserver.core.repository.ServerRepository(this@ServerDetailActivity)
+        }
+    }
     private var serverId: String? = null
     private var currentServer: Server? = null
+    private var deviceIp: String = "…"
     // Блокує збереження під час програмного заповнення контролів у updateUI
     private var suppressSettingsSave = false
 
@@ -59,6 +87,41 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnConsole.setOnClickListener { openConsole() }
         binding.btnFiles.setOnClickListener { openFileManager() }
         binding.btnDelete.setOnClickListener { deleteServer() }
+        binding.btnOpenTerminal.setOnClickListener { openConsole() }
+        binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
+        // Section tabs: real navigation (scroll within screen or open screen).
+        binding.tabOverview.setOnClickListener { binding.scrollView.smoothScrollTo(0, 0) }
+        binding.tabConsole.setOnClickListener { openConsole() }
+        binding.tabFiles.setOnClickListener { openFileManager() }
+        binding.tabTelemetry.setOnClickListener {
+            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.resourcesCard.top) }
+        }
+        binding.tabConfig.setOnClickListener {
+            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.menu_server_detail, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_copy_address -> { copyBindAddress(); true }
+            R.id.action_delete -> { deleteServer(); true }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun copyBindAddress() {
+        val server = currentServer ?: return
+        val text = "$deviceIp:${server.port}"
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("server address", text))
+            Toast.makeText(this, "Скопійовано: $text", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
     }
 
     private fun setupMinecraftSettings() {
@@ -71,9 +134,9 @@ class ServerDetailActivity : AppCompatActivity() {
         }
         // Зберігаємо лише коли палець відпущено, а не на кожен тік
         binding.sliderViewDistance.addOnSliderTouchListener(
-            object : com.google.android.material.slider.Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {}
-                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+            object : Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: Slider) {}
+                override fun onStopTrackingTouch(slider: Slider) {
                     if (suppressSettingsSave) return
                     saveMinecraftSettings()
                 }
@@ -104,10 +167,10 @@ class ServerDetailActivity : AppCompatActivity() {
                 if (server.status == ServerStatus.RUNNING ||
                     server.status == ServerStatus.STARTING
                 ) {
-                    android.widget.Toast.makeText(
+                    Toast.makeText(
                         this@ServerDetailActivity,
                         "Збережено. Застосується після рестарту сервера.",
-                        android.widget.Toast.LENGTH_SHORT
+                        Toast.LENGTH_SHORT
                     ).show()
                 } else {
                     try {
@@ -115,24 +178,24 @@ class ServerDetailActivity : AppCompatActivity() {
                             this@ServerDetailActivity, server.id,
                             server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
                         )
-                        com.anserver.app.util.ServerProperties.patch(
+                        ServerProperties.patch(
                             workDir,
                             server.port,
                             !allowPirate,
                             viewDistance,
                             server.name
                         )
-                        android.widget.Toast.makeText(
+                        Toast.makeText(
                             this@ServerDetailActivity,
                             "Збережено і застосовано.",
-                            android.widget.Toast.LENGTH_SHORT
+                            Toast.LENGTH_SHORT
                         ).show()
                     } catch (e: Exception) {
-                        android.util.Log.w("ServerDetail", "props patch failed", e)
+                        Log.w(TAG, "props patch failed", e)
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ServerDetail", "save settings failed", e)
+                Log.e(TAG, "save settings failed", e)
             }
         }
     }
@@ -189,14 +252,22 @@ class ServerDetailActivity : AppCompatActivity() {
                                     binding.tvErrorMessage.text = newContent.lines().lastOrNull {
                                         it.contains("Error", ignoreCase = true) || it.contains("Failed", ignoreCase = true)
                                     } ?: ""
-                                    binding.tvErrorMessage.visibility = android.view.View.VISIBLE
+                                    binding.tvErrorMessage.visibility = View.VISIBLE
+                                }
+                            }
+                            // Console stream preview: real tail of server.log (last 8 lines).
+                            val tail = newContent.lines().filter { it.isNotBlank() }.takeLast(8).joinToString("\n")
+                            if (tail.isNotBlank()) {
+                                runOnUiThread {
+                                    binding.tvLogPreview.text = tail.take(1200)
+                                    binding.tvLogLive.text = "● LIVE"
                                 }
                             }
                             offset = currentLength
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ServerDetailActivity", "Error reading log", e)
+                    Log.e(TAG, "Error reading log", e)
                 }
                 delay(2000)
             }
@@ -204,21 +275,57 @@ class ServerDetailActivity : AppCompatActivity() {
     }
 
     private fun updateUI(server: Server) {
-        android.util.Log.d("ServerDetailActivity", "updateUI ${server.status}")
+        Log.d(TAG, "updateUI ${server.status}")
         currentServer = server
         binding.apply {
             serverName.text = server.name
             serverType.text = server.type.name
-            serverPort.text = "Port: ${server.port}"
-            serverStatus.text = server.status.name
-            val statusColor = when (server.status) {
-                ServerStatus.RUNNING -> android.graphics.Color.GREEN
-                ServerStatus.STOPPED -> android.graphics.Color.GRAY
-                ServerStatus.STARTING -> android.graphics.Color.rgb(255, 165, 0)
-                ServerStatus.STOPPING -> android.graphics.Color.YELLOW
-                ServerStatus.ERROR -> android.graphics.Color.RED
+            serverPort.text = ":${server.port}"
+            serverIcon.text = server.name.firstOrNull()?.uppercase() ?: "?"
+            serverIcon.setTextColor(
+                ContextCompat.getColor(
+                    this@ServerDetailActivity,
+                    if (server.type == ServerType.MINECRAFT) R.color.tertiary
+                    else R.color.secondary
+                )
+            )
+            // Status badge follows REAL state (same mapping as server list).
+            val pillBgRes = when (server.status) {
+                ServerStatus.RUNNING -> R.drawable.bg_status_running
+                ServerStatus.STARTING, ServerStatus.STOPPING -> R.drawable.bg_status_warning
+                ServerStatus.ERROR -> R.drawable.bg_status_error
+                else -> R.drawable.bg_status_idle
             }
-            serverStatus.setTextColor(statusColor)
+            val dotRes = when (server.status) {
+                ServerStatus.RUNNING -> R.drawable.bg_dot_running
+                ServerStatus.STARTING, ServerStatus.STOPPING -> R.drawable.bg_dot_warning
+                ServerStatus.ERROR -> R.drawable.bg_dot_error
+                else -> R.drawable.bg_dot_idle
+            }
+            val labelRes = when (server.status) {
+                ServerStatus.RUNNING -> R.color.badge_running_fg
+                ServerStatus.STARTING, ServerStatus.STOPPING -> R.color.badge_warning_fg
+                ServerStatus.ERROR -> R.color.badge_error_fg
+                else -> R.color.badge_idle_fg
+            }
+            val label = when (server.status) {
+                ServerStatus.RUNNING -> "Running"
+                ServerStatus.STARTING -> "Starting"
+                ServerStatus.STOPPING -> "Stopping"
+                ServerStatus.ERROR -> "Error"
+                else -> "Stopped"
+            }
+            statusBadge.setBackgroundResource(pillBgRes)
+            statusDot.setBackgroundResource(dotRes)
+            serverStatus.text = label
+            serverStatus.setTextColor(ContextCompat.getColor(this@ServerDetailActivity, labelRes))
+            // Uptime is real: now - lastStarted while running.
+            val lastStarted = server.lastStarted
+            serverUptime.text = if ((server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) && lastStarted != null) {
+                "Up ${formatUptime(System.currentTimeMillis() - lastStarted)}"
+            } else {
+                "Up —"
+            }
             btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
             btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
             btnRestart.isEnabled = server.status == ServerStatus.RUNNING
@@ -229,14 +336,24 @@ class ServerDetailActivity : AppCompatActivity() {
                     server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
                 ).absolutePath
             } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
-            serverIpAddress.text = "Папка: $workDirStr"
+            // IP -> IP view (serverIpAddress + tvBindAddress), папка -> folder view.
+            // Було: serverIpAddress показував "Папка: /data/.../files/servers/..." — переплутана мітка.
+            serverIpAddress.text = "$deviceIp:${server.port}"
+            serverFolderPath.text = "Папка: $workDirStr"
+            // LAN bind line uses the real device IP + this server's port.
+            tvBindAddress.text = "$deviceIp:${server.port}"
             // Картка налаштувань — лише для Minecraft, значення зі збереженого конфігу
             if (server.type == ServerType.MINECRAFT) {
-                minecraftSettingsCard.visibility = android.view.View.VISIBLE
+                minecraftSettingsCard.visibility = View.VISIBLE
+                tabConfig.visibility = View.VISIBLE
                 suppressSettingsSave = true
                 try {
                     switchPirate.isChecked = !server.config.effectiveOnlineMode
-                    sliderViewDistance.value = server.config.effectiveViewDistance.toFloat()
+                    try {
+                        sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
+                    } catch (e: IllegalStateException) {
+                        Log.w(TAG, "snap viewDistance fallback", e)
+                    }
                     tvViewDistance.text =
                         "Дальність промальовки: ${server.config.effectiveViewDistance} чанків"
                 } catch (_: Exception) {
@@ -244,9 +361,20 @@ class ServerDetailActivity : AppCompatActivity() {
                     suppressSettingsSave = false
                 }
             } else {
-                minecraftSettingsCard.visibility = android.view.View.GONE
+                minecraftSettingsCard.visibility = View.GONE
+                tabConfig.visibility = View.GONE
             }
         }
+    }
+
+    private fun formatUptime(millis: Long): String {
+        if (millis < 0) return "—"
+        val minutes = millis / 60000
+        if (minutes < 1) return "just now"
+        if (minutes < 60) return "${minutes}m"
+        val hours = minutes / 60
+        if (hours < 24) return "${hours}h ${minutes % 60}m"
+        return "${hours / 24}d ${hours % 24}h"
     }
 
     private fun startServer() {
@@ -255,7 +383,7 @@ class ServerDetailActivity : AppCompatActivity() {
                 action = "com.anserver.app.START_SERVER"
                 putExtra("server_id", id)
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
         }
     }
 
@@ -265,7 +393,7 @@ class ServerDetailActivity : AppCompatActivity() {
                 action = "com.anserver.app.STOP_SERVER"
                 putExtra("server_id", id)
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
         }
     }
 
@@ -281,7 +409,7 @@ class ServerDetailActivity : AppCompatActivity() {
                 waited += 1000
                 try {
                     val id = serverId ?: break
-                    if (!com.anserver.app.embedded.EmbeddedProcessManager.isRunning(id)) break
+                    if (!EmbeddedProcessManager.isRunning(id)) break
                 } catch (_: Exception) { break }
             }
             startServer()
@@ -319,7 +447,7 @@ class ServerDetailActivity : AppCompatActivity() {
                             action = "com.anserver.app.STOP_SERVER"
                             putExtra("server_id", id)
                         }
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) startForegroundService(stop) else startService(stop)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(stop) else startService(stop)
                         delay(1000)
                     }
                 }
@@ -355,7 +483,7 @@ class ServerDetailActivity : AppCompatActivity() {
                         if (allowed) {
                             dir.deleteRecursively()
                         } else {
-                            android.util.Log.w("ServerDetail", "skip delete outside allowed roots: $dirCanon")
+                            Log.w(TAG, "skip delete outside allowed roots: $dirCanon")
                         }
                     }
                 } catch (_: Exception) {}
@@ -380,10 +508,10 @@ class ServerDetailActivity : AppCompatActivity() {
                     // не чекаючи 10с liveness-poll сервіса.
                     try {
                         if (s != null && s.status == ServerStatus.RUNNING &&
-                            !com.anserver.app.embedded.EmbeddedProcessManager.isRunning(id)
+                            !EmbeddedProcessManager.isRunning(id)
                         ) {
-                            android.util.Log.i(
-                                "ServerDetailActivity",
+                            Log.i(
+                                TAG,
                                 "onResume: facts dead but status RUNNING, syncing STOPPED $id"
                             )
                             repository.updateServerStatus(id, ServerStatus.STOPPED)
@@ -398,20 +526,45 @@ class ServerDetailActivity : AppCompatActivity() {
 
     private fun updateIpAddress() {
         val ipAddress = getLocalIpAddress()
-        android.util.Log.d("ServerDetailActivity", "IP $ipAddress")
+        deviceIp = ipAddress
+        Log.d(TAG, "IP $ipAddress")
+        try {
+            val port = currentServer?.port
+            binding.tvBindAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
+            // Hero-рядок serverIpAddress — теж IP (папка живе в serverFolderPath).
+            binding.serverIpAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
+        } catch (_: Exception) {}
     }
 
+    @Suppress("DEPRECATION")
     private fun getLocalIpAddress(): String {
+        // H5: primary — NetworkInterface (без дозволів, без deprecated API).
+        // WifiManager.connectionInfo — лише secondary best-effort в try/catch
+        // (deprecated + потребує location-дозволу на Android 10+).
         try {
-            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val wifiInfo = wifiManager.connectionInfo
-            val ipInt = wifiInfo.ipAddress
-            if (ipInt != 0) {
-                val ip = Formatter.formatIpAddress(ipInt)
-                return ip
-            }
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
             for (intf in interfaces) {
+                try {
+                    if (!intf.isUp || intf.isLoopback) continue
+                } catch (_: Exception) { continue }
+                val addrs = Collections.list(intf.inetAddresses)
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress) {
+                        val hostAddress = addr.hostAddress
+                        if (hostAddress != null && hostAddress.indexOf(':') < 0) {
+                            // Приватні діапазони першими, але повернемо перший IPv4 взагалі.
+                            if (hostAddress.startsWith("192.168.") || hostAddress.startsWith("10.") ||
+                                hostAddress.startsWith("172.")
+                            ) return hostAddress
+                        }
+                    }
+                }
+            }
+            // Другий прохід: будь-який IPv4 якщо приватного нема.
+            for (intf in interfaces) {
+                try {
+                    if (!intf.isUp || intf.isLoopback) continue
+                } catch (_: Exception) { continue }
                 val addrs = Collections.list(intf.inetAddresses)
                 for (addr in addrs) {
                     if (!addr.isLoopbackAddress) {
@@ -421,7 +574,32 @@ class ServerDetailActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("ServerDetailActivity", "Error getting IP", e)
+            Log.e(TAG, "Error getting IP via NetworkInterface", e)
+        }
+        // Secondary: WifiManager — лише якщо є location-дозвіл, інакше пропускаємо.
+        try {
+            val hasLocation = try {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    this, android.Manifest.permission.ACCESS_FINE_LOCATION
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        this, android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) { false }
+            if (hasLocation) {
+                @Suppress("DEPRECATION")
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                val wifiInfo = try { wifiManager.connectionInfo } catch (_: Exception) { null }
+                val ipInt = wifiInfo?.ipAddress ?: 0
+                if (ipInt != 0) {
+                    return Formatter.formatIpAddress(ipInt)
+                }
+            } else {
+                Log.d(TAG, "getLocalIpAddress: skip WifiManager (no location perm)")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting IP via WifiManager", e)
         }
         return "Unknown"
     }
@@ -437,23 +615,34 @@ class ServerDetailActivity : AppCompatActivity() {
 
     private fun updateSystemResources() {
         try {
-            binding.tvCpuUsage.text = "Термінал: вбудований (без Termux)"
+            // Uptime tile: real, from lastStarted while running.
+            val server = currentServer
+            val lastStarted = server?.lastStarted
+            binding.tileUptime.text = if (
+                (server?.status == ServerStatus.RUNNING || server?.status == ServerStatus.STARTING) &&
+                lastStarted != null
+            ) {
+                formatUptime(System.currentTimeMillis() - lastStarted)
+            } else {
+                "—"
+            }
             val runtime = Runtime.getRuntime()
             val totalMem = runtime.totalMemory() / 1024 / 1024
             val freeMem = runtime.freeMemory() / 1024 / 1024
             val used = totalMem - freeMem
             val max = runtime.maxMemory() / 1024 / 1024
-            binding.tvMemoryUsage.text = "Memory: $used MB / $max MB (heap $used/$totalMem)"
+            binding.tileMemory.text = "$used/$max MB"
             val cores = runtime.availableProcessors()
-            binding.tvCpuCores.text = "CPU Cores: $cores"
+            binding.tileCores.text = cores.toString()
             try {
-                val stat = android.os.StatFs(filesDir.absolutePath)
-                val totalBytes = stat.totalBytes / 1024 / 1024 / 1024
-                val freeBytes = stat.availableBytes / 1024 / 1024 / 1024
-                binding.tvCpuUsage.text = "Вбудований термінал | Disk: ${totalBytes - freeBytes}GB / ${totalBytes}GB"
-            } catch (_: Exception) {}
+                val stat = StatFs(filesDir.absolutePath)
+                val freeGb = stat.availableBytes / 1024.0 / 1024.0 / 1024.0
+                binding.tileDisk.text = String.format(Locale.US, "%.1f GB", freeGb)
+            } catch (_: Exception) {
+                binding.tileDisk.text = "—"
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "updateSystemResources failed", e)
         }
     }
 }

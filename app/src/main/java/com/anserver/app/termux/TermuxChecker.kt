@@ -81,13 +81,10 @@ object TermuxChecker {
     }
 
     fun isStorageSetup(context: Context): Boolean {
-        // We check persisted URI perms + termux storage symlink via RUN_COMMAND is async.
-        // Synchronous part: if we have at least one persisted SAF permission, assume storage setup pending RUN_COMMAND check later.
-        // Pure check for now: return true if persisted permissions exist, else false to trigger gate instruction.
+        // Вбудований термінал не потребує SAF: завжди true, реальна перевірка запису
+        // робиться через EmbeddedPaths.isDirWritable перед стартом.
         return try {
-            val persisted = context.contentResolver.persistedUriPermissions
-            // If we have any SAF perms, consider storage setup as "maybe" true; actual ls ~/storage check done via TermuxBridge
-            // For gate, we require at least not missing - but to avoid false gate, return true here and let TermuxBridge verify lazily.
+            context.contentResolver.persistedUriPermissions
             true
         } catch (_: Exception) { true }
     }

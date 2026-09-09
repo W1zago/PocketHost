@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PocketHost spacing (8pt grid, 4pt sub-grid) -->
+    <dimen name="ph_2xs">2dp</dimen>
+    <dimen name="ph_xs">4dp</dimen>
+    <dimen name="ph_sm">8dp</dimen>
+    <dimen name="ph_md">12dp</dimen>
+    <dimen name="ph_lg">16dp</dimen>
+    <dimen name="ph_xl">20dp</dimen>
+    <dimen name="ph_2xl">24dp</dimen>
+    <dimen name="ph_3xl">32dp</dimen>
+    <dimen name="ph_screen_margin">16dp</dimen>
+    <dimen name="ph_card_radius">16dp</dimen>
+    <dimen name="ph_control_radius">8dp</dimen>
+    <dimen name="ph_dot">6dp</dimen>
+</resources>

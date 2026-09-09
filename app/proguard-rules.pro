@@ -1,8 +1,8 @@
 -keep class com.anserver.** { *; }
 -keepclassmembers class com.anserver.** { *; }
 
--keep class com.anserver.native.NativeBridge { *; }
--keepclassmembers class com.anserver.native.NativeBridge { *; }
+-keep class com.anserver.app.jvm.PocketJvm { *; }
+-keepclassmembers class com.anserver.app.jvm.PocketJvm { *; }
 
 -keepattributes Signature
 -keepattributes *Annotation*

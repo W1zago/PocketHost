@@ -195,11 +195,27 @@ object EmbeddedJava {
 
     /**
      * Перевіряє як реально запускається java і підбирає робочу форму команди.
-     * P1: напряму. P2: лінкер + env + прапорець купи (форма як у сервера).
-     * P3: те саме без env (якщо env ламає лінкер — побачимо в лозі).
+     * P1: напряму. P2: лінкер + env (форма як у сервера, але БЕЗ -Xmx: прапорець купи
+     * ніколи не має стояти на місці executable — інакше linker падає з
+     * `expected absolute path: "-Xmx64M"`). P3: те саме без env.
      * У лог пише кожен крок: пристрій сам покаже що йому підходить.
+     *
+     * P0 FORK-fix: argv[0] має бути абсолютним шляхом до java (відносний "java"
+     * з PATH дає `expected absolute path: "-Xmx64M"` — linker пропускає неабсолютний
+     * argv[1] і чіпляється до наступного). Тому неабсолютний шлях одразу відхиляємо.
+     * Також перевіряємо libjli.so перед exec (інакше `CANNOT LINK EXECUTABLE ...
+     * library "libjli.so" not found`).
      */
     fun probeJava(javaPath: String, log: (String) -> Unit = {}): JavaLaunch {
+        // argv[0] мусить бути абсолютним — інакше linker візьме -Xmx за executable.
+        if (!File(javaPath).isAbsolute) {
+            log("Java exec: шлях не абсолютний ($javaPath) — exec через лінкер неможливий, потрібен абсолютний шлях")
+            return JavaLaunch(javaPath)
+        }
+        if (!hasLibJli(javaPath)) {
+            log("Java exec: WARN libjli.so не знайдено поруч з $javaPath — linker дасть CANNOT LINK EXECUTABLE")
+            // Не відмовляємо одразу: in-process (dlopen) може спрацювати, а probe нижче покаже.
+        }
         val directOut = runAndFirstLine(listOf(javaPath, "-version"))
         val directVer = directOut?.takeIf { looksLikeJavaVersion(it) }
         if (directVer != null) {
@@ -214,8 +230,11 @@ object EmbeddedJava {
             return JavaLaunch(javaPath)
         }
         val env = linkerEnv(javaPath)
-        // P2: повна форма серверної команди (з прапорцем купи) + env.
-        val shape = listOf(linker, javaPath, "-Xmx64M", "-version")
+        // P2: форма `linker <abs java> -version` + env. БЕЗ -Xmx: він ніколи не має
+        // стояти там де linker чекає executable (інакше `expected absolute path: "-Xmx64M"`).
+        // ProcessBuilder не вміє підміняти argv[0] окремо від executable (як execve),
+        // тому єдиний коректний виклик — linker першим, java абсолютним другим.
+        val shape = listOf(linker, javaPath, "-version")
         val vEnvRaw = runAndFirstLine(shape, env)
         val vEnv = vEnvRaw?.takeIf { looksLikeJavaVersion(it) }
         if (vEnv != null) {
@@ -237,19 +256,58 @@ object EmbeddedJava {
     /**
      * Оточення для запуску через лінкер: щоб libjli/libjvm знаходились
      * за LD_LIBRARY_PATH незалежно від того, що бачить лаунчер в argv[0].
+     * P0: має включати jre/lib/server + jre/lib (+ jre/lib/jli де лежить libjli.so),
+     * інакше linker падає `library "libjli.so" not found`. JAVA_HOME — обов'язково.
      */
     fun linkerEnv(javaPath: String): Map<String, String> {
         return try {
             val bin = File(javaPath).parentFile ?: return emptyMap()
             if (bin.name != "bin") return emptyMap()
             val home = bin.parentFile ?: return emptyMap()
-            val dirs = listOf(File(home, "lib"), File(home, "lib/server"))
+            // Порядок як у PocketJvm.ldLibraryPathFor, але з lib/server першим
+            // (там де libjvm.so) + lib + lib/jli (там де libjli.so на Pojav-JRE).
+            val dirs = listOf(
+                File(home, "lib/server"),
+                File(home, "lib"),
+                File(home, "lib/jli")
+            )
                 .filter { it.isDirectory }
                 .joinToString(":") { it.absolutePath }
             val env = mutableMapOf("JAVA_HOME" to home.absolutePath)
             if (dirs.isNotEmpty()) env["LD_LIBRARY_PATH"] = dirs
             env
         } catch (_: Exception) { emptyMap() }
+    }
+
+    /**
+     * P0: чи є libjli.so поруч з java (перевірка перед exec через лінкер).
+     * Шукаємо в lib/jli/libjli.so, lib/libjli.so, lib/server/libjli.so.
+     */
+    fun hasLibJli(javaPath: String): Boolean {
+        return try {
+            val bin = File(javaPath).parentFile ?: return false
+            if (bin.name != "bin") return false
+            val home = bin.parentFile ?: return false
+            listOf(
+                File(home, "lib/jli/libjli.so"),
+                File(home, "lib/libjli.so"),
+                File(home, "lib/server/libjli.so")
+            ).any { it.isFile && it.length() > 0 }
+        } catch (_: Exception) { false }
+    }
+
+    /** P0: абсолютний шлях до libjli.so або null (для діагностики в лозі). */
+    fun findLibJli(javaPath: String): File? {
+        return try {
+            val bin = File(javaPath).parentFile ?: return null
+            if (bin.name != "bin") return null
+            val home = bin.parentFile ?: return null
+            listOf(
+                File(home, "lib/jli/libjli.so"),
+                File(home, "lib/libjli.so"),
+                File(home, "lib/server/libjli.so")
+            ).firstOrNull { it.isFile }
+        } catch (_: Exception) { null }
     }
 
     fun javaVersion(javaPath: String): String? {

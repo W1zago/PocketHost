@@ -4,16 +4,23 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:padding="12dp"
+    android:gravity="center_vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
     android:background="?attr/selectableItemBackground">
 
     <TextView
         android:id="@+id/fileIcon"
         android:layout_width="40dp"
         android:layout_height="40dp"
+        android:background="@drawable/bg_icon_box"
         android:gravity="center"
-        android:text="📄"
-        android:textSize="24sp" />
+        android:text="D"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/secondary" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -27,8 +34,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="File Name"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textStyle="bold"
+            android:textColor="@color/on_surface"
             android:maxLines="1"
             android:ellipsize="end" />
 
@@ -39,21 +47,34 @@
             android:layout_marginTop="4dp">
 
             <TextView
-                android:id="@+id/fileSize"
-                android:layout_width="0dp"
+                android:id="@+id/filePerms"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:text="rwx"
+                android:textSize="10sp"
+                android:textColor="@color/tertiary"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/fileSize"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
                 android:text="Size"
-                android:textSize="12sp"
-                android:textColor="@android:color/darker_gray" />
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant"
+                android:fontFamily="monospace" />
 
             <TextView
                 android:id="@+id/fileDate"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="end"
                 android:text="Date"
-                android:textSize="12sp"
-                android:textColor="@android:color/darker_gray" />
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant"
+                android:fontFamily="monospace" />
 
         </LinearLayout>
 

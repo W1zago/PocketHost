@@ -697,7 +697,8 @@ object InProcessServer {
                 log("Сервер вже запущений — повторний старт пропущено")
                 return StartResult.ALREADY_RUNNING
             }
-            log("ERROR: JVM вже створена з іншим classpath. Перезапусти додаток щоб запустити інший сервер in-process.")
+            log("ERROR: Зупини інший сервер (інший classpath, потрібен рестарт апки).")
+            log("JVM вже створена з іншим classpath — другий Minecraft in-process не стартує.")
             log("було: $liveCp")
             log("треба: $wantCp")
             synchronized(this) { state = State.STOPPED; serverId = null }

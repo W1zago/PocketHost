@@ -10,6 +10,8 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -22,7 +24,17 @@ private val gson = Gson()
 
 class ServerRepository(private val context: Context) {
     private val servers = MutableStateFlow<Map<String, Server>>(emptyMap())
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // H6: SupervisorJob щоб одна впавша persist не вбивала весь scope + close() для скасування.
+    private val repoJob = SupervisorJob()
+    private val scope = CoroutineScope(repoJob + Dispatchers.IO)
+
+    /** Скасувати фонові задачі репозиторію (викликати при знищенні власника). */
+    fun close() {
+        try { scope.cancel() } catch (_: Exception) {}
+    }
+
+    /** Аліас для close() — скасування scope. */
+    fun cancel() = close()
 
     init {
         // Load persisted servers async with sanitization for Pure Termux
@@ -135,11 +147,6 @@ class ServerRepository(private val context: Context) {
             servers.value = servers.value + (id to updated)
             persist()
         }
-    }
-
-    @Deprecated("Use termuxExecutionId")
-    suspend fun updateServerPid(id: String, pid: Int) {
-        updateTermuxExecutionId(id, pid)
     }
 
     suspend fun updateTermuxExecutionId(id: String, executionId: Int?) {

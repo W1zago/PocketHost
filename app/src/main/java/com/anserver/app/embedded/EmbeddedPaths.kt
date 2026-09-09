@@ -21,6 +21,8 @@ object EmbeddedPaths {
 
     enum class StorageKind { INTERNAL, EXTERNAL, CUSTOM }
 
+    private val SAFE_ID_REGEX = Regex("[^a-zA-Z0-9._-]")
+
     fun kindOfUri(workDirUri: String): StorageKind = when {
         workDirUri.startsWith("external://") -> StorageKind.EXTERNAL
         workDirUri.startsWith("/") || workDirUri.startsWith("file://") -> StorageKind.CUSTOM
@@ -123,7 +125,7 @@ object EmbeddedPaths {
     }
 
     private fun sanitizeId(serverId: String): String =
-        serverId.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(64).ifEmpty { "server" }
+        serverId.replace(SAFE_ID_REGEX, "_").take(64).ifEmpty { "server" }
 
     fun serverDir(context: Context, serverId: String, kind: StorageKind = StorageKind.INTERNAL): File {
         if (kind == StorageKind.EXTERNAL) {

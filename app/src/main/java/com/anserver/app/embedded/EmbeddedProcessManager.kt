@@ -19,6 +19,10 @@ import java.io.File
 object EmbeddedProcessManager {
 
     private const val TAG = "EmbeddedTerminal"
+    // MAX 2 для shell-процесів, але in-process JVM — лише ОДНА на процес
+    // (-Djava.class.path фіксується при створенні JVM, інший classpath = потрібен
+    // рестарт апки). Тому для Minecraft діє додатковий canStartMinecraftCheck()
+    // нижче, а не лише цей ліміт.
     const val MAX_SERVERS = 2
 
     data class EmbeddedSession(
@@ -55,6 +59,26 @@ object EmbeddedProcessManager {
             return EmbeddedSession(serverId, null)
         }
         running[serverId]?.session
+    }
+
+    /**
+     * C4: чи можна стартувати Minecraft-сервер in-process.
+     * JVM одна на процес: якщо вже біжить ІНШИЙ сервер — другий з іншим classpath
+     * вмре з FAILED_DEFINITIVE. Чесно відмовляємо одразу з user-friendly причиною.
+     * @return Pair(canStart, reasonIfNot) — reason вже українською для логу/Toast.
+     */
+    fun canStartMinecraft(serverId: String): Pair<Boolean, String> {
+        try {
+            val liveId = InProcessServer.serverId
+            if (InProcessServer.isRunning() && liveId != null && liveId != serverId) {
+                return false to "Зупини інший сервер (інший classpath, потрібен рестарт апки)"
+            }
+        } catch (_: Exception) {}
+        val count = try { runningCount() } catch (_: Exception) { 0 }
+        if (count >= MAX_SERVERS) {
+            return false to "Зупини перший сервер (максимум $MAX_SERVERS)"
+        }
+        return true to ""
     }
 
     /**
@@ -103,6 +127,40 @@ object EmbeddedProcessManager {
                 env["ANDROID_DATA"] = "/data"
                 env["ANDROID_ROOT"] = "/system"
                 for ((k, v) in envExtra) env[k] = v
+                // P0 FORK-fix: якщо команда йде через системний лінкер
+                // ([linker, <abs java>, ...]), LD_LIBRARY_PATH+JAVA_HOME обов'язкові,
+                // інакше `library "libjli.so" not found`. Якщо викликач не передав —
+                // добудовуємо з linkerEnv за java-шляхом (command[1]).
+                if (command.isNotEmpty() && command[0].contains("linker")) {
+                    val javaPath = command.getOrNull(1) ?: ""
+                    if (javaPath.isEmpty() || !File(javaPath).isAbsolute) {
+                        val msg = "Відмова: argv[1] має бути абсолютним шляхом до java (отримано '$javaPath'), " +
+                            "інакше linker падає `expected absolute path: \"-Xmx64M\"`"
+                        Log.e(TAG, msg)
+                        appendLog(logFile, "\n[ПОМИЛКА ЗАПУСКУ: $msg]\n")
+                        return false
+                    }
+                    if (!EmbeddedJava.hasLibJli(javaPath)) {
+                        val jli = try { EmbeddedJava.findLibJli(javaPath)?.absolutePath ?: "не знайдено" } catch (_: Exception) { "?" }
+                        Log.e(TAG, "libjli.so missing for $javaPath (found: $jli)")
+                        appendLog(logFile, "\n[ПОПЕРЕДЖЕННЯ: libjli.so не знайдено ($jli) — можливий CANNOT LINK EXECUTABLE]\n")
+                    }
+                    if (!env.containsKey("LD_LIBRARY_PATH") || !env.containsKey("JAVA_HOME")) {
+                        try {
+                            val fill = EmbeddedJava.linkerEnv(javaPath)
+                            for ((k, v) in fill) if (!env.containsKey(k)) env[k] = v
+                            Log.i(TAG, "linker env injected LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]} JAVA_HOME=${env["JAVA_HOME"]}")
+                        } catch (_: Exception) {}
+                    }
+                    // -Xmx ніколи не має бути на місці executable (command[1]).
+                    val exe = command.getOrNull(1) ?: ""
+                    if (exe.startsWith("-")) {
+                        val msg = "Відмова: linker executable не може бути прапорцем ($exe)"
+                        Log.e(TAG, msg)
+                        appendLog(logFile, "\n[ПОМИЛКА ЗАПУСКУ: $msg]\n")
+                        return false
+                    }
+                }
             } catch (_: Exception) {}
 
             appendLog(logFile, "\n\$ ${command.joinToString(" ")}\n")
@@ -301,6 +359,14 @@ object EmbeddedProcessManager {
      * Будує команду запуску Minecraft: [java, -Xmx..., -jar, jar, nogui].
      * @param linkerPrefix непорожній на пристроях з W^X exec-забороною
      * (targetSdk 29+): ["/system/bin/linker64"] ставиться попереду java.
+     *
+     * P0 FORK-fix контракт:
+     *  - argv[0] після префікса ЗАВЖДИ абсолютний шлях до java (ніколи "-Xmx...").
+     *    Відносний "java" з PATH дає `F/linker: expected absolute path: "-Xmx64M"`.
+     *  - LD_LIBRARY_PATH (jre/lib/server:jre/lib:jre/lib/jli) + JAVA_HOME мають прийти
+     *    через envExtra (див. EmbeddedJava.linkerEnv) або будуть доінжекчені в start(),
+     *    інакше `CANNOT LINK EXECUTABLE ... library "libjli.so" not found`.
+     *  - libjli.so має існувати поруч з java — перевіряється в start()/probeJava.
      */
     fun buildMinecraftCommand(
         javaPath: String,
@@ -310,6 +376,13 @@ object EmbeddedProcessManager {
         extraArgs: List<String> = emptyList(),
         linkerPrefix: List<String> = emptyList()
     ): List<String> {
+        if (!File(javaPath).isAbsolute) {
+            Log.e(TAG, "buildMinecraftCommand: javaPath not absolute ($javaPath) — linker впаде expected absolute path")
+        }
+        if (linkerPrefix.any { it.startsWith("-X") }) {
+            Log.e(TAG, "buildMinecraftCommand: linkerPrefix must not contain -X flags: $linkerPrefix")
+        }
+        // linkerPrefix[0] — абсолютний шлях до лінкера, [1] — абсолютний java. -Xmx лише після java.
         val cmd = mutableListOf<String>()
         cmd.addAll(linkerPrefix)
         cmd.addAll(

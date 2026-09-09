@@ -1,6 +1,7 @@
 package com.anserver.app.ui
 
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AlertDialog
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
  * Створення сервера з вибором розташування: внутрішнє, зовнішнє сховище
@@ -27,10 +29,29 @@ import java.util.UUID
  */
 class CreateServerActivity : AppCompatActivity() {
 
+    companion object {
+        private const val TAG = "CreateServerActivity"
+        private val SAFE_NAME_REGEX = Regex("[^a-zA-Z0-9._-]")
+        // RAM-слайдер (activity_create_server.xml): valueFrom=128, valueTo=3072, stepSize=64.
+        // BaseSlider.validateValues кидає IllegalStateException, якщо value не дорівнює
+        // valueFrom + k*stepSize (напр. 2613.0 = totalMem*0.35 — FATAL при тапі MINECRAFT).
+        const val RAM_MIN = 128f
+        const val RAM_MAX = 3072f
+        const val RAM_STEP = 64f
+
+        /** Нормалізує БУДЬ-ЯКЕ значення RAM до найближчого валідного кроку слайдера. */
+        fun snapRam(value: Float): Float {
+            val coerced = value.coerceIn(RAM_MIN, RAM_MAX)
+            val steps = ((coerced - RAM_MIN) / RAM_STEP).roundToInt()
+            return RAM_MIN + steps * RAM_STEP
+        }
+    }
+
     private lateinit var binding: ActivityCreateServerBinding
     private val repository by lazy {
-        try { com.anserver.app.ANServerApplication.serverRepository }
-        catch (_: Exception) { com.anserver.core.repository.ServerRepository(this) }
+        // Уніфікований безпечний доступ (див. ANServerApplication.getRepositoryOrNull).
+        com.anserver.app.ANServerApplication.getRepositoryOrNull()
+            ?: com.anserver.core.repository.ServerRepository(this@CreateServerActivity)
     }
     private var selectedServerType: ServerType = ServerType.MINECRAFT
     private var selectedStorage = EmbeddedPaths.StorageKind.INTERNAL
@@ -77,18 +98,19 @@ class CreateServerActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupToolbar()
-        setupServerTypeSpinner()
+        setupRuntimeCards()
         setupMinecraftSettings()
+        setupRamSlider()
+        setupPortVerify()
         setupDirectorySection()
         setupCreateButton()
+        setupCancelButton()
 
         intent.getStringExtra("server_type")?.let { typeName ->
             try {
                 selectedServerType = ServerType.valueOf(typeName)
-                binding.spinnerServerType.setText(typeName, false)
             } catch (_: Exception) {}
-            updateDefaultValues()
-            updateMinecraftSettingsVisibility()
+            selectRuntime(selectedServerType)
         }
 
         // Вбудований термінал генерує команду сам
@@ -102,20 +124,38 @@ class CreateServerActivity : AppCompatActivity() {
         supportActionBar?.title = "Create Server"
     }
 
-    private fun setupServerTypeSpinner() {
-        val allowed = listOf(ServerType.MINECRAFT, ServerType.UBUNTU_SERVER)
-        val names = allowed.map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, names)
-        binding.spinnerServerType.setAdapter(adapter)
-        binding.spinnerServerType.setText(selectedServerType.name, false)
-        binding.spinnerServerType.setOnItemClickListener { _, _, position, _ ->
-            selectedServerType = allowed[position]
-            updateDefaultValues()
-            updateMinecraftSettingsVisibility()
-            updateCreateButtonState()
-        }
+    /** Runtime selector cards — same visual language as design, but only REAL backend types. */
+    private fun setupRuntimeCards() {
+        binding.cardMinecraft.setOnClickListener { selectRuntime(ServerType.MINECRAFT) }
+        binding.cardUbuntu.setOnClickListener { selectRuntime(ServerType.UBUNTU_SERVER) }
+        selectRuntime(selectedServerType)
+    }
+
+    private fun selectRuntime(type: ServerType) {
+        selectedServerType = type
+        val selectedStroke = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.primary)
+        val idleStroke = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.outline_variant)
+        val selectedBg = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.surface_high)
+        val idleBg = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.surface_container)
+        val selectedCheck = androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.on_primary)
+        val mcSelected = type == ServerType.MINECRAFT
+        binding.cardMinecraft.strokeColor = if (mcSelected) selectedStroke else idleStroke
+        binding.cardMinecraft.strokeWidth = if (mcSelected) 2 else 1
+        binding.cardMinecraft.setCardBackgroundColor(if (mcSelected) selectedBg else idleBg)
+        binding.checkMinecraft.setBackgroundResource(
+            if (mcSelected) com.anserver.app.R.drawable.bg_check_selected else com.anserver.app.R.drawable.bg_check_idle
+        )
+        binding.checkMinecraft.setTextColor(if (mcSelected) selectedCheck else android.graphics.Color.TRANSPARENT)
+        binding.cardUbuntu.strokeColor = if (!mcSelected) selectedStroke else idleStroke
+        binding.cardUbuntu.strokeWidth = if (!mcSelected) 2 else 1
+        binding.cardUbuntu.setCardBackgroundColor(if (!mcSelected) selectedBg else idleBg)
+        binding.checkUbuntu.setBackgroundResource(
+            if (!mcSelected) com.anserver.app.R.drawable.bg_check_selected else com.anserver.app.R.drawable.bg_check_idle
+        )
+        binding.checkUbuntu.setTextColor(if (!mcSelected) selectedCheck else android.graphics.Color.TRANSPARENT)
         updateDefaultValues()
         updateMinecraftSettingsVisibility()
+        updateCreateButtonState()
     }
 
     private fun setupMinecraftSettings() {
@@ -134,7 +174,7 @@ class CreateServerActivity : AppCompatActivity() {
         // старт чесно відмовить з підказкою про JRE 21.
         binding.spinnerMinecraftVersion.setText("1.20.4", false)
 
-        val loaders = MinecraftLoader.values().map { it.name }
+        val loaders = MinecraftLoader.entries.map { it.name }
         val loaderAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, loaders)
         binding.spinnerMinecraftLoader.setAdapter(loaderAdapter)
         binding.spinnerMinecraftLoader.setText(MinecraftLoader.PAPER.name, false)
@@ -159,8 +199,13 @@ class CreateServerActivity : AppCompatActivity() {
         val totalMb = deviceTotalMb()
         val recommendedMax = (totalMb * 0.35).toInt().coerceIn(512, 3072)
         val recommendedMin = (recommendedMax * 0.5).toInt().coerceAtLeast(256)
-        binding.etMaxMemory.setText(recommendedMax.toString())
+        // Округлюємо дефолт до валідного кроку слайдера (128 + k*64), інакше FATAL 2613.
+        val snappedRecommended = snapRam(recommendedMax.toFloat()).toInt()
+        binding.etMaxMemory.setText(snappedRecommended.toString())
         binding.etMinMemory.setText(recommendedMin.toString())
+        binding.tvRamHost.text = "Host • ${totalMb / 1024} GB total, $snappedRecommended MB recommended"
+        binding.tvRamValue.text = "$snappedRecommended MB"
+        setRamSliderSafe(snappedRecommended.toFloat())
 
         binding.btnUseMaxResources.setOnClickListener {
             val total = deviceTotalMb()
@@ -168,8 +213,98 @@ class CreateServerActivity : AppCompatActivity() {
             val minAllowed = (maxAllowed * 0.5).toInt().coerceAtLeast(256)
             binding.etMaxMemory.setText(maxAllowed.toString())
             binding.etMinMemory.setText(minAllowed.toString())
+            binding.tvRamValue.text = "$maxAllowed MB"
+            // et лишаємо точним для backend (JVM приймає будь-які MB),
+            // слайдер — лише snapped+coerced прев'ю (valueTo=3072, крок 64).
+            setRamSliderSafe(maxAllowed.toFloat())
             Snackbar.make(binding.root, "Using device RAM share: $maxAllowed MB (з ${total} MB)", Snackbar.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * Безпечне програмне встановлення RAM-слайдера.
+     * coerceIn + snapToStep перед set, runCatching + Log.w — НІКОЛИ не кидає,
+     * БУДЬ-ЯКЕ значення RAM (128..deviceMem) нормалізується.
+     */
+    private fun setRamSliderSafe(valueMb: Float) {
+        val snapped = snapRam(valueMb)
+        try {
+            binding.sliderRam.value = snapped
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "setRamSliderSafe fallback: $valueMb -> $snapped", e)
+            runCatching {
+                binding.sliderRam.valueFrom = RAM_MIN
+                binding.sliderRam.valueTo = RAM_MAX
+                binding.sliderRam.stepSize = RAM_STEP
+                binding.sliderRam.value = snapped
+            }
+        }
+    }
+
+    /** Two-way sync between RAM slider (design) and Max Memory field (backend value). */
+    private var syncingRam = false
+
+    private fun setupRamSlider() {
+        binding.sliderRam.addOnChangeListener { _, value, _ ->
+            if (syncingRam) return@addOnChangeListener
+            syncingRam = true
+            try {
+                binding.etMaxMemory.setText(value.toInt().toString())
+                binding.tvRamValue.text = "${value.toInt()} MB"
+            } finally {
+                syncingRam = false
+            }
+        }
+        binding.etMaxMemory.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (syncingRam) return
+                val v = s?.toString()?.toIntOrNull() ?: return
+                if (v in 128..3072) {
+                    syncingRam = true
+                    try {
+                        // Ручне введення може бути не кратним 64 (напр. 2613) — снапаємо перед set.
+                        setRamSliderSafe(v.toFloat())
+                        binding.tvRamValue.text = "$v MB"
+                    } finally {
+                        syncingRam = false
+                    }
+                }
+            }
+        })
+    }
+
+    /** Real port availability check via NetworkUtils (same check ServerService uses). */
+    private fun setupPortVerify() {
+        binding.btnVerifyPort.setOnClickListener {
+            val port = binding.etPort.text?.toString()?.trim()?.toIntOrNull()
+            if (port == null || port !in 1..65535) {
+                binding.tvPortStatus.text = "Invalid port (1–65535)"
+                binding.tvPortStatus.setTextColor(
+                    androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.badge_error_fg)
+                )
+                return@setOnClickListener
+            }
+            val free = try {
+                com.anserver.core.util.NetworkUtils.isPortAvailable(port)
+            } catch (_: Exception) { true }
+            if (free) {
+                binding.tvPortStatus.text = "Port $port available"
+                binding.tvPortStatus.setTextColor(
+                    androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.tertiary)
+                )
+            } else {
+                binding.tvPortStatus.text = "Port $port is in use"
+                binding.tvPortStatus.setTextColor(
+                    androidx.core.content.ContextCompat.getColor(this, com.anserver.app.R.color.badge_error_fg)
+                )
+            }
+        }
+    }
+
+    private fun setupCancelButton() {
+        binding.btnCancel.setOnClickListener { finish() }
     }
 
     private fun setupDirectorySection() {
@@ -334,6 +469,9 @@ class CreateServerActivity : AppCompatActivity() {
         Snackbar.make(binding.root, "Не вдалося відкрити налаштування", Snackbar.LENGTH_LONG).show()
     }
 
+    // H4: getExternalStorageDirectory deprecated — тут лише стартова папка для picker.
+    // TODO: мігрувати на SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
+    @Suppress("DEPRECATION")
     private fun openFolderPicker() {
         val startDir = customRoot?.let {
             try {
@@ -369,7 +507,7 @@ class CreateServerActivity : AppCompatActivity() {
                 return null
             }
             // Підпапка за назвою сервера, при зайнятості — з суфіксом. Непорожню чужу папку не чіпаємо.
-            val base = serverName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(48).ifEmpty { "server" }
+            val base = serverName.replace(SAFE_NAME_REGEX, "_").take(48).ifEmpty { "server" }
             var dir = File(root, base)
             var i = 2
             while (dir.exists() && dir.list()?.isNotEmpty() == true && i < 100) {

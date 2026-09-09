@@ -3,30 +3,156 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/background">
 
-    <com.google.android.material.appbar.AppBarLayout
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary"
-            android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+            android:background="@color/background"
+            app:title="Files"
+            app:titleTextColor="@color/on_surface"
+            app:navigationIconTint="@color/on_surface" />
 
-    </com.google.android.material.appbar.AppBarLayout>
+        <!-- Breadcrumbs (real path within the opened root) -->
+        <TextView
+            android:id="@+id/tvCrumbs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="4dp"
+            android:text="/"
+            android:textSize="11sp"
+            android:textColor="@color/secondary"
+            android:fontFamily="monospace"
+            android:ellipsize="start"
+            android:maxLines="1" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior"
-        android:clipToPadding="false"
-        android:padding="8dp"
-        android:paddingBottom="96dp" />
+        <!-- Storage card (real StatFs of current dir) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/bg_telemetry_strip"
+            android:padding="10dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Storage"
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant" />
+
+            <TextView
+                android:id="@+id/tvStorageInfo"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface"
+                android:fontFamily="monospace" />
+
+        </LinearLayout>
+
+        <!-- Action row: existing create operations, now one tap away -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNewFile"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:text="New File"
+                android:textSize="12sp"
+                style="@style/PocketHost.Button.Tonal" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnNewFolder"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="New Folder"
+                android:textSize="12sp"
+                style="@style/PocketHost.Button.Tonal" />
+
+        </LinearLayout>
+
+        <!-- Search + sort -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp">
+
+            <EditText
+                android:id="@+id/searchInput"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_search"
+                android:hint="Search files…"
+                android:textColor="@color/on_surface"
+                android:textColorHint="@color/on_surface_variant"
+                android:textSize="13sp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:inputType="text" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="130dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                app:hintEnabled="false"
+                app:boxBackgroundColor="@color/surface_high"
+                app:boxStrokeColor="@color/outline_variant">
+
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                    android:id="@+id/sortInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:text="Name"
+                    android:textSize="12sp"
+                    android:textColor="@color/secondary"
+                    android:fontFamily="monospace"
+                    android:inputType="none" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingBottom="96dp" />
+
+    </LinearLayout>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSelectFolder"
@@ -35,6 +161,7 @@
         android:layout_gravity="bottom"
         android:layout_margin="16dp"
         android:text="Вибрати цю папку"
-        android:visibility="gone" />
+        android:visibility="gone"
+        style="@style/PocketHost.Button.Primary" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

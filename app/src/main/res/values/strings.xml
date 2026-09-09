@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PocketHost</string>
-    <string name="create_server">Create Server</string>
+    <string name="create_server">Create &amp; Deploy</string>
     <string name="server_name">Server Name</string>
     <string name="server_type">Server Type</string>
     <string name="port">Port</string>

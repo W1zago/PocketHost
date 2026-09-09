@@ -59,10 +59,4 @@ object ServerPaths {
             }
         } catch (_: Exception) { uriString }
     }
-
-    @Deprecated("Use getWorkDir for embedded File")
-    fun resolve(context: Context, path: String): java.io.File {
-        val file = java.io.File(path)
-        return if (file.isAbsolute) file else java.io.File(context.filesDir, path)
-    }
 }

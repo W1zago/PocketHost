@@ -6,6 +6,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.os.StatFs
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.anserver.app.ANServerApplication
 import com.anserver.app.R
@@ -13,9 +15,12 @@ import com.anserver.app.embedded.EmbeddedBootstrap
 import com.anserver.app.embedded.EmbeddedJava
 import com.anserver.app.embedded.EmbeddedPaths
 import com.anserver.app.embedded.EmbeddedProcessManager
+import com.anserver.app.jvm.InProcessServer
 import com.anserver.app.ui.MainActivity
+import com.anserver.app.util.ServerProperties
 import com.anserver.core.model.ServerStatus
 import com.anserver.core.model.ServerType
+import com.anserver.core.util.NetworkUtils
 import com.anserver.plugins.minecraft.MinecraftServerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +32,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.RandomAccessFile
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Вбудований сервіс запуску серверів.
@@ -40,11 +52,18 @@ class ServerService : Service() {
     private val startMutex = Mutex()
     // Кеш робочих папок: логи мають писатись у справжню папку сервера
     // (включно з кастомною), а не вгадуватись через probe.
-    private val workDirCache = java.util.concurrent.ConcurrentHashMap<String, File>()
+    private val workDirCache = ConcurrentHashMap<String, File>()
     // Сервери що зараз проходять довге завантаження (jar/JRE) поза локом.
     // Захищено startMutex.
     private val startingIds = mutableSetOf<String>()
-    private val repository = ANServerApplication.serverRepository
+    // Уніфіковано з MainActivity/CreateServerActivity: безпечний lazy-доступ.
+    // Service не може finish(), тому fallback — локальний репозиторій.
+    private val repository by lazy {
+        runCatching { ANServerApplication.serverRepository }.getOrElse { e ->
+            Log.e("ServerService", "repo not ready, using fallback", e)
+            com.anserver.core.repository.ServerRepository(this@ServerService)
+        }
+    }
 
     inner class ServerBinder : Binder() {
         fun getService(): ServerService = this@ServerService
@@ -76,14 +95,14 @@ class ServerService : Service() {
             // 1. Швидка фаза під локом: перевірки + резерв слота, без мережевого I/O.
             val reservedWorkDir: File? = startMutex.withLock {
                 try {
-                    android.util.Log.d("ServerService", "startServer embedded $serverId")
+                    Log.d("ServerService", "startServer embedded $serverId")
                     if (startingIds.contains(serverId)) {
                         log(serverId, "Сервер вже запускається")
                         return@withLock null
                     }
                     val server = repository.getServer(serverId).first()
                     if (server == null) {
-                        android.util.Log.e("ServerService", "Server not found $serverId")
+                        Log.e("ServerService", "Server not found $serverId")
                         return@withLock null
                     }
                     if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) {
@@ -96,14 +115,32 @@ class ServerService : Service() {
                         serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.ERROR) }
                         return@withLock null
                     }
+                    // C4: 1 JVM на процес — другий Minecraft з іншим classpath не стартує.
+                    // Чесна відмова замість мовчазного FAILED_DEFINITIVE глибоко в InProcessServer.
+                    if (server.type == ServerType.MINECRAFT) {
+                        val (canStart, reason) = try {
+                            EmbeddedProcessManager.canStartMinecraft(serverId)
+                        } catch (_: Exception) { true to "" }
+                        if (!canStart) {
+                            log(serverId, reason)
+                            Log.w("ServerService", "canStartMinecraft denied $serverId: $reason")
+                            try {
+                                android.widget.Toast.makeText(
+                                    this@ServerService, reason, android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            } catch (_: Exception) {}
+                            serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.ERROR) }
+                            return@withLock null
+                        }
+                    }
                     if (EmbeddedProcessManager.isRunning(serverId)) {
                         log(serverId, "Сервер вже запущений")
                         // FAIL 17:44: reserve мовчки блокував рестарт ("Сервер вже
                         // запущений", порт порожній). Факти в logcat показують чому.
                         try {
-                            android.util.Log.i(
+                            Log.i(
                                 "ServerService",
-                                "start reserve blocked $serverId facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                                "start reserve blocked $serverId facts=${InProcessServer.describeFacts()}"
                             )
                         } catch (_: Exception) {}
                         return@withLock null
@@ -118,7 +155,7 @@ class ServerService : Service() {
                     )
                     workDir
                 } catch (e: Exception) {
-                    android.util.Log.e("ServerService", "startServer reserve error", e)
+                    Log.e("ServerService", "startServer reserve error", e)
                     log(serverId, "EXCEPTION: ${e.message}")
                     null
                 }
@@ -137,13 +174,13 @@ class ServerService : Service() {
                 // InProcessServer (свіжий Done + порт-first), тут лише діагностика.
                 try {
                     val alive = EmbeddedProcessManager.isRunning(serverId) ||
-                        com.anserver.app.jvm.InProcessServer.isRunning(serverId)
+                        InProcessServer.isRunning(serverId)
                     val portFree = try {
-                        com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)
+                        NetworkUtils.isPortAvailable(server.port)
                     } catch (_: Exception) { true }
-                    android.util.Log.i(
+                    Log.i(
                         "ServerService",
-                        "startMinecraft pre-check $serverId alive=$alive portFree=$portFree status=${server.status} facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                        "startMinecraft pre-check $serverId alive=$alive portFree=$portFree status=${server.status} facts=${InProcessServer.describeFacts()}"
                     )
                 } catch (_: Exception) {}
                 reservedWorkDir.mkdirs()
@@ -182,7 +219,7 @@ class ServerService : Service() {
                 log(serverId, "Папка: ${reservedWorkDir.absolutePath}")
 
                 try {
-                    val stat = android.os.StatFs(reservedWorkDir.absolutePath)
+                    val stat = StatFs(reservedWorkDir.absolutePath)
                     if (stat.availableBytes < 512L * 1024 * 1024) {
                         log(serverId, "Попередження: мало місця <512MB")
                     }
@@ -193,7 +230,7 @@ class ServerService : Service() {
                     ServerType.UBUNTU_SERVER -> startUbuntu(serverId, reservedWorkDir)
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ServerService", "startServer error", e)
+                Log.e("ServerService", "startServer error", e)
                 log(serverId, "EXCEPTION: ${e.message}")
                 try { repository.updateServerStatus(serverId, ServerStatus.ERROR) } catch (_: Exception) {}
             } finally {
@@ -233,9 +270,9 @@ class ServerService : Service() {
         // Без цього повторний Start запускав другий Paper поверх залоченого
         // світу -> OverlappingFileLockException.
         try {
-            if (!com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)) {
+            if (!NetworkUtils.isPortAvailable(server.port)) {
                 if (EmbeddedProcessManager.isRunning(serverId) ||
-                    com.anserver.app.jvm.InProcessServer.isRunning(serverId)
+                    InProcessServer.isRunning(serverId)
                 ) {
                     log(serverId, "Сервер вже запущений (порт ${server.port} зайнятий ним) — повторний старт пропущено")
                     try {
@@ -257,7 +294,7 @@ class ServerService : Service() {
         )
         // Наявність файлу ≠ цілісність: обірваний jar чистимо через provision заново.
         val hasJarBefore = foundBefore != null &&
-            MinecraftServerManager.isValidServerJar(java.io.File(workDir, foundBefore))
+            MinecraftServerManager.isValidServerJar(File(workDir, foundBefore))
         if (!hasJarBefore) {
             log(serverId, "Завантаження ${loader ?: "PAPER"} $version (~50-100 MB)...")
             val ok = try {
@@ -302,10 +339,10 @@ class ServerService : Service() {
         // targetSdk 29+ (error=13). Основний шлях — in-process JVM як у MojoLauncher
         // (dlopen libjvm.so + JNI_CreateJavaVM, без exec взагалі).
         // Legacy exec через системний лінкер лишено як fallback для retryable-помилок.
-        val jarFile = java.io.File(workDir, jar)
+        val jarFile = File(workDir, jar)
         val inProcessResult = try {
             log(serverId, "Старт in-process JVM (Mojo-підхід, без exec)...")
-            com.anserver.app.jvm.InProcessServer.start(
+            InProcessServer.start(
                 this@ServerService, serverId, jarFile, workDir,
                 server.config.maxMemory, server.config.minMemory,
                 server.config.javaArgs, version,
@@ -314,11 +351,11 @@ class ServerService : Service() {
                 javaPath
             )
         } catch (e: Exception) {
-            android.util.Log.e("ServerService", "in-process start failed, fallback to exec", e)
+            Log.e("ServerService", "in-process start failed, fallback to exec", e)
             log(serverId, "In-process старт не вдався (${e.message}), пробую legacy exec...")
-            com.anserver.app.jvm.InProcessServer.StartResult.FAILED_RETRYABLE
+            InProcessServer.StartResult.FAILED_RETRYABLE
         }
-        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.ALREADY_RUNNING) {
+        if (inProcessResult == InProcessServer.StartResult.ALREADY_RUNNING) {
             // No-op: живий сервер вже є (Paperclip main повернувся, але факти
             // живі). Статус лишається RUNNING, другий Paper не стартуємо.
             log(serverId, "Сервер вже запущений — повторний старт пропущено")
@@ -331,7 +368,7 @@ class ServerService : Service() {
             startLivenessPoll(serverId)
             return
         }
-        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.STARTED) {
+        if (inProcessResult == InProcessServer.StartResult.STARTED) {
             repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
             repository.updateServerStatus(serverId, ServerStatus.RUNNING)
             log(serverId, "Сервер запущено (in-process JVM) jar=$jar")
@@ -350,17 +387,17 @@ class ServerService : Service() {
                         // означають "живий, просто повільний старт".
                         var looksAlive = false
                         try {
-                            if (!com.anserver.core.util.NetworkUtils.isPortAvailable(server.port)) {
+                            if (!NetworkUtils.isPortAvailable(server.port)) {
                                 looksAlive = true
                             }
                         } catch (_: Exception) {}
                         if (!looksAlive) {
                             try {
-                                val lf = java.io.File(workDir, "server.log")
+                                val lf = File(workDir, "server.log")
                                 if (lf.isFile) {
                                     val len = lf.length()
                                     val tailLen = if (len > 64 * 1024) 64 * 1024 else len.toInt()
-                                    java.io.RandomAccessFile(lf, "r").use { raf ->
+                                    RandomAccessFile(lf, "r").use { raf ->
                                         raf.seek(len - tailLen)
                                         val buf = ByteArray(tailLen)
                                         var tot = 0
@@ -415,10 +452,10 @@ class ServerService : Service() {
                             // крах: STOPPED + просимо ретрай, а не ERROR.
                             var sawBusyPrev = false
                             try {
-                                val lf = java.io.File(workDir, "server.log")
+                                val lf = File(workDir, "server.log")
                                 if (lf.isFile && lf.length() > 0) {
                                     val n = if (lf.length() > 8192) 8192 else lf.length().toInt()
-                                    java.io.RandomAccessFile(lf, "r").use { raf ->
+                                    RandomAccessFile(lf, "r").use { raf ->
                                         raf.seek(lf.length() - n)
                                         val b = ByteArray(n)
                                         var t = 0
@@ -446,7 +483,7 @@ class ServerService : Service() {
             }
             return
         }
-        if (inProcessResult == com.anserver.app.jvm.InProcessServer.StartResult.FAILED_DEFINITIVE) {
+        if (inProcessResult == InProcessServer.StartResult.FAILED_DEFINITIVE) {
             // Битий jar / стара Java / зайнята JVM — legacy exec не виправить.
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
@@ -503,7 +540,7 @@ class ServerService : Service() {
         viewDistance: Int,
         serverName: String
     ) {
-        com.anserver.app.util.ServerProperties.patch(
+        ServerProperties.patch(
             workDir, port, onlineMode, viewDistance, serverName
         )
     }
@@ -535,15 +572,15 @@ class ServerService : Service() {
             val wasRunning = EmbeddedProcessManager.isRunning(serverId)
             if (wasRunning) {
                 try {
-                    android.util.Log.i(
+                    Log.i(
                         "ServerService",
-                        "stopServer: sending stop to $serverId facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                        "stopServer: sending stop to $serverId facts=${InProcessServer.describeFacts()}"
                     )
                     // FAIL 17:44: phase1 МАЄ ставити stopRequested одразу.
                     // sendInput("stop") сам флага не ставив -> 60с stopReq=false,
                     // гілка stopRequested+portFree мертва, fast-path тримав alive=true.
                     try {
-                        com.anserver.app.jvm.InProcessServer.requestStop(serverId)
+                        InProcessServer.requestStop(serverId)
                     } catch (_: Exception) {}
                     EmbeddedProcessManager.sendInput(serverId, "stop")
                     var waited = 0
@@ -555,9 +592,9 @@ class ServerService : Service() {
                         // а не тільки "alive=true".
                         if (waited % 5000 == 0) {
                             try {
-                                android.util.Log.i(
+                                Log.i(
                                     "ServerService",
-                                    "stopServer wait ${waited}ms $serverId alive=${EmbeddedProcessManager.isRunning(serverId)} facts=${com.anserver.app.jvm.InProcessServer.describeFacts()}"
+                                    "stopServer wait ${waited}ms $serverId alive=${EmbeddedProcessManager.isRunning(serverId)} facts=${InProcessServer.describeFacts()}"
                                 )
                             } catch (_: Exception) {}
                         }
@@ -565,18 +602,18 @@ class ServerService : Service() {
                     if (EmbeddedProcessManager.isRunning(serverId)) {
                         log(serverId, "Сервер не відповів на stop за 60с — чекаю далі у фоні (світ може зберігатись)")
                         try {
-                            android.util.Log.w("ServerService", "stopServer timeout $serverId still alive after 60s")
+                            Log.w("ServerService", "stopServer timeout $serverId still alive after 60s")
                         } catch (_: Exception) {}
                     } else {
                         try {
-                            android.util.Log.i("ServerService", "stopServer graceful in ${waited}ms $serverId")
+                            Log.i("ServerService", "stopServer graceful in ${waited}ms $serverId")
                         } catch (_: Exception) {}
                     }
                 } catch (_: Exception) {}
             }
             startMutex.withLock {
                 try {
-                    android.util.Log.d("ServerService", "stopServer embedded $serverId")
+                    Log.d("ServerService", "stopServer embedded $serverId")
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
                         // Сюди потрапляємо і після ввічливого стопа в phase1
                         // (порт вільний + Closing): це успіх, а не "не запущений".
@@ -595,7 +632,7 @@ class ServerService : Service() {
                     repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                     log(serverId, "Сервер зупинено")
                 } catch (e: Exception) {
-                    android.util.Log.e("ServerService", "stop error", e)
+                    Log.e("ServerService", "stop error", e)
                     log(serverId, "Error stopping: ${e.message}")
                 }
             }
@@ -603,7 +640,7 @@ class ServerService : Service() {
     }
 
     private fun log(serverId: String, message: String) {
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val line = "[$timestamp] $message\n"
         // пишемо одразу у файл справжньої робочої папки (без SAF!)
         try {
@@ -615,20 +652,20 @@ class ServerService : Service() {
 
     private fun getDeviceIp(): String {
         return try {
-            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            val interfaces = NetworkInterface.getNetworkInterfaces()
             for (iface in interfaces) {
                 if (!iface.isUp || iface.isLoopback) continue
                 for (addr in iface.inetAddresses) {
-                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
                         val host = addr.hostAddress ?: continue
                         if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172.")) return host
                     }
                 }
             }
-            for (iface in java.net.NetworkInterface.getNetworkInterfaces()) {
+            for (iface in NetworkInterface.getNetworkInterfaces()) {
                 if (!iface.isUp || iface.isLoopback) continue
                 for (addr in iface.inetAddresses) {
-                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) return addr.hostAddress ?: continue
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) return addr.hostAddress ?: continue
                 }
             }
             "192.168.0.100"
@@ -642,7 +679,7 @@ class ServerService : Service() {
         // (б) grace 30с — свіжий Paper пише маркери/биндить порт до ~30с, а в
         // перші секунди фактів ще нема (нема Done/порту) — не вбивати.
         // Без цього: тиша нового старту 10с -> "Процес завершено" -> STOPPED.
-        val mySeq = try { com.anserver.app.jvm.InProcessServer.currentSeq() } catch (_: Exception) { -1L }
+        val mySeq = try { InProcessServer.currentSeq() } catch (_: Exception) { -1L }
         serviceScope.launch {
             var emptyCount = 0
             var ticks = 0
@@ -652,7 +689,7 @@ class ServerService : Service() {
                     val server = repository.getServer(serverId).first()
                     if (server == null || server.status != ServerStatus.RUNNING) break
                     try {
-                        if (com.anserver.app.jvm.InProcessServer.currentSeq() != mySeq) break
+                        if (InProcessServer.currentSeq() != mySeq) break
                     } catch (_: Exception) {}
                     ticks++
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
@@ -684,9 +721,11 @@ class ServerService : Service() {
     }
 
     override fun onDestroy() {
+        // H6: stopAll ДО cancel — зупинка процесів має встигнути дописати логи/
+        // відправити stop до скасування scope (інакше фонові launch вбиваються раніше).
+        try { EmbeddedProcessManager.stopAll() } catch (_: Exception) {}
+        try { serviceScope.cancel() } catch (_: Exception) {}
         super.onDestroy()
-        serviceScope.cancel()
-        EmbeddedProcessManager.stopAll()
     }
 
     companion object {

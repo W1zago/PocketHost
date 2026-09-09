@@ -1,5 +1,6 @@
 package com.anserver.core.util
 
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -18,7 +19,7 @@ object NetworkUtils {
         return try {
             NetworkInterface.getNetworkInterfaces().toList()
                 .flatMap { it.inetAddresses.toList() }
-                .firstOrNull { !it.isLoopbackAddress && it is java.net.Inet4Address }
+                .firstOrNull { !it.isLoopbackAddress && it is Inet4Address }
                 ?.hostAddress
         } catch (e: Exception) {
             null

@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -54,8 +55,21 @@ class FileManagerActivity : AppCompatActivity() {
     private var useSaf = false
     private var selectMode = false
 
+    // Full unfiltered listing of the current dir; applyFilter() derives the view.
+    private var fullItems: List<FileItem> = emptyList()
+    private var searchQuery: String = ""
+    private var sortMode: String = "Name"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!handleBack()) {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
         binding = ActivityFileManagerBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -73,36 +87,59 @@ class FileManagerActivity : AppCompatActivity() {
 
         setupToolbar()
         setupRecyclerView()
+        setupSearchSort()
+        setupActionRow()
 
         if (selectMode) {
             openSelectRoot()
             return
         }
-        // Тут target точно не null: вище або finish+return, або гілка selectMode з return.
-        val target = uriStr!!
+        // H8: без !! — явний null-check з Toast+return.
+        val target = uriStr ?: run {
+            Toast.makeText(this, "Невірний шлях", Toast.LENGTH_LONG).show()
+            finish(); return
+        }
         if (target.startsWith("content://")) {
             useSaf = true
             currentDocUri = try { Uri.parse(target) } catch (_: Exception) { null }
             rootDocUri = currentDocUri
-            if (currentDocUri == null) {
+            val docUri = currentDocUri ?: run {
                 Toast.makeText(this, "Невірний SAF шлях", Toast.LENGTH_LONG).show()
                 finish(); return
             }
-            loadSafFiles(currentDocUri!!)
+            loadSafFiles(docUri)
         } else {
             useSaf = false
             val file = resolveFile(target)
-            if (file == null || !file.exists()) {
+            // C5: не finish() одразу — resolveFile вже пробував mkdirs, даємо другий шанс
+            // через явний mkdirs перед тим як здатися.
+            val ready = file?.let {
+                if (!it.exists()) {
+                    android.util.Log.w("FileManager", "onCreate: creating missing dir ${it.absolutePath}")
+                    try { it.mkdirs() } catch (_: Exception) {}
+                }
+                it.exists()
+            } == true
+            if (!ready) {
                 Toast.makeText(this, "Папка не знайдена: $target", Toast.LENGTH_LONG).show()
                 finish(); return
             }
-            currentFile = file
-            rootFile = file
-            loadLocalFiles(file)
+            // H8: без !! — ready==true гарантує non-null, але перевіряємо явно.
+            val safeFile = file ?: run {
+                Toast.makeText(this, "Папка не знайдена: $target", Toast.LENGTH_LONG).show()
+                finish(); return
+            }
+            currentFile = safeFile
+            rootFile = safeFile
+            loadLocalFiles(safeFile)
         }
     }
 
     /** Вхід у режим вибору папки: корінь — спільне сховище. */
+    // H4: getExternalStorageDirectory deprecated, але для selectMode потрібен саме
+    // legacy shared-root (MediaStore/SAF-міграція складна — лишаємо з Suppress).
+    // TODO: мігрувати вибір папки на SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
+    @Suppress("DEPRECATION")
     private fun openSelectRoot() {
         useSaf = false
         val startPath = intent.getStringExtra(EXTRA_ROOT_PATH)
@@ -136,26 +173,55 @@ class FileManagerActivity : AppCompatActivity() {
     }
 
     private fun resolveFile(uriStr: String): File? {
-        // Важливо: лише lookup без mkdirs() щоб сміттєвий ввід не створював папки.
+        // C5: embedded://external:// більше не повертають null для неіснуючої папки —
+        // пробуємо створити через lookupServerDir+mkdirs (гонка: сервер ще не створив папку,
+        // а FileManager вже відкрився). Log.w коли створюємо.
         return try {
             when {
                 uriStr.startsWith("embedded://") -> {
                     val id = uriStr.removePrefix("embedded://")
                     if (id.isEmpty()) return null
-                    EmbeddedPaths.lookupServerDir(this, id).let { if (it.exists()) it else null }
+                    val dir = EmbeddedPaths.lookupServerDir(this, id)
+                    if (!dir.exists()) {
+                        android.util.Log.w("FileManager", "creating missing embedded dir: ${dir.absolutePath}")
+                        try { dir.mkdirs() } catch (_: Exception) {}
+                    }
+                    if (dir.exists()) dir else null
                 }
                 uriStr.startsWith("external://") -> {
                     val id = uriStr.removePrefix("external://")
                     if (id.isEmpty()) return null
-                    EmbeddedPaths.lookupServerDir(this, id).let { if (it.exists()) it else null }
+                    val dir = EmbeddedPaths.lookupServerDir(this, id)
+                    if (!dir.exists()) {
+                        android.util.Log.w("FileManager", "creating missing external dir: ${dir.absolutePath}")
+                        try { dir.mkdirs() } catch (_: Exception) {}
+                    }
+                    if (dir.exists()) dir else null
                 }
-                uriStr.startsWith("/") -> File(uriStr).let { if (it.exists()) it else null }
-                uriStr.startsWith("file://") -> File(Uri.parse(uriStr).path ?: return null).let {
-                    if (it.exists()) it else null
+                uriStr.startsWith("/") -> {
+                    val f = File(uriStr)
+                    if (!f.exists()) {
+                        android.util.Log.w("FileManager", "creating missing abs dir: ${f.absolutePath}")
+                        try { f.mkdirs() } catch (_: Exception) {}
+                    }
+                    if (f.exists()) f else null
+                }
+                uriStr.startsWith("file://") -> {
+                    val p = try { Uri.parse(uriStr).path ?: return null } catch (_: Exception) { return null }
+                    val f = File(p)
+                    if (!f.exists()) {
+                        android.util.Log.w("FileManager", "creating missing file:// dir: ${f.absolutePath}")
+                        try { f.mkdirs() } catch (_: Exception) {}
+                    }
+                    if (f.exists()) f else null
                 }
                 else -> {
                     // спроба як serverId
                     val dir = EmbeddedPaths.lookupServerDir(this, uriStr)
+                    if (!dir.exists()) {
+                        android.util.Log.w("FileManager", "creating missing serverId dir: ${dir.absolutePath}")
+                        try { dir.mkdirs() } catch (_: Exception) {}
+                    }
                     if (dir.exists()) dir else null
                 }
             }
@@ -186,6 +252,74 @@ class FileManagerActivity : AppCompatActivity() {
 
     // ---------- local (File) mode ----------
 
+    private fun setupSearchSort() {
+        binding.searchInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                searchQuery = s?.toString()?.trim()?.lowercase() ?: ""
+                applyFilter()
+            }
+        })
+        val sorts = listOf("Name", "Date", "Size")
+        val sortAdapter = android.widget.ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, sorts)
+        binding.sortInput.setAdapter(sortAdapter)
+        binding.sortInput.setOnItemClickListener { _, _, position, _ ->
+            sortMode = sorts[position]
+            applyFilter()
+        }
+    }
+
+    private fun setupActionRow() {
+        binding.btnNewFile.setOnClickListener { createFileInCurrent() }
+        binding.btnNewFolder.setOnClickListener { createFolderInCurrent() }
+    }
+
+    /** Client-side search + sort over the real listing. Dirs stay first. */
+    private fun applyFilter() {
+        try {
+            var list = fullItems
+            if (searchQuery.isNotEmpty()) {
+                list = list.filter { it.name.lowercase().contains(searchQuery) }
+            }
+            list = when (sortMode) {
+                "Date" -> list.sortedWith(compareBy({ !it.isDirectory }, { -it.lastModified }))
+                "Size" -> list.sortedWith(compareBy({ !it.isDirectory }, { -it.length }))
+                else -> list.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+            }
+            adapter.submitList(list)
+        } catch (e: Exception) {
+            android.util.Log.e("FileManager", "applyFilter failed", e)
+        }
+    }
+
+    private fun updateCrumbsAndStorage(dir: File) {
+        try {
+            val root = rootFile
+            val crumbs = if (root != null) {
+                val rel = try {
+                    dir.canonicalPath.removePrefix(root.canonicalPath).trim { it == '/' }.split('/').joinToString(" › ")
+                } catch (_: Exception) { dir.name }
+                if (rel.isEmpty()) root.name.ifEmpty { "/" } else "${root.name.ifEmpty { "/" }} › $rel"
+            } else {
+                dir.absolutePath
+            }
+            binding.tvCrumbs.text = crumbs
+        } catch (_: Exception) {
+            binding.tvCrumbs.text = dir.name
+        }
+        try {
+            val stat = android.os.StatFs(dir.absolutePath)
+            val freeGb = stat.availableBytes / 1024.0 / 1024.0 / 1024.0
+            val totalGb = stat.totalBytes / 1024.0 / 1024.0 / 1024.0
+            binding.tvStorageInfo.text = String.format(
+                java.util.Locale.US, "Free %.1f of %.1f GB", freeGb, totalGb
+            )
+        } catch (_: Exception) {
+            binding.tvStorageInfo.text = "—"
+        }
+    }
+
     private fun loadLocalFiles(dir: File) {
         currentFile = dir
         supportActionBar?.subtitle = dir.name.ifEmpty { dir.absolutePath }
@@ -202,7 +336,9 @@ class FileManagerActivity : AppCompatActivity() {
                 file = it
             )
         }.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).take(500)
-        adapter.submitList(items)
+        fullItems = items
+        updateCrumbsAndStorage(dir)
+        applyFilter()
         if (items.isEmpty()) Toast.makeText(this, "Папка порожня", Toast.LENGTH_SHORT).show()
     }
 
@@ -353,7 +489,12 @@ class FileManagerActivity : AppCompatActivity() {
                     return
                 }
             } else {
-                contentResolver.openInputStream(item.docUri!!)?.bufferedReader()?.readText()?.take(50000) ?: return
+                // H8: без !! — null-check для docUri з раннім виходом.
+                val docUri = item.docUri ?: run {
+                    Toast.makeText(this, "Нема URI для шарингу", Toast.LENGTH_SHORT).show()
+                    return
+                }
+                contentResolver.openInputStream(docUri)?.bufferedReader()?.readText()?.take(50000) ?: return
             }
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -381,6 +522,8 @@ class FileManagerActivity : AppCompatActivity() {
             return
         }
         supportActionBar?.subtitle = (doc.name ?: uri.toString()) + " [legacy SAF]"
+        binding.tvCrumbs.text = (doc.name ?: uri.toString()) + " [legacy SAF]"
+        binding.tvStorageInfo.text = "—"
         val files = try { doc.listFiles().toList() } catch (_: Exception) { emptyList() }
         val items = files.map {
             FileItem(
@@ -391,17 +534,13 @@ class FileManagerActivity : AppCompatActivity() {
                 docUri = it.uri
             )
         }.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).take(500)
-        adapter.submitList(items)
+        fullItems = items
+        applyFilter()
         if (items.isEmpty()) Toast.makeText(this, "Папка порожня", Toast.LENGTH_SHORT).show()
     }
 
     override fun onSupportNavigateUp(): Boolean {
         return handleBack()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (!handleBack()) super.onBackPressed()
     }
 
     private fun handleBack(): Boolean {
@@ -455,15 +594,32 @@ class FileManagerActivity : AppCompatActivity() {
             fun bind(item: FileItem) {
                 binding.fileName.text = item.name
                 if (item.isDirectory) {
-                    binding.fileIcon.text = "📁"
+                    binding.fileIcon.text = "D"
+                    binding.fileIcon.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(binding.root.context, com.anserver.app.R.color.secondary)
+                    )
                     binding.fileSize.text = if (item.file != null) {
                         "${item.file.listFiles()?.size ?: 0} items"
                     } else "${item.length} items"
                 } else {
-                    binding.fileIcon.text = "📄"
+                    val ext = item.name.substringAfterLast('.', "").uppercase().take(3).ifEmpty { "F" }
+                    binding.fileIcon.text = ext
+                    binding.fileIcon.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(binding.root.context, com.anserver.app.R.color.tertiary)
+                    )
                     binding.fileSize.text = FileUtils.formatFileSize(item.length)
                 }
-                val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                // Real unix-style perms for local files; SAF has no stat — show dash.
+                binding.filePerms.text = if (item.file != null) {
+                    try {
+                        val f = item.file
+                        val r = if (f.canRead()) "r" else "-"
+                        val w = if (f.canWrite()) "w" else "-"
+                        val x = if (f.canExecute() || f.isDirectory) "x" else "-"
+                        "$r$w$x"
+                    } catch (_: Exception) { "—" }
+                } else "—"
+                val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
                 binding.fileDate.text = fmt.format(java.util.Date(item.lastModified))
                 binding.root.setOnClickListener { onClick(item) }
                 binding.root.setOnLongClickListener { onLong(item); true }

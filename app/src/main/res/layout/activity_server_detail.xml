@@ -3,86 +3,179 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/background">
 
-    <com.google.android.material.appbar.AppBarLayout
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary"
-            android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
-            app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+            android:background="@color/background"
+            app:title="Server Details"
+            app:titleTextColor="@color/on_surface"
+            app:navigationIconTint="@color/on_surface" />
 
-    </com.google.android.material.appbar.AppBarLayout>
-
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-        <LinearLayout
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/scrollView"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="24dp">
 
-            <com.google.android.material.card.MaterialCardView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardElevation="4dp"
-                app:cardCornerRadius="8dp">
+                android:orientation="vertical"
+                android:padding="16dp">
 
+                <!-- Hero card -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
+                    android:background="@drawable/bg_section_card"
                     android:padding="16dp">
 
-                    <TextView
-                        android:id="@+id/serverName"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Server Name"
-                        android:textSize="24sp"
-                        android:textStyle="bold" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
 
-                    <TextView
-                        android:id="@+id/serverType"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Type"
-                        android:textSize="16sp" />
+                        <TextView
+                            android:id="@+id/serverIcon"
+                            android:layout_width="44dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/bg_icon_box"
+                            android:gravity="center"
+                            android:text="M"
+                            android:textSize="22sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/tertiary" />
 
-                    <TextView
-                        android:id="@+id/serverPort"
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="12dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/serverName"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Server Name"
+                                android:textSize="18sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/on_surface"
+                                android:ellipsize="end"
+                                android:maxLines="1" />
+
+                            <TextView
+                                android:id="@+id/serverType"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="Type"
+                                android:textSize="11sp"
+                                android:textColor="@color/on_surface_variant"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:id="@+id/statusBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:background="@drawable/bg_status_idle"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="4dp">
+
+                            <View
+                                android:id="@+id/statusDot"
+                                android:layout_width="6dp"
+                                android:layout_height="6dp"
+                                android:background="@drawable/bg_dot_idle" />
+
+                            <TextView
+                                android:id="@+id/serverStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="6dp"
+                                android:text="Stopped"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/badge_idle_fg"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Port: 25565"
-                        android:textSize="16sp" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="12dp">
+
+                        <TextView
+                            android:id="@+id/serverPort"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text=":25565"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/secondary"
+                            android:fontFamily="monospace"
+                            android:background="@drawable/bg_port_chip"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="4dp" />
+
+                        <TextView
+                            android:id="@+id/serverUptime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="Up —"
+                            android:textSize="12sp"
+                            android:textColor="@color/on_surface_variant"
+                            android:fontFamily="monospace" />
+
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/serverIpAddress"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="IP: Loading..."
-                        android:textSize="16sp"
+                        android:layout_marginTop="8dp"
+                        android:text="…"
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant"
+                        android:fontFamily="monospace"
                         android:textIsSelectable="true" />
 
                     <TextView
-                        android:id="@+id/serverStatus"
+                        android:id="@+id/serverFolderPath"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Status"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:layout_marginTop="4dp"
+                        android:text="Папка: …"
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant"
+                        android:fontFamily="monospace"
+                        android:textIsSelectable="true" />
 
                     <TextView
                         android:id="@+id/tvErrorMessage"
@@ -90,100 +183,395 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text=""
-                        android:textSize="14sp"
-                        android:textColor="@android:color/holo_red_dark"
+                        android:textSize="12sp"
+                        android:textColor="@color/error"
+                        android:fontFamily="monospace"
                         android:visibility="gone" />
 
                 </LinearLayout>
 
-            </com.google.android.material.card.MaterialCardView>
+                <!-- Section tabs: real navigation (scroll or open screen) -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:scrollbars="none">
 
-            <!-- System Resources Card -->
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                app:cardElevation="4dp"
-                app:cardCornerRadius="8dp">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/tabOverview"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:text="Overview"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/tabConsole"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Console"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/tabFiles"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Files"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/tabTelemetry"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Telemetry"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/tabConfig"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Config"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                    </LinearLayout>
+
+                </HorizontalScrollView>
+
+                <!-- Live telemetry bento (device-real values, 2s poll) -->
                 <LinearLayout
+                    android:id="@+id/resourcesCard"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_section_card"
                     android:padding="16dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="System Resources"
-                        android:textSize="18sp"
-                        android:textStyle="bold"
-                        android:layout_marginBottom="8dp" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
 
-                    <TextView
-                        android:id="@+id/tvCpuUsage"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="CPU: 0%"
-                        android:textSize="14sp" />
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="LIVE TELEMETRY"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/on_surface_variant"
+                            android:fontFamily="monospace" />
 
-                    <TextView
-                        android:id="@+id/tvMemoryUsage"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Memory: 0 MB / 0 MB"
-                        android:textSize="14sp" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="2s poll"
+                            android:textSize="10sp"
+                            android:textColor="@color/tertiary"
+                            android:fontFamily="monospace" />
 
-                    <TextView
-                        android:id="@+id/tvCpuCores"
+                    </LinearLayout>
+
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="CPU Cores: 0"
-                        android:textSize="14sp" />
+                        android:orientation="horizontal"
+                        android:layout_marginTop="12dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:background="@drawable/bg_telemetry_strip"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="UPTIME"
+                                android:textSize="10sp"
+                                android:textColor="@color/on_surface_variant" />
+
+                            <TextView
+                                android:id="@+id/tileUptime"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="—"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/on_surface"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:orientation="vertical"
+                            android:background="@drawable/bg_telemetry_strip"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="APP HEAP"
+                                android:textSize="10sp"
+                                android:textColor="@color/on_surface_variant" />
+
+                            <TextView
+                                android:id="@+id/tileMemory"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="—"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/secondary"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:background="@drawable/bg_telemetry_strip"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="CPU CORES"
+                                android:textSize="10sp"
+                                android:textColor="@color/on_surface_variant" />
+
+                            <TextView
+                                android:id="@+id/tileCores"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="—"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/on_surface"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:orientation="vertical"
+                            android:background="@drawable/bg_telemetry_strip"
+                            android:padding="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="DISK FREE"
+                                android:textSize="10sp"
+                                android:textColor="@color/on_surface_variant" />
+
+                            <TextView
+                                android:id="@+id/tileDisk"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="—"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/tertiary"
+                                android:fontFamily="monospace" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
 
                 </LinearLayout>
 
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Minecraft Settings Card -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/minecraftSettingsCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:visibility="gone"
-                app:cardElevation="4dp"
-                app:cardCornerRadius="8dp">
-
+                <!-- Network & binding (real LAN IP + port) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_section_card"
                     android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="NETWORK &amp; BINDING"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface_variant"
+                        android:fontFamily="monospace" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="8dp">
+
+                        <TextView
+                            android:id="@+id/tvBindAddress"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="…"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/secondary"
+                            android:fontFamily="monospace"
+                            android:textIsSelectable="true" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCopyAddress"
+                            android:layout_width="wrap_content"
+                            android:layout_height="36dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Copy"
+                            android:textSize="12sp"
+                            style="@style/PocketHost.Button.Tonal" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="0.0.0.0 • TCP — reachable on local Wi-Fi"
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant" />
+
+                </LinearLayout>
+
+                <!-- Console stream preview (real tail of server.log) -->
+                <LinearLayout
+                    android:id="@+id/logCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_section_card"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="CONSOLE STREAM"
+                            android:textSize="11sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/on_surface_variant"
+                            android:fontFamily="monospace" />
+
+                        <TextView
+                            android:id="@+id/tvLogLive"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="● LIVE"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/tertiary"
+                            android:fontFamily="monospace" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvLogPreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_telemetry_strip"
+                        android:padding="10dp"
+                        android:text="Waiting for log…"
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface"
+                        android:fontFamily="monospace"
+                        android:maxLines="10"
+                        android:ellipsize="end" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOpenTerminal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Open Interactive Terminal"
+                        android:textSize="13sp"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                </LinearLayout>
+
+                <!-- Minecraft settings -->
+                <LinearLayout
+                    android:id="@+id/minecraftSettingsCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_section_card"
+                    android:padding="16dp"
+                    android:visibility="gone">
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Налаштування Minecraft"
-                        android:textSize="18sp"
+                        android:textSize="15sp"
                         android:textStyle="bold"
-                        android:layout_marginBottom="8dp" />
+                        android:textColor="@color/on_surface" />
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/switchPirate"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="4dp"
+                        android:layout_marginTop="8dp"
                         android:text="Дозволити гравців без ліцензії (піратка)" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="4dp"
+                        android:layout_marginTop="4dp"
                         android:text="Вимикає перевірку ліцензії Mojang (online-mode=false)."
-                        android:textSize="12sp" />
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant" />
 
                     <TextView
                         android:id="@+id/tvViewDistance"
@@ -191,7 +579,8 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
                         android:text="Дальність промальовки: 10 чанків"
-                        android:textSize="16sp" />
+                        android:textSize="13sp"
+                        android:textColor="@color/on_surface" />
 
                     <com.google.android.material.slider.Slider
                         android:id="@+id/sliderViewDistance"
@@ -208,69 +597,83 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:text="На зупиненому сервері застосовується одразу, на запущеному — після рестарту."
-                        android:textSize="12sp" />
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant" />
 
                 </LinearLayout>
 
-            </com.google.android.material.card.MaterialCardView>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginTop="16dp">
-
-                <Button
-                    android:id="@+id/btnStart"
-                    android:layout_width="0dp"
+                <!-- Actions -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="4dp"
-                    android:text="@string/start" />
+                    android:orientation="horizontal"
+                    android:layout_marginTop="16dp">
 
-                <Button
-                    android:id="@+id/btnStop"
-                    android:layout_width="0dp"
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStart"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:text="@string/start"
+                        style="@style/PocketHost.Button.Start" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnStop"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/stop"
+                        style="@style/PocketHost.Button.Destructive" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRestart"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/restart"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="4dp"
-                    android:text="@string/stop" />
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnConsole"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:text="@string/console"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnFiles"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/files"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDelete"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/delete"
+                    style="@style/PocketHost.Button.Destructive" />
 
             </LinearLayout>
 
-            <Button
-                android:id="@+id/btnRestart"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/restart" />
+        </androidx.core.widget.NestedScrollView>
 
-            <Button
-                android:id="@+id/btnConsole"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/console"
-                style="@style/Widget.Material3.Button.OutlinedButton" />
-
-            <Button
-                android:id="@+id/btnFiles"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/files"
-                style="@style/Widget.Material3.Button.OutlinedButton" />
-
-            <Button
-                android:id="@+id/btnDelete"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="@string/delete"
-                android:backgroundTint="@android:color/holo_red_dark" />
-
-        </LinearLayout>
-
-    </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -8,13 +8,22 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class TermuxResultsService : Service() {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // H6: SupervisorJob + cancel в onDestroy щоб не витікав scope.
+    private val serviceJob = SupervisorJob()
+    private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        try { scope.cancel() } catch (_: Exception) {}
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let { handleIntent(it) }

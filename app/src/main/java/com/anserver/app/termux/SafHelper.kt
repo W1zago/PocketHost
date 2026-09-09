@@ -9,6 +9,8 @@ import androidx.documentfile.provider.DocumentFile
 
 object SafHelper {
 
+    private val SAFE_NAME_REGEX = Regex("[^a-zA-Z0-9._-]")
+
     fun isOnPrimaryStorage(context: Context, uri: Uri): Boolean {
         return try {
             val docId = DocumentsContract.getTreeDocumentId(uri)
@@ -18,6 +20,9 @@ object SafHelper {
         }
     }
 
+    // H4: getExternalStorageDirectory deprecated — для SAF-display мапінгу потрібен
+    // саме legacy root. TODO: мігрувати на SAF-DocumentFile/MediaStore коли буде час.
+    @Suppress("DEPRECATION")
     fun getDisplayPath(context: Context, uri: Uri): String {
         return try {
             val docId = DocumentsContract.getTreeDocumentId(uri)
@@ -82,7 +87,7 @@ object SafHelper {
     }
 
     fun sanitizeName(name: String): String {
-        return name.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(32).lowercase().ifEmpty { "server" }
+        return name.replace(SAFE_NAME_REGEX, "_").take(32).lowercase().ifEmpty { "server" }
     }
 
     data class ValidationResult(val ok: Boolean, val message: String)

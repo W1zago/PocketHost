@@ -15,6 +15,16 @@ class ANServerApplication : Application() {
             private set
         lateinit var serverRepository: ServerRepository
             private set
+
+        /** True якщо [serverRepository] вже проініціалізовано (без кидання UninitializedPropertyAccessException). */
+        val isRepositoryInitialized: Boolean
+            get() = ::serverRepository.isInitialized
+
+        /** Безпечний доступ: null якщо репозиторій ще не готовий або пошкоджений. */
+        fun getRepositoryOrNull(): ServerRepository? =
+            if (::serverRepository.isInitialized) {
+                runCatching { serverRepository }.getOrNull()
+            } else null
     }
 
     override fun onCreate() {
@@ -32,21 +42,22 @@ class ANServerApplication : Application() {
             } catch (_: Exception) {}
             defaultHandler?.uncaughtException(thread, throwable)
         }
-        try {
+        // Single init з зрозумілим fallback: якщо DataStore пошкоджено — чистимо
+        // файли один раз і пробуємо ще раз. Якщо і другий раз впав — лишаємо
+        // неініціалізованим (getRepositoryOrNull() == null, isRepositoryInitialized == false),
+        // викликачі мають обробити через fallback/Toast+finish, а не крашитись на lateinit.
+        runCatching {
             serverRepository = ServerRepository(this)
-        } catch (e: Exception) {
+        }.onFailure { e ->
             android.util.Log.e("ANServerApplication", "ServerRepository init failed, clearing datastore", e)
-            try {
-                // Delete corrupted DataStore file
+            runCatching {
                 java.io.File(filesDir, "datastore/pockethost_servers.preferences_pb").delete()
                 java.io.File(filesDir, "datastore/pockethost_servers.preferences_pb.tmp").delete()
-            } catch (_: Exception) {}
-            try {
+            }
+            runCatching {
                 serverRepository = ServerRepository(this)
-            } catch (e2: Exception) {
-                android.util.Log.e("ANServerApplication", "Retry failed", e2)
-                // Last resort: use in-memory only repository via reflection fallback (create empty)
-                serverRepository = ServerRepository(this)
+            }.onFailure { e2 ->
+                android.util.Log.e("ANServerApplication", "ServerRepository retry failed, leaving uninitialized", e2)
             }
         }
         try { createNotificationChannel() } catch (_: Exception) {}

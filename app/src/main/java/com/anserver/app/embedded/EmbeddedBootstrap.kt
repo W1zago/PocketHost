@@ -3,6 +3,7 @@ package com.anserver.app.embedded
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -156,7 +157,7 @@ object EmbeddedBootstrap {
                         if (attempt < MAX_JRE_ATTEMPTS) {
                             val keptMb = try { tmpFile.length() / 1024 / 1024 } catch (_: Exception) { 0L }
                             log("Спроба $attempt/$MAX_JRE_ATTEMPTS перервана ($err). Збережено $keptMb MB — повторюю докачку...")
-                            try { Thread.sleep(3000) } catch (_: Exception) {}
+                            try { delay(3000) } catch (_: Exception) {}
                         }
                     }
                     if (err == null) {

@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
@@ -23,6 +24,11 @@ class TermuxHardGateActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                try { finishAffinity() } catch (_: Exception) { try { finish() } catch (_: Exception) {} }
+            }
+        })
         // Автоміграція на вбудований термінал: жодних перевірок Termux
         try {
             startActivity(Intent(this, com.anserver.app.ui.MainActivity::class.java).apply {
@@ -181,9 +187,4 @@ class TermuxHardGateActivity : AppCompatActivity() {
         }
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        try { super.onBackPressed() } catch (_: Exception) {}
-        try { finishAffinity() } catch (_: Exception) { finish() }
-    }
 }

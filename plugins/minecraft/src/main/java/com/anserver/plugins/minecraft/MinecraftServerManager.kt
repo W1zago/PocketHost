@@ -1,5 +1,6 @@
 package com.anserver.plugins.minecraft
 
+import android.util.Log
 import com.anserver.core.model.MinecraftLoader
 import com.anserver.core.model.Server
 import com.anserver.core.model.ServerConfig
@@ -7,6 +8,7 @@ import com.anserver.core.model.ServerType
 import com.anserver.core.util.FileUtils
 import com.anserver.core.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -86,7 +88,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 serverSoftware = software
             )
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "createMinecraftServer failed", e)
             log?.invoke("EXCEPTION: ${e.message}")
             null
         }
@@ -153,7 +155,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             }
             return@withContext true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "provision failed", e)
             log("Provision error: ${e.message}")
             return@withContext false
         }
@@ -236,7 +238,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
 
             jarName
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "downloadServerJar failed", e)
             log?.invoke("Download error: ${e.message}")
             null
         }
@@ -254,7 +256,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
         }
     }
 
-    private fun getVanillaUrl(version: String, log: ((String) -> Unit)?): String? {
+    private suspend fun getVanillaUrl(version: String, log: ((String) -> Unit)?): String? {
         return try {
             log?.invoke("Resolving Vanilla $version manifest...")
             var manifestJson: String? = null
@@ -278,7 +280,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     attempts++
                     if (attempts < 6) {
                         log?.invoke("Retrying manifest in ${attempts*2}s... ($attempts/6)")
-                        Thread.sleep((attempts*2000).toLong())
+                        delay((attempts*2000).toLong())
                     }
                 }
             }
@@ -319,7 +321,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 } catch (e: Exception) {
                     log?.invoke("Version meta attempt ${attempt+1} failed: ${e.message}")
                 }
-                if (versionMetaJson == null && attempt < 2) Thread.sleep(2000)
+                if (versionMetaJson == null && attempt < 2) delay(2000)
             }
             if (versionMetaJson == null) return null
             val versionMeta = JSONObject(versionMetaJson)
@@ -329,7 +331,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             log?.invoke("Vanilla URL: $url")
             url
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "getVanillaUrl failed", e)
             log?.invoke("Vanilla resolve failed: ${e.message}")
             null
         }
@@ -416,7 +418,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             log?.invoke("No Paper build for $version. Перевір список версій: Paper підтримує $version? Спробуй VANILLA/PURPUR/FABRIC.")
             null
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "getPaperUrl failed", e)
             log?.invoke("Paper resolve failed: ${e.message}")
             null
         }
@@ -437,7 +439,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             // fallback
             "https://api.purpurmc.org/v2/purpur/$version/latest/download"
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "getPurpurUrl failed", e)
             log?.invoke("Purpur resolve failed: ${e.message}")
             "https://api.purpurmc.org/v2/purpur/$version/latest/download"
         }
@@ -472,13 +474,14 @@ class MinecraftServerManager(private val baseDirectory: String) {
             }
             null
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "getFabricUrl failed", e)
             log?.invoke("Fabric resolve failed: ${e.message}")
             null
         }
     }
 
     companion object {
+        private const val TAG = "MinecraftServerManager"
         // Fill v3 вимагає ідентифікуючий User-Agent з контактом, інакше 403/rate-limit.
         // https://docs.papermc.io/misc/downloads-service/
         private const val USER_AGENT = "PocketHost/1.0 (Android; +https://github.com/anserver/pockethost)"
@@ -664,7 +667,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             downloadFile(pluginUrl, file, null)
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "installPlugin failed", e)
             false
         }
     }
@@ -677,7 +680,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             downloadFile(modUrl, file, null)
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "installMod failed", e)
             false
         }
     }

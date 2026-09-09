@@ -1,12 +1,34 @@
 package com.anserver.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.Selection
+import android.text.Spannable
+import android.text.TextWatcher
+import android.util.Log
+import android.view.ContextMenu
+import android.view.KeyEvent
+import android.view.Menu
+import android.view.MenuItem
+import android.view.MotionEvent
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.anserver.app.ANServerApplication
+import com.anserver.app.R
 import com.anserver.app.databinding.ActivityConsoleBinding
 import com.anserver.app.embedded.EmbeddedPaths
 import com.anserver.app.embedded.EmbeddedProcessManager
+import com.anserver.core.model.ServerStatus
+import com.anserver.core.model.ServerType
+import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -23,11 +45,39 @@ import java.io.RandomAccessFile
 class ConsoleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityConsoleBinding
-    private val repository = ANServerApplication.serverRepository
+    // Уніфіковано з MainActivity/CreateServerActivity: безпечний lazy-доступ.
+    private val repository by lazy {
+        runCatching { ANServerApplication.serverRepository }.getOrElse { e ->
+            Log.e("ConsoleActivity", "repo not ready, using fallback", e)
+            com.anserver.core.repository.ServerRepository(this@ConsoleActivity)
+        }
+    }
     private var serverId: String? = null
     private var workDir: File? = null
     private var ctrlActive = false
     private var altActive = false
+
+    // Log buffer + filters (all real: derived from actual backend output).
+    private val logBuffer: ArrayDeque<String> = ArrayDeque()
+    private var infoCount = 0
+    private var warnCount = 0
+    private var errorCount = 0
+    private var filterLevel: String = "ALL"
+    private var filterQuery: String = ""
+    private var autoScroll = true
+    private var footerTick = 0
+
+    // Sent-command history (local recall, like terminal history).
+    private val sentHistory: ArrayDeque<String> = ArrayDeque()
+    private var historyPos = -1
+
+    companion object {
+        private const val INITIAL_TAIL_SIZE = 16 * 1024L
+        private const val MAX_BUFFER_LINES = 2000
+        private val ANSI_REGEX = Regex("\u001B\\[[0-9;?]*[A-Za-z]")
+        private val ERROR_PATTERN = Regex("error|exception|failed|severe|fatal|caused by", RegexOption.IGNORE_CASE)
+        private val WARN_PATTERN = Regex("warn", RegexOption.IGNORE_CASE)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +89,8 @@ class ConsoleActivity : AppCompatActivity() {
         setupToolbar()
         setupConsole()
         setupExtraKeys()
+        setupFilters()
+        setupQuickPills()
         loadServerInfo()
         startOutputMonitoring()
     }
@@ -46,16 +98,86 @@ class ConsoleActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Console (вбудована)"
+        supportActionBar?.title = "Console"
         binding.consoleOutput.setOnLongClickListener { false }
         binding.consoleOutput.setOnClickListener { }
         registerForContextMenu(binding.consoleOutput)
     }
 
+    /** Log search + level filter + follow toggle (all computed from real output). */
+    private fun setupFilters() {
+        binding.chipLevelGroup.setOnCheckedStateChangeListener { group, _ ->
+            val chip = group.findViewById<Chip>(group.checkedChipId)
+            filterLevel = chip?.tag?.toString() ?: "ALL"
+            renderFiltered()
+        }
+        binding.etLogFilter.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                filterQuery = s?.toString()?.trim()?.lowercase() ?: ""
+                renderFiltered()
+            }
+        })
+        binding.btnAutoScroll.setOnClickListener {
+            autoScroll = !autoScroll
+            binding.btnAutoScroll.text = if (autoScroll) "Follow: ON" else "Follow: OFF"
+            binding.btnJumpLive.visibility = if (autoScroll) View.GONE else View.VISIBLE
+            if (autoScroll) scrollToBottom()
+        }
+        binding.btnJumpLive.setOnClickListener {
+            autoScroll = true
+            binding.btnAutoScroll.text = "Follow: ON"
+            binding.btnJumpLive.visibility = View.GONE
+            scrollToBottom()
+        }
+        // Manual scroll up pauses follow (standard console UX).
+        binding.scrollView.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_MOVE && autoScroll) {
+                binding.scrollView.post {
+                    val max = binding.consoleOutput.bottom - binding.scrollView.height
+                    if (binding.scrollView.scrollY < max - 120) {
+                        autoScroll = false
+                        binding.btnAutoScroll.text = "Follow: OFF"
+                        binding.btnJumpLive.visibility = View.VISIBLE
+                    }
+                }
+            }
+            false
+        }
+    }
+
+    /** Quick command pills only fill the input — execution still goes through sendInput. */
+    private fun setupQuickPills() {
+        val fill: (String) -> Unit = { cmd ->
+            binding.inputCommand.setText(cmd)
+            binding.inputCommand.setSelection(cmd.length)
+            binding.inputCommand.requestFocus()
+        }
+        binding.pillList.setOnClickListener { fill("/list") }
+        binding.pillTps.setOnClickListener { fill("/tps") }
+        binding.pillSaveAll.setOnClickListener { fill("/save-all") }
+        binding.pillSay.setOnClickListener { fill("/say ") }
+        binding.pillStop.setOnClickListener { fill("/stop") }
+        binding.pillLs.setOnClickListener { fill("ls") }
+        binding.pillPs.setOnClickListener { fill("ps") }
+        binding.pillDf.setOnClickListener { fill("df -h") }
+        binding.pillPwd.setOnClickListener { fill("pwd") }
+    }
+
+    private fun scrollToBottom() {
+        binding.consoleOutput.post {
+            binding.scrollView.smoothScrollTo(
+                0,
+                (binding.consoleOutput.bottom - binding.scrollView.height).coerceAtLeast(0)
+            )
+        }
+    }
+
     override fun onCreateContextMenu(
-        menu: android.view.ContextMenu?,
-        v: android.view.View?,
-        menuInfo: android.view.ContextMenu.ContextMenuInfo?
+        menu: ContextMenu?,
+        v: View?,
+        menuInfo: ContextMenu.ContextMenuInfo?
     ) {
         super.onCreateContextMenu(menu, v, menuInfo)
         menu?.add(0, 1, 0, "Копіювати виділене")
@@ -64,7 +186,7 @@ class ConsoleActivity : AppCompatActivity() {
         menu?.add(0, 4, 0, "Очистити консоль")
     }
 
-    override fun onContextItemSelected(item: android.view.MenuItem): Boolean {
+    override fun onContextItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             1 -> { copySelection(); true }
             2 -> { copyAll(); true }
@@ -74,17 +196,17 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
-        menuInflater.inflate(com.anserver.app.R.menu.menu_console, menu)
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        menuInflater.inflate(R.menu.menu_console, menu)
         return true
     }
 
-    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            com.anserver.app.R.id.action_copy -> { copyAll(); true }
-            com.anserver.app.R.id.action_select_all -> { selectAll(); true }
-            com.anserver.app.R.id.action_clear -> { clearConsole(); true }
-            com.anserver.app.R.id.action_share -> { shareLog(); true }
+            R.id.action_copy -> { copyAll(); true }
+            R.id.action_select_all -> { selectAll(); true }
+            R.id.action_clear -> { clearConsole(); true }
+            R.id.action_share -> { shareLog(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -100,42 +222,47 @@ class ConsoleActivity : AppCompatActivity() {
     }
 
     private fun copyAll() {
-        copyToClipboard(binding.consoleOutput.text.toString())
-        android.widget.Toast.makeText(this, "Скопійовано ${binding.consoleOutput.text.length} символів", android.widget.Toast.LENGTH_SHORT).show()
+        copyToClipboard(fullLogText())
+        Toast.makeText(this, "Скопійовано ${fullLogText().length} символів", Toast.LENGTH_SHORT).show()
     }
 
     private fun selectAll() {
         binding.consoleOutput.post {
             val text = binding.consoleOutput.text
-            if (text is android.text.Spannable) {
-                android.text.Selection.selectAll(text as android.text.Spannable)
+            if (text is Spannable) {
+                Selection.selectAll(text as Spannable)
             } else copyAll()
         }
     }
 
     private fun clearConsole() {
+        logBuffer.clear()
+        infoCount = 0
+        warnCount = 0
+        errorCount = 0
         binding.consoleOutput.text = ""
-        android.widget.Toast.makeText(this, "Консоль очищено (файл логу не видалено)", android.widget.Toast.LENGTH_SHORT).show()
+        updateLevelCounts()
+        Toast.makeText(this, "Консоль очищено (файл логу не видалено)", Toast.LENGTH_SHORT).show()
     }
 
     private fun shareLog() {
-        val logText = binding.consoleOutput.text.toString()
+        val logText = fullLogText()
         if (logText.isBlank()) {
-            android.widget.Toast.makeText(this, "Лог порожній", android.widget.Toast.LENGTH_SHORT).show(); return
+            Toast.makeText(this, "Лог порожній", Toast.LENGTH_SHORT).show(); return
         }
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        val intent = android.content.Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(android.content.Intent.EXTRA_TEXT, logText)
-            putExtra(android.content.Intent.EXTRA_SUBJECT, "PocketHost server log")
+            putExtra(Intent.EXTRA_TEXT, logText)
+            putExtra(Intent.EXTRA_SUBJECT, "PocketHost server log")
         }
-        startActivity(android.content.Intent.createChooser(intent, "Поділитися логом"))
+        startActivity(Intent.createChooser(intent, "Поділитися логом"))
     }
 
     private fun copyToClipboard(text: String) {
-        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val clip = android.content.ClipData.newPlainText("console", text)
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("console", text)
         clipboard.setPrimaryClip(clip)
-        android.widget.Toast.makeText(this, "Скопійовано в буфер", android.widget.Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Скопійовано в буфер", Toast.LENGTH_SHORT).show()
     }
 
     private fun setupConsole() {
@@ -148,9 +275,10 @@ class ConsoleActivity : AppCompatActivity() {
                 writeToProcess("\n")
             }
         }
+        binding.btnHistory.setOnClickListener { recallHistory() }
         binding.inputCommand.setOnEditorActionListener { _, actionId, event ->
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND ||
-                (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_ENTER)) {
+            if (actionId == EditorInfo.IME_ACTION_SEND ||
+                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
                 val command = binding.inputCommand.text.toString()
                 if (command.isNotEmpty()) {
                     sendCommand(command)
@@ -215,7 +343,7 @@ class ConsoleActivity : AppCompatActivity() {
         val ok = try {
             EmbeddedProcessManager.sendInput(id, data)
         } catch (e: Exception) {
-            android.util.Log.e("ConsoleActivity", "sendInput failed", e)
+            Log.e("ConsoleActivity", "sendInput failed", e)
             false
         }
         if (!ok) {
@@ -242,14 +370,57 @@ class ConsoleActivity : AppCompatActivity() {
                         server?.let {
                             val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
                             workDir = EmbeddedPaths.resolveWorkDir(this@ConsoleActivity, it.id, uriStr)
+                            binding.tvServerName.text = it.name
+                            supportActionBar?.title = it.name
+                            // Quick pills match the REAL server type (Minecraft-only settings rule).
+                            val isMc = it.type == ServerType.MINECRAFT
+                            binding.quickMinecraft.visibility =
+                                if (isMc) View.VISIBLE else View.GONE
+                            binding.quickUbuntu.visibility =
+                                if (!isMc) View.VISIBLE else View.GONE
+                            updateStatusPill(it.status)
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ConsoleActivity", "loadServerInfo", e)
+                    Log.e("ConsoleActivity", "loadServerInfo", e)
                     binding.consoleOutput.setText("ERROR loading console: ${e.message}\n")
                 }
             }
         }
+    }
+
+    private fun updateStatusPill(status: com.anserver.core.model.ServerStatus) {
+        val pillBgRes = when (status) {
+            ServerStatus.RUNNING -> R.drawable.bg_status_running
+            ServerStatus.STARTING,
+            ServerStatus.STOPPING -> R.drawable.bg_status_warning
+            ServerStatus.ERROR -> R.drawable.bg_status_error
+            else -> R.drawable.bg_status_idle
+        }
+        val dotRes = when (status) {
+            ServerStatus.RUNNING -> R.drawable.bg_dot_running
+            ServerStatus.STARTING,
+            ServerStatus.STOPPING -> R.drawable.bg_dot_warning
+            ServerStatus.ERROR -> R.drawable.bg_dot_error
+            else -> R.drawable.bg_dot_idle
+        }
+        val labelRes = when (status) {
+            ServerStatus.RUNNING -> R.color.badge_running_fg
+            ServerStatus.STARTING,
+            ServerStatus.STOPPING -> R.color.badge_warning_fg
+            ServerStatus.ERROR -> R.color.badge_error_fg
+            else -> R.color.badge_idle_fg
+        }
+        binding.statusBadge.setBackgroundResource(pillBgRes)
+        binding.statusDot.setBackgroundResource(dotRes)
+        binding.statusText.text = when (status) {
+            ServerStatus.RUNNING -> "Running"
+            ServerStatus.STARTING -> "Starting"
+            ServerStatus.STOPPING -> "Stopping"
+            ServerStatus.ERROR -> "Error"
+            else -> "Stopped"
+        }
+        binding.statusText.setTextColor(ContextCompat.getColor(this, labelRes))
     }
 
     private fun startOutputMonitoring() {
@@ -330,7 +501,7 @@ class ConsoleActivity : AppCompatActivity() {
                         }
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("ConsoleActivity", "Error reading log", e)
+                    Log.e("ConsoleActivity", "Error reading log", e)
                 }
                 delay(200)
             }
@@ -338,24 +509,130 @@ class ConsoleActivity : AppCompatActivity() {
     }
 
     private fun appendOutput(output: String) {
-        binding.consoleOutput.append(output)
-        binding.consoleOutput.post {
-            val scrollAmount = binding.consoleOutput.layout?.getLineTop(binding.consoleOutput.lineCount) ?: 0
-            binding.consoleOutput.scrollTo(0, scrollAmount)
+        // Strip ANSI escapes so control codes never render as garbage; keep plain text.
+        val clean = try {
+            ANSI_REGEX.replace(output, "")
+        } catch (_: Exception) { output }
+        val newLines = clean.lines()
+        var appendedVisible = false
+        val visibleChunk = StringBuilder()
+        for (line in newLines) {
+            // Preserve blank-line spacing in buffer only if it carries content around it.
+            if (line.isEmpty() && logBuffer.isEmpty()) continue
+            logBuffer.addLast(line)
+            if (logBuffer.size > MAX_BUFFER_LINES) logBuffer.removeFirst()
+            when (lineLevel(line)) {
+                "ERROR" -> errorCount++
+                "WARN" -> warnCount++
+                else -> infoCount++
+            }
+            if (matchesFilter(line)) {
+                if (visibleChunk.isNotEmpty()) visibleChunk.append("\n")
+                visibleChunk.append(line)
+                appendedVisible = true
+            }
+        }
+        if (appendedVisible) {
+            binding.consoleOutput.append(
+                if (binding.consoleOutput.text.isEmpty()) visibleChunk.toString()
+                else "\n" + visibleChunk.toString()
+            )
+            if (autoScroll) scrollToBottom()
+        }
+        updateLevelCounts()
+        updateFooter()
+    }
+
+    private fun lineLevel(line: String): String {
+        return when {
+            ERROR_PATTERN.containsMatchIn(line) -> "ERROR"
+            WARN_PATTERN.containsMatchIn(line) -> "WARN"
+            else -> "INFO"
+        }
+    }
+
+    private fun matchesFilter(line: String): Boolean {
+        if (filterQuery.isNotEmpty() && !line.lowercase().contains(filterQuery)) return false
+        return when (filterLevel) {
+            "INFO" -> lineLevel(line) == "INFO"
+            "WARN" -> lineLevel(line) == "WARN"
+            "ERROR" -> lineLevel(line) == "ERROR"
+            else -> true
+        }
+    }
+
+    /** Full re-render from buffer (used when the filter changes). */
+    private fun renderFiltered() {
+        try {
+            val text = logBuffer.filter { matchesFilter(it) }.joinToString("\n")
+            binding.consoleOutput.text = text
+            if (autoScroll) scrollToBottom()
+        } catch (e: Exception) {
+            Log.e("ConsoleActivity", "renderFiltered failed", e)
+        }
+    }
+
+    private fun fullLogText(): String {
+        return try {
+            logBuffer.joinToString("\n")
+        } catch (_: Exception) { "" }
+    }
+
+    private fun updateLevelCounts() {
+        try {
+            val total = infoCount + warnCount + errorCount
+            binding.chipAll.text = "ALL $total"
+            binding.chipInfo.text = "INFO $infoCount"
+            binding.chipWarn.text = "WARN $warnCount"
+            binding.chipError.text = "ERROR $errorCount"
+        } catch (_: Exception) {}
+    }
+
+    /** Footer shows the REAL process state (throttled: isRunning reads live facts). */
+    private fun updateFooter() {
+        footerTick++
+        if (footerTick % 10 != 0) return
+        val id = serverId ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            val running = try {
+                EmbeddedProcessManager.isRunning(id)
+            } catch (_: Exception) { false }
+            withContext(Dispatchers.Main) {
+                try {
+                    val state = if (running) "● running" else "○ stopped"
+                    binding.tvFooterStatus.text = "$state • server.log • ${logBuffer.size} lines"
+                } catch (_: Exception) {}
+            }
         }
     }
 
     private fun sendCommand(command: String) {
+        recordHistory(command)
         appendOutput("$ $command\n")
         writeToProcess("$command\n")
+    }
+
+    private fun recordHistory(command: String) {
+        val cmd = command.trim()
+        if (cmd.isEmpty()) return
+        if (sentHistory.lastOrNull() != cmd) {
+            sentHistory.addLast(cmd)
+            if (sentHistory.size > 50) sentHistory.removeFirst()
+        }
+        historyPos = -1
+    }
+
+    /** Cycles previously sent commands into the input (terminal-style history). */
+    private fun recallHistory() {
+        if (sentHistory.isEmpty()) return
+        historyPos = (historyPos + 1) % sentHistory.size
+        val cmd = sentHistory[sentHistory.size - 1 - historyPos]
+        binding.inputCommand.setText(cmd)
+        binding.inputCommand.setSelection(cmd.length)
     }
 
     override fun onSupportNavigateUp(): Boolean {
         onBackPressed()
         return true
-    }
-
-    companion object {
-        private const val INITIAL_TAIL_SIZE = 16 * 1024L
     }
 }

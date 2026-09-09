@@ -31,7 +31,15 @@ class MinecraftCreateFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val baseDir = requireContext().getExternalFilesDir(null)?.absolutePath + "/servers"
+        // H4: getExternalFilesDir може бути null (нема сховища) — fallback на filesDir з Toast.
+        val extRoot = requireContext().getExternalFilesDir(null)?.absolutePath
+        val baseRoot = extRoot ?: run {
+            try {
+                android.widget.Toast.makeText(requireContext(), "Зовнішнє сховище недоступне — використовую внутрішнє", android.widget.Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {}
+            requireContext().filesDir.absolutePath
+        }
+        val baseDir = "$baseRoot/servers"
         minecraftManager = MinecraftServerManager(baseDir)
 
         setupViews()
@@ -42,7 +50,7 @@ class MinecraftCreateFragment : Fragment() {
             createMinecraftServer()
         }
 
-        val softwareOptions = MinecraftServerSoftware.values().map { it.name }
+        val softwareOptions = MinecraftServerSoftware.entries.map { it.name }
         binding.spinnerSoftware.adapter = android.widget.ArrayAdapter(
             requireContext(),
             android.R.layout.simple_spinner_dropdown_item,
@@ -55,7 +63,7 @@ class MinecraftCreateFragment : Fragment() {
         val version = binding.editVersion.text.toString()
         val port = binding.editPort.text.toString().toIntOrNull() ?: 25565
         val softwareIndex = binding.spinnerSoftware.selectedItemPosition
-        val software = MinecraftServerSoftware.values()[softwareIndex]
+        val software = MinecraftServerSoftware.entries[softwareIndex]
 
         if (name.isEmpty()) {
             Snackbar.make(binding.root, "Server name is required", Snackbar.LENGTH_SHORT).show()
@@ -73,12 +81,14 @@ class MinecraftCreateFragment : Fragment() {
         lifecycleScope.launch {
             val server = minecraftManager.createMinecraftServer(name, version, software, port)
 
+            // H8: після мережевого await фрагмент міг від'єднатися — не чіпаємо binding.
+            if (!isAdded || _binding == null) return@launch
             binding.progressBar.visibility = View.GONE
             binding.btnCreate.isEnabled = true
 
             if (server != null) {
                 Snackbar.make(binding.root, "Server created successfully", Snackbar.LENGTH_SHORT).show()
-                requireActivity().finish()
+                try { requireActivity().finish() } catch (_: Exception) {}
             } else {
                 Snackbar.make(binding.root, "Failed to create server", Snackbar.LENGTH_SHORT).show()
             }
