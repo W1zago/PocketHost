@@ -1,25 +1,25 @@
 @echo off
 echo ========================================
-echo   ANServer Project Transfer Script
+echo   PocketHost Project Transfer Script
 echo ========================================
 echo.
-echo This script will copy ANServer project to E:\ANServer
+echo This script will copy PocketHost project to E:\PocketHost
 echo Requires Administrator privileges
 echo.
 pause
 
 echo.
 echo Copying files...
-robocopy "C:\Users\W1zago\ANServer" "E:\ANServer" /E /MT:8 /R:3 /W:5
+robocopy "C:\Users\W1zago\PocketHost" "E:\PocketHost" /E /MT:8 /R:3 /W:5
 
 if %ERRORLEVEL% LEQ 7 (
     echo.
     echo ========================================
-    echo   SUCCESS! Project copied to E:\ANServer
+    echo   SUCCESS! Project copied to E:\PocketHost
     echo ========================================
     echo.
     echo You can now open the project in Android Studio:
-    echo File ^> Open ^> E:\ANServer
+    echo File ^> Open ^> E:\PocketHost
     echo.
 ) else (
     echo.

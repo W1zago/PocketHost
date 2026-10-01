@@ -1,6 +1,6 @@
-# Contributing to ANServer
+# Contributing to PocketHost
 
-Thank you for your interest in contributing to ANServer! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to PocketHost! This document provides guidelines and instructions for contributing.
 
 ## Code of Conduct
 
@@ -43,7 +43,7 @@ Feature requests should include:
 
 1. **Fork the repository**
    ```bash
-   git clone https://github.com/yourusername/ANServer.git
+   git clone https://github.com/yourusername/PocketHost.git
    ```
 
 2. **Create a feature branch**
@@ -135,12 +135,12 @@ suspend fun createServer(name: String, type: ServerType): Server? {
 ## Project Structure
 
 ```
-ANServer/
-├── app/              # Main application
-├── core/             # Core business logic
-├── native/           # Native C++ code
-└── plugins/          # Plugin modules
-    └── minecraft/    # Minecraft plugin
+PocketHost/
+в”њв”Ђв”Ђ app/              # Main application
+в”њв”Ђв”Ђ core/             # Core business logic
+в”њв”Ђв”Ђ native/           # Native C++ code
+в””в”Ђв”Ђ plugins/          # Plugin modules
+    в””в”Ђв”Ђ minecraft/    # Minecraft plugin
 ```
 
 ## Commit Message Guidelines
@@ -267,4 +267,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to ANServer! 🚀
+Thank you for contributing to PocketHost! рџљЂ

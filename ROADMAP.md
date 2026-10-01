@@ -1,6 +1,6 @@
-# ANServer Development Roadmap
+# PocketHost Development Roadmap
 
-## Version 1.0.0 (Current) ✅
+## Version 1.0.0 (Current) вњ…
 **Status**: Complete - Production Ready
 
 ### Core Features
@@ -35,7 +35,7 @@
 - [ ] Notification actions (start/stop from notification)
 - [ ] Swipe gestures for server cards
 - [ ] Search and filter servers
-- [ ] General interface overhaul (DEFERRED per user request 08.09.2026 — do later, not now): unify styling/spacing across creation/detail/console screens, Material3 polish pass, Ukrainian strings review
+- [ ] General interface overhaul (DEFERRED per user request 08.09.2026 вЂ” do later, not now): unify styling/spacing across creation/detail/console screens, Material3 polish pass, Ukrainian strings review
 
 ### Features
 - [ ] Server templates library
@@ -298,6 +298,6 @@
 
 **Last Updated**: 2026-09-08
 
-**Maintainer**: ANServer Development Team
+**Maintainer**: PocketHost Development Team
 
 **License**: See LICENSE file

@@ -1,4 +1,4 @@
-# ANServer Build Instructions
+# PocketHost Build Instructions
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@
 1. Clone or extract the project to your desired location
 2. Open Android Studio
 3. Select "Open an Existing Project"
-4. Navigate to the ANServer directory and select it
+4. Navigate to the PocketHost directory and select it
 5. Wait for Gradle sync to complete
 
 ## Building
@@ -100,15 +100,15 @@ Run instrumented tests:
 ## Project Structure
 
 ```
-ANServer/
-├── app/              # Main application module
-├── core/             # Core business logic
-├── native/           # Native C++ code
-├── plugins/
-│   └── minecraft/    # Minecraft plugin module
-├── gradle/           # Gradle wrapper
-├── build.gradle.kts  # Root build script
-└── settings.gradle.kts
+PocketHost/
+в”њв”Ђв”Ђ app/              # Main application module
+в”њв”Ђв”Ђ core/             # Core business logic
+в”њв”Ђв”Ђ native/           # Native C++ code
+в”њв”Ђв”Ђ plugins/
+в”‚   в””в”Ђв”Ђ minecraft/    # Minecraft plugin module
+в”њв”Ђв”Ђ gradle/           # Gradle wrapper
+в”њв”Ђв”Ђ build.gradle.kts  # Root build script
+в””в”Ђв”Ђ settings.gradle.kts
 ```
 
 ## Dependencies

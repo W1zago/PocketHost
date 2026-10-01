@@ -1,8 +1,8 @@
--keep class com.anserver.** { *; }
--keepclassmembers class com.anserver.** { *; }
+-keep class com.pockethost.** { *; }
+-keepclassmembers class com.pockethost.** { *; }
 
--keep class com.anserver.app.jvm.PocketJvm { *; }
--keepclassmembers class com.anserver.app.jvm.PocketJvm { *; }
+-keep class com.pockethost.app.jvm.PocketJvm { *; }
+-keepclassmembers class com.pockethost.app.jvm.PocketJvm { *; }
 
 -keepattributes Signature
 -keepattributes *Annotation*

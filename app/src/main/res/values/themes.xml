@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- PocketHost dark theme. Name kept (referenced from AndroidManifest). -->
-    <style name="Theme.ANServer" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="Theme.PocketHost" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/primary</item>
         <item name="colorOnPrimary">@color/on_primary</item>
         <item name="colorPrimaryContainer">@color/primary_container</item>

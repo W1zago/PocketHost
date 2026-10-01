@@ -5,9 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <!-- Довільна папка сервера (опційно, лише за вибором користувача):
-         на Android 11+ потрібен доступ до всіх файлів (системні налаштування),
-         на старіших — класичний WRITE_EXTERNAL_STORAGE. -->
+    <!-- Р”РѕРІС–Р»СЊРЅР° РїР°РїРєР° СЃРµСЂРІРµСЂР° (РѕРїС†С–Р№РЅРѕ, Р»РёС€Рµ Р·Р° РІРёР±РѕСЂРѕРј РєРѕСЂРёСЃС‚СѓРІР°С‡Р°):
+         РЅР° Android 11+ РїРѕС‚СЂС–Р±РµРЅ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ (СЃРёСЃС‚РµРјРЅС– РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ),
+         РЅР° СЃС‚Р°СЂС–С€РёС… вЂ” РєР»Р°СЃРёС‡РЅРёР№ WRITE_EXTERNAL_STORAGE. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
@@ -17,18 +17,18 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- Вбудований термінал: зовнішній Termux більше не потрібен,
-         дозвіл com.termux.permission.RUN_COMMAND прибрано щоб система
-         не просила "керування / ввід команд в Termux". -->
+    <!-- Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р·РѕРІРЅС–С€РЅС–Р№ Termux Р±С–Р»СЊС€Рµ РЅРµ РїРѕС‚СЂС–Р±РµРЅ,
+         РґРѕР·РІС–Р» com.termux.permission.RUN_COMMAND РїСЂРёР±СЂР°РЅРѕ С‰РѕР± СЃРёСЃС‚РµРјР°
+         РЅРµ РїСЂРѕСЃРёР»Р° "РєРµСЂСѓРІР°РЅРЅСЏ / РІРІС–Рґ РєРѕРјР°РЅРґ РІ Termux". -->
 
     <application
-        android:name=".ANServerApplication"
+        android:name=".PocketHostApplication"
         android:allowBackup="true"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="@string/app_name"
         android:roundIcon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ANServer"
+        android:theme="@style/Theme.PocketHost"
         android:requestLegacyExternalStorage="true"
         android:memtagMode="off"
         tools:targetApi="31">
@@ -36,7 +36,7 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.ANServer">
+            android:theme="@style/Theme.PocketHost">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -64,13 +64,13 @@
             android:exported="false"
             android:noHistory="true"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.ANServer" />
+            android:theme="@style/Theme.PocketHost" />
 
         <activity
             android:name=".termux.DeviceScanActivity"
             android:exported="false"
             android:parentActivityName=".ui.MainActivity"
-            android:theme="@style/Theme.ANServer" />
+            android:theme="@style/Theme.PocketHost" />
 
         <service
             android:name=".service.ServerService"
@@ -78,8 +78,8 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Legacy Termux callback, лишено для сумісності старих встановлень.
-             Не вимагає RUN_COMMAND, не використовується вбудованим терміналом. -->
+        <!-- Legacy Termux callback, Р»РёС€РµРЅРѕ РґР»СЏ СЃСѓРјС–СЃРЅРѕСЃС‚С– СЃС‚Р°СЂРёС… РІСЃС‚Р°РЅРѕРІР»РµРЅСЊ.
+             РќРµ РІРёРјР°РіР°С” RUN_COMMAND, РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ РІР±СѓРґРѕРІР°РЅРёРј С‚РµСЂРјС–РЅР°Р»РѕРј. -->
         <service
             android:name=".termux.TermuxResultsService"
             android:enabled="true"

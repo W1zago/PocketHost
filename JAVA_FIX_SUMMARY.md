@@ -9,11 +9,11 @@ Created a utility class that searches for Java in multiple locations and provide
 ## Changes Made
 
 ### 1. Created JavaUtils.kt
-**File**: `core/src/main/java/com/anserver/core/util/JavaUtils.kt`
+**File**: `core/src/main/java/com/PocketHost/core/util/JavaUtils.kt`
 
 - Searches for Java in multiple locations:
   - Termux: `/data/data/com.termux/files/usr/bin/java`
-  - Bundled: `/data/data/com.anserver.app/files/java/bin/java`
+  - Bundled: `/data/data/com.pockethost.app/files/java/bin/java`
   - System paths: `/system/bin/java`, `/system/xbin/java`
   - PATH: `java`
 - Validates Java executables
@@ -21,7 +21,7 @@ Created a utility class that searches for Java in multiple locations and provide
 - Returns `JavaInfo` with path and version
 
 ### 2. Updated CreateServerActivity.kt
-**File**: `app/src/main/java/com/anserver/app/ui/CreateServerActivity.kt`
+**File**: `app/src/main/java/com/PocketHost/app/ui/CreateServerActivity.kt`
 
 - Replaced `System.getProperty("java.home")` with `JavaUtils.findJavaExecutable()`
 - Added `checkJavaAvailability()` method
@@ -29,13 +29,13 @@ Created a utility class that searches for Java in multiple locations and provide
 - Logs Java path and version when found
 
 ### 3. Updated MinecraftServerManager.kt
-**File**: `plugins/minecraft/src/main/java/com/anserver/plugins/minecraft/MinecraftServerManager.kt`
+**File**: `plugins/minecraft/src/main/java/com/PocketHost/plugins/minecraft/MinecraftServerManager.kt`
 
 - Updated `createStartScript()` to use `JavaUtils.findJavaExecutable()`
 - Generates correct start scripts with proper Java path
 
 ### 4. Updated ServerService.kt
-**File**: `app/src/main/java/com/anserver/app/service/ServerService.kt`
+**File**: `app/src/main/java/com/PocketHost/app/service/ServerService.kt`
 
 - Added Java availability check before starting Minecraft servers
 - Provides detailed error messages with installation instructions
@@ -48,7 +48,7 @@ Created a utility class that searches for Java in multiple locations and provide
 Comprehensive guide covering:
 - Problem explanation
 - Installation steps (Termux recommended)
-- How ANServer finds Java
+- How PocketHost finds Java
 - Troubleshooting tips
 - Java version requirements for different Minecraft versions
 - Performance tips

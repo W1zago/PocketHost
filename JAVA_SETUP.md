@@ -1,4 +1,4 @@
-# Java Setup for ANServer on Android
+# Java Setup for PocketHost on Android
 
 ## Problem
 
@@ -37,24 +37,24 @@ To run Java-based servers (like Minecraft) on Android, you need to install a Jav
    termux-setup-storage
    ```
 
-5. **Restart ANServer**
-   - Close and reopen ANServer app
+5. **Restart PocketHost**
+   - Close and reopen PocketHost app
    - The app will automatically detect Java from Termux
 
 ### Option 2: Manual Java Installation (Advanced)
 
-If you want to bundle Java with ANServer:
+If you want to bundle Java with PocketHost:
 
 1. Download a compatible ARM64 JRE (e.g., Zulu OpenJDK for Android)
-2. Extract to `/data/data/com.anserver.app/files/java/`
+2. Extract to `/data/data/com.pockethost.app/files/java/`
 3. Ensure the `bin/java` executable has proper permissions
 
-## How ANServer Finds Java
+## How PocketHost Finds Java
 
-ANServer searches for Java in the following locations (in order):
+PocketHost searches for Java in the following locations (in order):
 
 1. `/data/data/com.termux/files/usr/bin/java` (Termux)
-2. `/data/data/com.anserver.app/files/java/bin/java` (Bundled)
+2. `/data/data/com.pockethost.app/files/java/bin/java` (Bundled)
 3. `/system/bin/java` (System-wide, rare)
 4. `java` in PATH
 
@@ -65,7 +65,7 @@ ANServer searches for Java in the following locations (in order):
 1. Make sure Termux is properly installed from F-Droid
 2. Verify Java is installed in Termux: `pkg list-installed | grep openjdk`
 3. Check Java path: `which java` in Termux
-4. Restart ANServer app
+4. Restart PocketHost app
 
 ### Permission Denied
 
@@ -98,7 +98,7 @@ pkg install openjdk-11  # For older versions
 
 ## Alternative: Use PRoot Environment
 
-ANServer also supports running servers in PRoot containers (Ubuntu, Debian, Alpine), which come with their own Java installations:
+PocketHost also supports running servers in PRoot containers (Ubuntu, Debian, Alpine), which come with their own Java installations:
 
 1. Create an Ubuntu Server instead of Minecraft
 2. Install Java inside the container
@@ -116,7 +116,7 @@ ANServer also supports running servers in PRoot containers (Ubuntu, Debian, Alpi
 
 If you continue to have issues:
 
-1. Check ANServer logs in the Console tab
+1. Check PocketHost logs in the Console tab
 2. Check Termux logs: `logcat | grep ServerProcess`
 3. Verify Java installation: `java -version` in Termux
 4. Report issues with full error logs

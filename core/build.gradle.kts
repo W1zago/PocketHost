@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.anserver.core"
+    namespace = "com.pockethost.core"
     compileSdk = 34
 
     defaultConfig {

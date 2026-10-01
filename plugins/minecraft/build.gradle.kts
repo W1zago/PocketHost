@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.anserver.plugins.minecraft"
+    namespace = "com.pockethost.plugins.minecraft"
     compileSdk = 34
 
     defaultConfig {

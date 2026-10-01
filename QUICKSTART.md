@@ -1,4 +1,4 @@
-# ANServer - Quick Start Guide
+# PocketHost - Quick Start Guide
 
 ## Installation
 
@@ -13,7 +13,7 @@
 
 1. **Open Project**
    ```
-   File > Open > Select C:\Users\W1zago\ANServer
+   File > Open > Select C:\Users\W1zago\PocketHost
    ```
 
 2. **Sync Gradle**
@@ -34,7 +34,7 @@
 
 ### Creating a Basic Server
 
-1. Launch ANServer app
+1. Launch PocketHost app
 2. Tap the **+** (FAB) button
 3. Select server type:
    - **CUSTOM**: Generic server
@@ -260,7 +260,7 @@ Include:
 
 ---
 
-**Project Location**: `C:\Users\W1zago\ANServer`
+**Project Location**: `C:\Users\W1zago\PocketHost`
 
 **Version**: 1.0.0
 

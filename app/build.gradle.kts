@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.anserver.app"
+    namespace = "com.pockethost.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.anserver.app"
+        applicationId = "com.pockethost.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -16,7 +16,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // In-process JVM launcher (порт Mojo jre_launcher): збірка libpockethost_jvm.so
+        // In-process JVM launcher (РїРѕСЂС‚ Mojo jre_launcher): Р·Р±С–СЂРєР° libpockethost_jvm.so
         externalNativeBuild {
             cmake {
                 cFlags += "-std=c11 -Wall"

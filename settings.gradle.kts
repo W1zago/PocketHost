@@ -18,7 +18,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ANServer"
+rootProject.name = "PocketHost"
 include(":app")
 include(":core")
 include(":plugins:minecraft")
