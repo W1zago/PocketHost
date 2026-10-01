@@ -1,128 +1,93 @@
 # Java Setup for PocketHost on Android
 
-## Problem
+## Problem Context
 
-Android devices do not have a standard Java Runtime Environment (JRE) installed. The error `sh: /apex/com.android.art/bin/java: inaccessible or not found` occurs because the app tries to use Android's internal ART runtime, which is not accessible for running Java applications like Minecraft servers.
+Standard Android devices do not ship with a standalone Java Runtime Environment (JRE/JDK).
+If an application attempts to run a Java binary directly using Android's internal ART runtime path (such as `/apex/com.android.art/bin/java`), it will fail with errors such as:
+`sh: /apex/com.android.art/bin/java: inaccessible or not found`
 
-## Solution
+To run Java-based servers (such as Minecraft Paper, Spigot, Vanilla, or custom JAR applications) on PocketHost, a full OpenJDK binary compatible with ARM64/ARMv7 Android environments is required.
 
-To run Java-based servers (like Minecraft) on Android, you need to install a Java runtime. The recommended approach is using **Termux**.
+---
 
-## Installation Steps
+## Execution Modes in PocketHost
 
-### Option 1: Termux (Recommended)
+PocketHost supports **two execution strategies** for Java applications:
 
-1. **Install Termux**
-   - Download from F-Droid: https://f-droid.org/packages/com.termux/
-   - **Do NOT use Google Play version** (it's outdated and broken)
+1. **In-Process Native JVM (`libpockethost_jvm.so`)**:
+   - Uses PocketHost's custom C++ native JNI launcher (ported from MojoLauncher/PojavLauncher).
+   - Runs the JVM inside the app process, optimized for headless servers with low overhead and direct JNI control.
+   - Requires bundled or external OpenJDK runtime libraries (`libjvm.so`, `modules`/`rt.jar`).
 
-2. **Install Java in Termux**
-   ```bash
-   pkg update
-   pkg upgrade
-   pkg install openjdk-17
-   ```
+2. **External Process (Termux / Standalone Binary)**:
+   - Spawns Java as a separate system process via command line.
+   - Ideal when using Termux packages or isolated chroot/PRoot environments.
 
-3. **Verify Installation**
-   ```bash
-   java -version
-   ```
-   You should see output like:
-   ```
-   openjdk version "17.0.x"
-   ```
+---
 
-4. **Grant Storage Permissions**
-   ```bash
-   termux-setup-storage
-   ```
+## Installation & Setup Guide
 
-5. **Restart PocketHost**
-   - Close and reopen PocketHost app
-   - The app will automatically detect Java from Termux
+### Method 1: Termux Setup (Recommended for External Process)
 
-### Option 2: Manual Java Installation (Advanced)
+Using **Termux** is the most reliable way to obtain and update OpenJDK binaries on Android.
 
-If you want to bundle Java with PocketHost:
+#### Step 1: Install Termux
+- Download and install **Termux** from [F-Droid](https://f-droid.org/packages/com.termux/).
+- ⚠️ **Important**: Do NOT install Termux from the Google Play Store (the Play Store version is deprecated and unsupported).
 
-1. Download a compatible ARM64 JRE (e.g., Zulu OpenJDK for Android)
-2. Extract to `/data/data/com.pockethost.app/files/java/`
-3. Ensure the `bin/java` executable has proper permissions
-
-## How PocketHost Finds Java
-
-PocketHost searches for Java in the following locations (in order):
-
-1. `/data/data/com.termux/files/usr/bin/java` (Termux)
-2. `/data/data/com.pockethost.app/files/java/bin/java` (Bundled)
-3. `/system/bin/java` (System-wide, rare)
-4. `java` in PATH
-
-## Troubleshooting
-
-### Java Not Found After Installation
-
-1. Make sure Termux is properly installed from F-Droid
-2. Verify Java is installed in Termux: `pkg list-installed | grep openjdk`
-3. Check Java path: `which java` in Termux
-4. Restart PocketHost app
-
-### Permission Denied
-
-If you get "Permission denied" errors:
+#### Step 2: Install OpenJDK in Termux
+Open Termux and execute:
 
 ```bash
-# In Termux
-chmod +x $PREFIX/bin/java
+# Update package repositories
+pkg update && pkg upgrade -y
+
+# Install OpenJDK 17 (recommended for Minecraft 1.18+)
+pkg install openjdk-17 -y
+
+# Alternatively, for newer Minecraft versions requiring Java 21:
+# pkg install openjdk-21 -y
 ```
 
-### Memory Issues
-
-If Minecraft server crashes due to memory:
-
-1. Reduce `-Xmx` and `-Xms` values in server start command
-2. Close other apps to free up RAM
-3. Use lightweight server software (Paper instead of Vanilla)
-
-## Recommended Java Versions
-
-- **Minecraft 1.17+**: Java 17 or higher
-- **Minecraft 1.16.5 and below**: Java 8 or 11
-- **Minecraft 1.12.2 and below**: Java 8
-
-Install specific versions in Termux:
+#### Step 3: Verify Installation Path
+Check the installed Java path in Termux:
 ```bash
-pkg install openjdk-17  # For modern Minecraft
-pkg install openjdk-11  # For older versions
+which java
+# Output: /data/data/com.termux/files/usr/bin/java
 ```
 
-## Alternative: Use PRoot Environment
+PocketHost automatically scans standard locations including `/data/data/com.termux/files/usr/bin/java`.
 
-PocketHost also supports running servers in PRoot containers (Ubuntu, Debian, Alpine), which come with their own Java installations:
+---
 
-1. Create an Ubuntu Server instead of Minecraft
-2. Install Java inside the container
-3. Run Minecraft server from within the container
+### Method 2: Embedded / Bundled Java Binaries
 
-## Performance Tips
+If you are using PocketHost with a bundled JRE package stored in app internal storage:
 
-1. **Use Paper/Purpur** instead of Vanilla for better performance
-2. **Limit view distance** in server.properties (6-8 chunks)
-3. **Reduce max players** to 5-10
-4. **Allocate appropriate memory**: 1-2GB for small servers
-5. **Use SSD storage** if possible (faster world loading)
+1. Extract your OpenJDK build to the app's internal files directory:
+   `/data/data/com.pockethost.app/files/java/`
+2. Ensure the binary structure follows the standard layout:
+   - Binaries: `/data/data/com.pockethost.app/files/java/bin/java`
+   - Libraries: `/data/data/com.pockethost.app/files/java/lib/`
+3. PocketHost's internal `JavaUtils` scanner automatically detects and validates executables in this directory.
 
-## Support
+---
 
-If you continue to have issues:
+## How PocketHost Detects Java (`JavaUtils.kt`)
 
-1. Check PocketHost logs in the Console tab
-2. Check Termux logs: `logcat | grep ServerProcess`
-3. Verify Java installation: `java -version` in Termux
-4. Report issues with full error logs
+PocketHost uses `com.pockethost.core.util.JavaUtils` to detect and parse major Java versions. The detection algorithm scans paths in the following priority order:
 
-## References
+1. **Termux JRE**: `/data/data/com.termux/files/usr/bin/java`
+2. **Bundled JRE**: `/data/data/com.pockethost.app/files/java/bin/java`
+3. **System Paths**: `/system/bin/java`, `/system/xbin/java`
+4. **Environment PATH**: `java` binary available in current PATH environment variable.
 
-- Termux Wiki: https://wiki.termux.com/
-- Termux Java: https://wiki.termux.com/wiki/Development_Environments#Java
-- Minecraft Server Requirements: https://minecraft.fandom.com/wiki/Server/Requirements
+---
+
+## Troubleshooting & Common Issues
+
+| Issue / Error | Root Cause | Solution |
+| :--- | :--- | :--- |
+| `java: inaccessible or not found` | Attempted to run Android ART internal binary | Install OpenJDK in Termux or place OpenJDK in app files directory. |
+| `UnsupportedClassVersionError` | Server JAR requires a higher Java version (e.g. Java 17/21) than installed | Upgrade OpenJDK in Termux (`pkg install openjdk-17` or `openjdk-21`). |
+| `Permission denied` | The `java` binary lacks execution (`+x`) permissions | In Termux or ADB, run `chmod +x /path/to/java`. |
