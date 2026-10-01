@@ -1,196 +1,181 @@
-# ANServer - Android Server Management Platform
+# PocketHost — Mobile Server Management & Hosting Platform
 
-ANServer is a comprehensive Android application for creating and managing local/dedicated servers directly on Android devices. It provides a universal server platform for running various servers, containers, scripts, and network services.
+PocketHost is a versatile Android platform designed to host, execute, and manage local and dedicated servers directly on mobile devices. It turns Android hardware into a flexible hosting environment capable of running isolated Linux environments, custom backend services, scripts, and gaming servers.
 
-## Architecture
+---
 
-```
-Kotlin (Android UI + Business Logic)
-    ↓ JNI
-C/C++ via Android NDK (Network, Processes, File System, Monitoring)
-    ↓
-PRoot/QEMU (Isolated Linux Environment)
-```
+## 🎯 Purpose & Key Features
 
-## Features
+The primary goal of PocketHost is to enable convenient, isolated, and efficient self-hosting on mobile hardware without requiring root access.
 
-### 1. Server Manager (Core Feature)
-- Create custom servers of any type
-- Run local TCP/UDP servers
-- Launch Linux services in containers
-- Support for Java, Python, Node.js, Docker-like environments
-- Create multiple server instances
-- Start / Stop / Restart / View Logs
+### Core Capabilities
+- **Server Manager**: Create, configure, launch, and monitor custom server instances (TCP/UDP, Linux services, Node.js, Python, or Java runtimes).
+- **Sandboxed Runtimes**: Execute Linux distributions and server binaries inside isolated PRoot or QEMU user-space containers.
+- **Real-Time Monitoring**: Track CPU consumption, memory allocation, active network ports, and process health via high-performance native engines.
+- **Integrated File Management**: Manage server directories, edit configuration files, and create system backups directly within the app.
+- **Modular Plugin System**: Extensible architecture supporting dedicated plugins (e.g., Minecraft server manager supporting Vanilla, Paper, Spigot, Fabric, Forge, etc.).
 
-### 2. File System
-- Full access to server files
-- Built-in file manager
-- Configuration file editing
-- Archive and backup functionality
+---
 
-### 3. Monitoring
-- CPU, RAM, network load tracking
-- Active ports monitoring
-- Process status tracking
+## 🔄 Architecture & Principle of Operation
 
-### 4. Linux Environment
-- Run via PRoot or QEMU
-- Package installation support
-- Environment isolation
+PocketHost orchestrates the complete lifecycle of hosted servers and Linux environments through four primary architecture layers: the User Interface layer, the Core Orchestration layer, the Native Execution Bridge, and the Sandboxed Container layer.
 
-### 5. Plugin System
-- **Minecraft Server Manager** (Additional Module):
-  - Create Minecraft servers
-  - Vanilla / Paper / Spigot / Fabric / Forge / Purpur
-  - Manage mods/plugins
-  - Server console
-  - Automatic server.jar download
+### Architecture Overview
 
-### 6. Security
-- Android permissions management
-- Sandbox isolation
-- File access control
+```mermaid
+flowchart TD
+    subgraph UI ["1. User Interface Layer (Kotlin/Jetpack)"]
+        Dashboard["Server Management Dashboard"]
+        ConsoleUI["Interactive Terminal & Live Logs"]
+        FMUI["File Manager & Config Editor"]
+        MonitorUI["Resource Monitor Dashboard"]
+    end
 
-## Project Structure
+    subgraph Core ["2. Core Orchestration Layer (Kotlin Core)"]
+        ServerManager["Server Lifecycle Manager"]
+        PluginManager["Plugin & Extension Service"]
+        ConfigResolver["Environment & Config Resolver"]
+    end
 
-```
-ANServer/
-├── app/                          # Main Android application
-│   ├── src/main/
-│   │   ├── java/com/anserver/app/
-│   │   │   ├── ui/              # UI components (Activities, Fragments)
-│   │   │   ├── service/         # Background services
-│   │   │   └── ANServerApplication.kt
-│   │   ├── res/                 # Resources (layouts, strings, etc.)
-│   │   └── AndroidManifest.xml
-│   └── build.gradle.kts
-│
-├── core/                         # Core business logic
-│   ├── src/main/java/com/anserver/core/
-│   │   ├── model/               # Data models
-│   │   ├── repository/          # Data repositories
-│   │   └── util/                # Utility classes
-│   └── build.gradle.kts
-│
-├── native/                       # Native C++ code
-│   ├── src/main/
-│   │   ├── cpp/
-│   │   │   ├── include/         # Header files
-│   │   │   ├── native_bridge.cpp
-│   │   │   ├── process_manager.cpp
-│   │   │   ├── system_monitor.cpp
-│   │   │   ├── network_manager.cpp
-│   │   │   ├── file_system.cpp
-│   │   │   └── proot_manager.cpp
-│   │   └── java/com/anserver/native/
-│   │       └── NativeBridge.kt  # JNI interface
-│   ├── CMakeLists.txt
-│   └── build.gradle.kts
-│
-└── plugins/
-    └── minecraft/                # Minecraft plugin
-        ├── src/main/java/com/anserver/plugins/minecraft/
-        │   ├── MinecraftServer.kt
-        │   ├── MinecraftServerManager.kt
-        │   └── ui/
-        └── build.gradle.kts
+    subgraph Native ["3. Native Bridge Layer (C/C++ & JNI)"]
+        JNIBridge["JNI Native Interface"]
+        ProcController["Native Process Manager"]
+        SysMonitor["System Telemetry (CPU/RAM/Net)"]
+    end
+
+    subgraph Execution ["4. Isolated Execution Layer (PRoot/QEMU)"]
+        LinuxEnv["Sandboxed Linux Environment"]
+        ServerInstance["Hosted Server Instance (Java, Python, Node, etc.)"]
+    end
+
+    UI --> Core
+    Core --> Native
+    Native -->|Process Spawn & Control| Execution
+    SysMonitor -->|Real-time Metrics| UI
+    LinuxEnv --> ServerInstance
 ```
 
-## Requirements
+### Execution & Control Workflow
 
-### For Building
-- Android 8.0 (API 26) or higher
-- Android NDK
-- CMake 3.22.1+
-- Gradle 8.4+
-- Kotlin 1.9.22+
+When managing server lifecycles, PocketHost executes an asynchronous pipeline linking native Android background services with the sandboxed Linux runtime:
 
-### For Running Java Servers (Minecraft, etc.)
-- **Java Runtime Environment** required
-- Recommended: Install Termux from F-Droid and run `pkg install openjdk-17`
-- See [JAVA_SETUP.md](JAVA_SETUP.md) for detailed instructions
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as App Dashboard / Console
+    participant Service as Server Lifecycle Manager
+    participant Native as Native C++ Bridge (JNI)
+    participant Environment as PRoot / Linux Runtime
+    participant Server as Target Server Process
 
-## Building
+    User->>UI: Tap "Start Server"
+    UI->>Service: Request Server Boot
+    Service->>Native: Prepare Execution Arguments & Ports
+    Native->>Environment: Initialize Isolated Container Context
+    Environment->>Server: Spawn Server Process (e.g. Java / Node.js)
+    activate Server
+    
+    par Real-time Log Streaming
+        Server-->>Native: Stream stdout / stderr Output
+        Native-->>UI: Broadcast Live Logs to Console UI
+    and Resource Monitoring
+        Native-->>Native: Measure Process CPU / Memory / IO
+        Native-->>UI: Push Live Telemetry Metrics
+    end
 
-1. Clone the repository
-2. Open in Android Studio
-3. Sync Gradle
-4. Build the project
+    User->>UI: Send Console Command
+    UI->>Native: Pipe Command Input
+    Native->>Server: Write to stdin Stream
 
-```bash
-./gradlew build
+    User->>UI: Tap "Stop Server"
+    UI->>Service: Initiate Termination Sequence
+    Service->>Native: Send SIGTERM Signal
+    Native->>Server: Graceful Shutdown Command
+    deactivate Server
+    Native-->>UI: Update Status to "Stopped"
 ```
 
-## Installation
+---
 
-1. Build the APK
-2. Install on Android device
-3. Grant required permissions:
-   - Storage access
-   - Network access
-   - Notifications
+### Key Operational Principles
 
-## Usage
+1. **Sandboxed User-Space Execution**:
+   PocketHost utilizes **PRoot** and **QEMU** technologies to bind mount points and intercept system calls, enabling full Linux file systems and server binaries to run without root privileges or device modification.
 
-### Creating a Server
+2. **Native Performance Telemetry**:
+   Resource statistics (CPU percentage, memory RSS/VSZ, network socket states) are gathered directly by a dedicated **C/C++ native layer** querying Linux system interfaces (`/proc`), keeping overhead low.
 
-1. Open ANServer app
-2. Tap the "+" button
-3. Select server type
-4. Configure server settings
-5. Tap "Create"
+3. **Asynchronous I/O & Terminal Pipe**:
+   Process input and output streams are piped via non-blocking POSIX channels connected to background Android services, providing real-time logging without blocking the user interface.
 
-### Managing Servers
+---
 
-- **Start**: Tap the "Start" button
-- **Stop**: Tap the "Stop" button
-- **Console**: Access server console for command input
-- **Files**: Browse and edit server files
-- **Monitor**: View CPU, RAM, and network usage
+## 📁 Project Structure
 
-### Minecraft Servers
-
-**Important**: Minecraft servers require Java. Install Termux and Java first:
-```bash
-# In Termux (from F-Droid)
-pkg install openjdk-17
+```text
+PocketHost/
+├── app/                  # Main Android application module (UI, Services, ViewModels)
+│   ├── src/main/java/    # Application Kotlin source code
+│   └── src/main/res/     # Resources, layouts, and strings
+├── core/                 # Shared domain logic, repositories, and data models
+├── native/               # High-performance C/C++ engine layer
+│   ├── src/main/cpp/     # Process management, system monitor, PRoot hooks
+│   └── CMakeLists.txt    # CMake compilation config for NDK
+└── plugins/              # Extensible modules (e.g., Minecraft Server manager)
 ```
 
-Then in ANServer:
-1. Select "Minecraft" server type
-2. Choose server software (Vanilla, Paper, Spigot, etc.)
-3. Select Minecraft version
-4. Configure port and settings
-5. Server JAR will be downloaded automatically
-6. Manage plugins/mods through the file manager
+---
 
-For detailed Java setup instructions, see [JAVA_SETUP.md](JAVA_SETUP.md)
+## 🚀 Getting Started
 
-## Native Features
+### Prerequisites for Building
+- **Android Studio**: Ladybug (or newer recommended)
+- **Java Development Kit (JDK)**: Version 17+
+- **Android SDK**: API Level 26+ (Android 8.0 Oreo minimum)
+- **Android NDK & CMake**: 3.22.1+ (for compiling native C++ binaries)
+- **Gradle**: 8.x+
 
-The native C++ layer provides:
+### Building the Application
 
-- **Process Management**: Start, stop, monitor processes
-- **System Monitoring**: CPU, memory, network statistics
-- **Network Management**: Port binding, network operations
-- **File System**: File operations with proper permissions
-- **PRoot Integration**: Isolated Linux environments
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-username/PocketHost.git
+   cd PocketHost
+   ```
 
-## Security
+2. Open the project in **Android Studio**.
 
-- All servers run in isolated environments
-- File access is controlled and sandboxed
-- Network operations require explicit permissions
-- Process isolation prevents interference
+3. Build the APK using the Gradle wrapper:
+   ```bash
+   ./gradlew assembleDebug
+   ```
 
-## License
+---
 
-This project is provided as-is for educational and development purposes.
+## ⚙️ Usage Guide
 
-## Contributing
+1. **Launch PocketHost**: Open the app on your mobile device.
+2. **Add a Server**:
+   - Tap **"+"** to create a server instance.
+   - Choose a template or container type (Custom Linux container, Minecraft server, Python environment, etc.).
+   - Define network ports, memory constraints, and start parameters.
+3. **Control & Interact**:
+   - Tap **Start** to initialize the server process.
+   - Access the **Console** tab to read live logs and execute commands via standard input.
+   - Access the **File Manager** to upload, download, or tweak configuration files.
 
-Contributions are welcome! Please ensure code follows the existing architecture and style.
+---
 
-## Support
+## 🔒 Security & Sandbox Assurance
 
-For issues and feature requests, please create an issue in the repository.
+- **Non-Root Operation**: Operates entirely within standard Android user app sandboxes.
+- **Local Data Isolation**: All server files, databases, and logs are kept strictly within local storage.
+- **Port Isolation**: Network operations bind to designated non-privileged local ports.
+
+---
+
+## 📄 License
+
+This project is provided under the MIT License. See the `LICENSE` file for full licensing information.
