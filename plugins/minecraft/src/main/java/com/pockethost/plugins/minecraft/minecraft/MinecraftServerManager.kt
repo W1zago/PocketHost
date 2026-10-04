@@ -110,12 +110,12 @@ class MinecraftServerManager(private val baseDirectory: String) {
             val jarFile = File("$serverDir/$jarName")
             // Also check generic server.jar for backward compat
             val genericJar = File("$serverDir/server.jar")
-            // Р‘РёС‚РёР№/РѕР±С–СЂРІР°РЅРёР№ jar (>1MB, Р°Р»Рµ РЅРµ zip) РјР°СЃРєСѓРІР°РІСЃСЏ Р± РїС–Рґ РіРѕС‚РѕРІРёР№ С– РІР±РёРІР°РІ
-            // СЃС‚Р°СЂС‚ РїС–Р·РЅС–С€Рµ Р· "Р±РµР· Main-Class". РџРµСЂРµРІС–СЂСЏС”РјРѕ С†С–Р»С–СЃРЅС–СЃС‚СЊ РѕРґСЂР°Р·Сѓ:
-            // РЅРµРІР°Р»С–РґРЅРёР№ РІРёРґР°Р»СЏС”РјРѕ С‰РѕР± РЅР°СЃС‚СѓРїРЅРёР№ РєСЂРѕРє СЃРєР°С‡Р°РІ Р·Р°РЅРѕРІРѕ.
+            // Broken/truncated jar (>1MB but not zip) would masquerade as ready and kill
+            // start later with "no Main-Class". Verify integrity at once:
+            // delete invalid so the next step downloads fresh.
             for (candidate in listOf(jarFile, genericJar)) {
                 if (candidate.exists() && !isValidServerJar(candidate)) {
-                    log("Р—РЅР°Р№РґРµРЅРѕ Р±РёС‚РёР№ jar ${candidate.name} (${candidate.length() / 1024} KB) вЂ” РІРёРґР°Р»СЏСЋ, РєР°С‡Р°СЋ Р·Р°РЅРѕРІРѕ...")
+                    log("Found broken jar ${candidate.name} (${candidate.length() / 1024} KB) - deleting, downloading fresh...")
                     try { candidate.delete() } catch (_: Exception) {}
                 }
             }
@@ -125,9 +125,9 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 val downloaded = downloadServerJar(serverDir, version, software, log)
                 if (downloaded == null) {
                     if (software == MinecraftServerSoftware.SPIGOT || software == MinecraftServerSoftware.FORGE || software == MinecraftServerSoftware.BUKKIT) {
-                        log("ERROR: $software РЅРµ РјР°С” РїСЂСЏРјРѕРіРѕ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ. РџРѕРєР»Р°РґРё jar РІСЂСѓС‡РЅСѓ С‡РµСЂРµР· Files (${getJarName(software)}) Р°Р±Рѕ РѕР±РµСЂРё PAPER/PURPUR/VANILLA/FABRIC.")
+                        log("ERROR: $software has no direct download. Drop the jar manually via Files (${getJarName(software)}) or pick PAPER/PURPUR/VANILLA/FABRIC.")
                     } else {
-                        log("ERROR: Download failed for $software $version. Р”РёРІРёСЃСЊ РїСЂРёС‡РёРЅСѓ РІРёС‰Рµ (HTTP-РєРѕРґ). РЇРєС‰Рѕ С–РЅС‚РµСЂРЅРµС‚ С” - СЃРїСЂРѕР±СѓР№ VANILLA/PURPUR/FABRIC.")
+                        log("ERROR: Download failed for $software $version. See the cause above (HTTP code). With internet on - try VANILLA/PURPUR/FABRIC.")
                     }
                     return@withContext false
                 }
@@ -224,14 +224,14 @@ class MinecraftServerManager(private val baseDirectory: String) {
             try {
                 downloadFile(downloadUrl, File(jarPath), log)
             } catch (e: Exception) {
-                log?.invoke("Download error: ${e.message}. РџРµСЂРµРІС–СЂ С–РЅС‚РµСЂРЅРµС‚, VPN/РїСЂРѕРІР°Р№РґРµСЂ РјС–Рі Р·Р°Р±Р»РѕРєСѓРІР°С‚Рё $downloadUrl")
+                log?.invoke("Download error: ${e.message}. Check internet, a VPN/provider may have blocked $downloadUrl")
                 try { File(jarPath).takeIf { it.exists() && it.length() < 1024 * 1024 }?.delete() } catch (_: Exception) {}
                 throw e
             }
 
             val len = File(jarPath).length()
             if (!isValidServerJar(File(jarPath))) {
-                log?.invoke("Downloaded file invalid (${len / 1024} KB Р°Р±Рѕ Р±РёС‚РёР№ zip). РњРѕР¶Р»РёРІРѕ РѕР±СЂРёРІ Р·КјС”РґРЅР°РЅРЅСЏ - СЃРїСЂРѕР±СѓР№ С‰Рµ СЂР°Р· Р°Р±Рѕ VANILLA/PURPUR.")
+                log?.invoke("Downloaded file invalid (${len / 1024} KB or broken zip). Possible connection cut - retry or use VANILLA/PURPUR.")
                 try { File(jarPath).takeIf { it.exists() }?.delete() } catch (_: Exception) {}
                 return@withContext null
             }
@@ -338,11 +338,11 @@ class MinecraftServerManager(private val baseDirectory: String) {
     }
 
     private fun getPaperUrl(version: String, log: ((String) -> Unit)?): String? {
-        // PaperMC Fill v2 (api.papermc.io) РїРѕРІРµСЂС‚Р°С” 410 Gone Р· 01.07.2026.
-        // РђРєС‚СѓР°Р»СЊРЅРёР№ API: Fill v3 -> fill.papermc.io
-        // Р”РѕРє: https://docs.papermc.io/misc/downloads-service/
+        // PaperMC Fill v2 (api.papermc.io) returned 410 Gone on 01.07.2026.
+        // Current API: Fill v3 -> fill.papermc.io
+        // Docs: https://docs.papermc.io/misc/downloads-service/
         // GET /v3/projects/paper/versions/{version}/builds/latest
-        //   -> downloads["server:default"].url (Р°Р±СЃРѕР»СЋС‚РЅРёР№ URL РЅР° fill-data.papermc.io)
+        //   -> downloads["server:default"].url (absolute URL on fill-data.papermc.io)
         return try {
             log?.invoke("Resolving Paper $version (Fill v3) ...")
             val latestJson = try {
@@ -356,7 +356,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     val obj = JSONObject(latestJson)
                     val channel = obj.optString("channel", "STABLE")
                     val downloads = obj.getJSONObject("downloads")
-                    // РљР»СЋС‡ Р·РјС–РЅРёРІСЃСЏ Сѓ v3: application -> server:default
+                    // Key changed in v3: application -> server:default
                     val downloadObj = when {
                         downloads.has("server:default") -> downloads.getJSONObject("server:default")
                         downloads.has("application") -> downloads.getJSONObject("application")
@@ -364,13 +364,13 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     }
                     val url = downloadObj?.optString("url", null)
                     if (!url.isNullOrEmpty()) {
-                        // latest РјРѕР¶Рµ Р±СѓС‚Рё ALPHA/EXPERIMENTAL (РЅР°РїСЂ. 1.21.9-47):
-                        // РЅРµСЃС‚Р°Р±С–Р»СЊРЅРёР№ Р±РµСЂРµРјРѕ Р»РёС€Рµ СЏРєС‰Рѕ STABLE РІР·Р°РіР°Р»С– РЅРµРјР° РЅРёР¶С‡Рµ.
+                        // latest may be ALPHA/EXPERIMENTAL (e.g. 1.21.9-47):
+                        // unstable is taken only when no STABLE exists below.
                         if (channel == "STABLE") {
                             log?.invoke("Paper URL (Fill v3): $url")
                             return url
                         } else {
-                            log?.invoke("Fill v3 latest вЂ” $channel (РЅРµ STABLE), С€СѓРєР°СЋ СЃС‚Р°Р±С–Р»СЊРЅРёР№ Р±С–Р»Рґ Сѓ СЃРїРёСЃРєСѓ...")
+                            log?.invoke("Fill v3 latest - $channel (not STABLE), looking for a stable build in the list...")
                         }
                     } else {
                         log?.invoke("Fill v3: no download url in response, trying builds list")
@@ -379,8 +379,8 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     log?.invoke("Fill v3 parse failed: ${e.message}, trying builds list")
                 }
             }
-            // Fallback: СЃРїРёСЃРѕРє Р±С–Р»РґС–РІ (Fill v3 РїРѕРІРµСЂС‚Р°С” newest-first).
-            // РџСЂРѕС…С–Рґ 1 вЂ” С‚С–Р»СЊРєРё STABLE; РїСЂРѕС…С–Рґ 2 вЂ” Р±СѓРґСЊ-СЏРєРёР№ (Р· РїРѕРїРµСЂРµРґР¶РµРЅРЅСЏРј).
+            // Fallback: builds list (Fill v3 returns newest-first).
+            // Pass 1 - STABLE only; pass 2 - anything (with warning).
             try {
                 val buildsJson = httpGet("https://fill.papermc.io/v3/projects/paper/versions/$version/builds")
                 if (buildsJson != null) {
@@ -406,7 +406,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                         val buildObj = arr.getJSONObject(i)
                         val (url, channel) = urlOf(buildObj)
                         if (url != null) {
-                            log?.invoke("РЈР’РђР“Рђ: STABLE Р±С–Р»РґР° РЅРµРјР°, Р±РµСЂСѓ $channel build ${buildObj.optInt("id", -1)}: $url")
+                            log?.invoke("WARNING: no STABLE build, taking $channel build ${buildObj.optInt("id", -1)}: $url")
                             return url
                         }
                     }
@@ -415,7 +415,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             } catch (e: Exception) {
                 log?.invoke("Fill v3 builds list failed: ${e.message}")
             }
-            log?.invoke("No Paper build for $version. РџРµСЂРµРІС–СЂ СЃРїРёСЃРѕРє РІРµСЂСЃС–Р№: Paper РїС–РґС‚СЂРёРјСѓС” $version? РЎРїСЂРѕР±СѓР№ VANILLA/PURPUR/FABRIC.")
+            log?.invoke("No Paper build for $version. Check the version list: does Paper support $version? Try VANILLA/PURPUR/FABRIC.")
             null
         } catch (e: Exception) {
             Log.e(TAG, "getPaperUrl failed", e)
@@ -482,14 +482,14 @@ class MinecraftServerManager(private val baseDirectory: String) {
 
     companion object {
         private const val TAG = "MinecraftServerManager"
-        // Fill v3 РІРёРјР°РіР°С” С–РґРµРЅС‚РёС„С–РєСѓСЋС‡РёР№ User-Agent Р· РєРѕРЅС‚Р°РєС‚РѕРј, С–РЅР°РєС€Рµ 403/rate-limit.
+        // Fill v3 requires an identifying User-Agent with contact, otherwise 403/rate-limit.
         // https://docs.papermc.io/misc/downloads-service/
         private const val USER_AGENT = "PocketHost/1.0 (Android; +https://github.com/PocketHost/pockethost)"
 
         /**
-         * РњС–РЅС–РјР°Р»СЊРЅР° С†С–Р»С–СЃРЅС–СЃС‚СЊ СЃРµСЂРІРµСЂРЅРѕРіРѕ jar: СЂРѕР·РјС–СЂ + РІР°Р»С–РґРЅРёР№ zip-С†РµРЅС‚СЂРѕРєР°С‚Р°Р»РѕРі.
-         * РћР±С–СЂРІР°РЅРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ (>1MB СЃРјС–С‚С‚СЏ) ZipFile РЅРµ РІС–РґРєСЂРёС” вЂ” С‚Р°РєРёР№ С„Р°Р№Р»
-         * С‚СЂРµР±Р° РІРёРґР°Р»РёС‚Рё С– СЃРєР°С‡Р°С‚Рё Р·Р°РЅРѕРІРѕ, Р° РЅРµ РІРµР·С‚Рё РґРѕ СЃС‚Р°СЂС‚Сѓ JVM.
+         * Minimal server-jar integrity: size + valid zip central directory.
+         * An interrupted download (>1MB of garbage) fails ZipFile open - such a file
+         * must be deleted and downloaded again, not taken to JVM start.
          */
         fun isValidServerJar(f: File): Boolean {
             return try {
@@ -517,7 +517,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 if (code in 300..399) {
                     val loc = conn.getHeaderField("Location")
                         ?: throw IllegalStateException("HTTP $code redirect without Location for $current")
-                    // Location РјРѕР¶Рµ Р±СѓС‚Рё РІС–РґРЅРѕСЃРЅРёРј
+                    // Location may be relative
                     current = try { URL(URL(current), loc).toString() } catch (_: Exception) { loc }
                     redirects++
                     continue

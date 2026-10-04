@@ -10,18 +10,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Р’Р±СѓРґРѕРІР°РЅРёР№ bootstrap: JRE + Ubuntu rootfs Р·Р°РІР°РЅС‚Р°Р¶СѓСЋС‚СЊСЃСЏ
- * Сѓ РїСЂРёРІР°С‚РЅСѓ РїР°РїРєСѓ РґРѕРґР°С‚РєСѓ. Р–РѕРґРЅРѕРіРѕ Р·РѕРІРЅС–С€РЅСЊРѕРіРѕ Termux РЅРµ С‚СЂРµР±Р°.
+ * Built-in bootstrap: JRE + Ubuntu rootfs download
+ * into the app private dir. No external Termux needed.
  *
- * Р’СЃРµ РІРёРєРѕРЅСѓС”С‚СЊСЃСЏ С‡РµСЂРµР· Р·РІРёС‡Р°Р№РЅРёР№ INTERNET (РІР¶Рµ С” РІ Manifest),
- * Р±РµР· RUN_COMMAND / SAF / storage РґРѕР·РІРѕР»С–РІ.
+ * Everything runs over plain INTERNET (already in Manifest),
+ * no RUN_COMMAND / SAF / storage permissions.
  */
 object EmbeddedBootstrap {
 
     private const val TAG = "EmbeddedBootstrap"
 
-    // URL Р±РµСЂРµРјРѕ Р· С”РґРёРЅРѕРіРѕ РґР¶РµСЂРµР»Р° EmbeddedJava.jreDownloadUrl() С‰РѕР± РЅРµ СЂРѕР·С…РѕРґРёР»РёСЃСЊ.
-    // Р›РµРіРєРёР№ Android-Bionic JRE (aarch64). Shell-СЃРµСЂРІРµСЂРё РїСЂР°С†СЋСЋС‚СЊ С– Р±РµР· Java.
+    // URL comes from the single source EmbeddedJava.jreDownloadUrl() to avoid drift.
+    // Light Android-Bionic JRE (aarch64). Shell servers work even without Java.
 
     data class BootstrapState(
         val javaPath: String?,
@@ -48,15 +48,15 @@ object EmbeddedBootstrap {
             if (!log.exists()) {
                 try { log.createNewFile() } catch (_: Exception) {}
             }
-            // input.txt Р±С–Р»СЊС€Рµ РЅРµ РїРѕС‚СЂС–Р±РµРЅ (stdin-С‚СЂСѓР±Р°), Р°Р»Рµ Р»РёС€Р°С”РјРѕ РґР»СЏ СЃСѓРјС–СЃРЅРѕСЃС‚С– СЃС‚Р°СЂРёС… Р»РѕРіС–РІ
+            // input.txt no longer needed (stdin pipe), kept for old-log compatibility
             workDir
         }
 
     /**
-     * Р“Р°СЂР°РЅС‚СѓС” Java РґР»СЏ Minecraft. РџРѕРІРµСЂС‚Р°С” С€Р»СЏС… РґРѕ java Р°Р±Рѕ null.
-     * РЇРєС‰Рѕ JRE РЅРµРјР° - РїСЂРѕР±СѓС” Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё РІ С„РѕРЅС– С– РїРёС€Рµ РїСЂРѕРіСЂРµСЃ Сѓ log().
-     * РќРµ РєРёРґР°С” exception, РЅРµ РІРёРјР°РіР°С” Р¶РѕРґРЅРёС… РґРѕР·РІРѕР»С–РІ.
-     * @param minecraftVersion РґР»СЏ РїРѕРїРµСЂРµРґР¶РµРЅРЅСЏ: 1.21+ РїРѕС‚СЂРµР±СѓС” Java 21, РІР±СѓРґРѕРІР°РЅРёР№ JRE17 С—С— РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЊ.
+     * Guarantees Java for Minecraft. Returns the java path or null.
+     * If no JRE - tries downloading in background and reports progress to log().
+     * Never throws, requires no permissions.
+     * @param minecraftVersion for warning: 1.21+ needs Java 21, bundled JRE17 will not run it.
      */
     suspend fun ensureJava(
         context: Context,
@@ -68,9 +68,9 @@ object EmbeddedBootstrap {
             if (existing != null) {
                 val ver = EmbeddedJava.javaVersion(existing) ?: "?"
                 log("Java: $existing ($ver)")
-                // Р”Р»СЏ 1.20.5+ РїРµСЂРµРІС–СЂСЏС”РјРѕ С‰Рѕ С†Рµ СЃРїСЂР°РІРґС– 21+: JRE17 С‚СѓС‚ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЊСЃСЏ.
-                // findJavaForVersion РІР¶Рµ РІС–РґРґР°РІ jre21 СЏРєС‰Рѕ РІС–РЅ С”; СЏРєС‰Рѕ РЅРµРјР° вЂ”
-                // С‡РµСЃРЅРѕ РєР°Р¶РµРјРѕ РґРµ Р№РѕРіРѕ РІР·СЏС‚Рё, Р° prepare РЅРёР¶С‡Рµ РІС–РґРјРѕРІРёС‚СЊ Р· Definitive.
+                // For 1.20.5+ verify it is really 21+: JRE17 will not launch here.
+                // findJavaForVersion already returned jre21 if present; if not -
+                // honestly say where to get it, prepare below refuses with Definitive.
                 if (minecraftVersion != null) {
                     try {
                         val need = EmbeddedJava.minJavaForMinecraft(minecraftVersion)
@@ -78,7 +78,7 @@ object EmbeddedBootstrap {
                             val home = EmbeddedJava.runtimeHomeFor(existing)
                             val have = if (home != null) com.pockethost.app.jvm.PocketJvm.readJreMajor(home) else null
                             if (have != null && have < need) {
-                                log("Java 21 РЅРµ Р·РЅР°Р№РґРµРЅР° (С” Р»РёС€Рµ Java $have). РџРѕРєР»Р°РґРё JRE21 РІСЂСѓС‡РЅСѓ С‡РµСЂРµР· Files Сѓ tools/jre21/ (С‰РѕР± Р·'СЏРІРёРІСЃСЏ tools/jre21/bin/java) С– РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·. РЎС‚Р°Р±С–Р»СЊРЅРѕРіРѕ Р°РІС‚РѕР·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE21 РЅРµРјР° вЂ” Pojav-СЂРµР»С–Р· Р°СЂС…С–РІРѕРІР°РЅРѕ.")
+                                log("Java 21 not found (only Java $have). Drop JRE21 manually via Files into tools/jre21/ (so tools/jre21/bin/java appears) and press Start again. No stable JRE21 auto-download - Pojav release archived.")
                             } else {
                                 warnIfJavaTooOld(existing, minecraftVersion, log)
                             }
@@ -96,13 +96,13 @@ object EmbeddedBootstrap {
             if (ok) {
                 val now = EmbeddedJava.findJava(context)
                 if (now != null) {
-                    log("Р’Р±СѓРґРѕРІР°РЅРёР№ JRE РІСЃС‚Р°РЅРѕРІР»РµРЅРѕ: $now (${EmbeddedJava.javaVersion(now) ?: "?"})")
+                    log("Bundled JRE installed: $now (${EmbeddedJava.javaVersion(now) ?: "?"})")
                     warnIfJavaTooOld(now, minecraftVersion, log)
                     return@withContext now
                 }
             }
-            log("Java РїРѕРєРё РЅРµРґРѕСЃС‚СѓРїРЅР°. Shell-СЃРµСЂРІРµСЂРё РїСЂР°С†СЋСЋС‚СЊ, Minecraft РїРѕС‚СЂРµР±СѓС” JRE.")
-            log("РћР±С…С–Рґ: РїРѕРєР»Р°РґРё СЃРІС–Р№ JRE РІСЂСѓС‡РЅСѓ С‡РµСЂРµР· Files Сѓ tools/jre/ (С‰РѕР± Р·'СЏРІРёРІСЃСЏ tools/jre/bin/java) С– РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·.")
+            log("Java unavailable yet. Shell servers work, Minecraft needs JRE.")
+            log("Workaround: drop your own JRE manually via Files into tools/jre/ (so tools/jre/bin/java appears) and press Start again.")
             null
         }
 
@@ -112,9 +112,9 @@ object EmbeddedBootstrap {
         if (need <= 17) return
         val have = try { EmbeddedJava.javaMajorVersion(javaPath) } catch (_: Exception) { null }
         if (have != null && have < need) {
-            log("РЈР’РђР“Рђ: Minecraft $minecraftVersion РїРѕС‚СЂРµР±СѓС” Java $need+, Р° Р·РЅР°Р№РґРµРЅРѕ Java $have.")
-            log("Р’Р±СѓРґРѕРІР°РЅРёР№ JRE17 Р·Р°РїСѓСЃС‚РёС‚СЊ Р»РёС€Рµ Minecraft <=1.20.4.")
-            log("Р’Р°СЂС–Р°РЅС‚Рё: РѕР±РµСЂРё РІРµСЂСЃС–СЋ 1.20.4 (VANILLA/PAPER), Р°Р±Рѕ С–РјРїРѕСЂС‚СѓР№ JRE21 РІСЂСѓС‡РЅСѓ РІ tools/jre21/ С‡РµСЂРµР· Files.")
+            log("WARNING: Minecraft $minecraftVersion needs Java $need+, but Java $have was found.")
+            log("Bundled JRE17 runs only Minecraft <=1.20.4.")
+            log("Options: pick 1.20.4 (VANILLA/PAPER), or import JRE21 manually into tools/jre21/ via Files.")
         }
     }
 
@@ -122,15 +122,15 @@ object EmbeddedBootstrap {
         withContext(Dispatchers.IO) {
             try {
                 if (!EmbeddedJava.isJreAutoInstallSupported()) {
-                    log("РђСЂС…С–С‚РµРєС‚СѓСЂР° ${EmbeddedJava.abi()}: Р°РІС‚РѕР·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE РЅРµ РїС–РґС‚СЂРёРјСѓС”С‚СЊСЃСЏ. РЎРїСЂРѕР±Р° СЃРёСЃС‚РµРјРЅРѕРіРѕ java...")
+                    log("Arch ${EmbeddedJava.abi()}: JRE auto-install not supported. Trying system java...")
                     return@withContext false
                 }
                 val toolsDir = EmbeddedPaths.toolsDir(context)
                 val tmpFile = File(toolsDir, "jre-download.tar.xz")
-                // Р‘РёС‚РёР№/С‡СѓР¶РёР№ С„Р°Р№Р» Р·Р°РјС–СЃС‚СЊ Р°СЂС…С–РІСѓ вЂ” РЅРµ РґРѕРєР°С‡СѓС”РјРѕ СЃРјС–С‚С‚СЏ, Р° РєР°С‡Р°С”РјРѕ Р·Р°РЅРѕРІРѕ.
-                // Р¦С–Р»РёР№ Р°СЂС…С–РІ Р»РёС€Р°С”РјРѕ: РґРѕРєР°С‡РєР°/РїРѕРІС‚РѕСЂРЅРµ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ РїС–РґСѓС‚СЊ Р±РµР· СЃРєР°С‡СѓРІР°РЅРЅСЏ.
+                // Bitten/foreign file instead of archive - re-download, not resume.
+                // Whole archive is kept: download/re-extract retries go without fetching.
                 if (tmpFile.exists() && !TarExtractor.looksLikeXz(tmpFile)) {
-                    log("Р—Р±РµСЂРµР¶РµРЅРёР№ Р°СЂС…С–РІ РїРѕС€РєРѕРґР¶РµРЅРёР№ вЂ” РєР°С‡Р°СЋ Р·Р°РЅРѕРІРѕ...")
+                    log("Cached archive is damaged - downloading fresh...")
                     try { tmpFile.delete() } catch (_: Exception) {}
                 }
                 val urls = EmbeddedJava.jreDownloadUrls()
@@ -138,25 +138,25 @@ object EmbeddedBootstrap {
                 var lastError = ""
                 for (url in urls) {
                     if (tmpFile.exists() && tmpFile.length() > 0) {
-                        log("РџСЂРѕРґРѕРІР¶СѓСЋ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE Р· ${tmpFile.length() / 1024 / 1024} MB (~40MB РІСЃСЊРѕРіРѕ)...")
+                        log("Resuming JRE download from ${tmpFile.length() / 1024 / 1024} MB (~40MB total)...")
                     } else {
-                        log("Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РІР±СѓРґРѕРІР°РЅРѕРіРѕ JRE (~40MB)...")
+                        log("Downloading bundled JRE (~40MB)...")
                     }
                     log("URL: $url")
-                    // РњРµСЂРµР¶Р° СЂРІРµ Р·'С”РґРЅР°РЅРЅСЏ (stall-Рё, timeout-Рё) вЂ” РїРѕРІС‚РѕСЂСЋС”РјРѕ Р· РґРѕРєР°С‡РєРѕСЋ,
-                    // С‰РѕР± РєРѕСЂРёСЃС‚СѓРІР°С‡ РЅРµ С‚РёС†СЏРІ Start Р·Р°СЂР°РґРё РѕСЃС‚Р°РЅРЅСЊРѕРіРѕ РјРµРіР°Р±Р°Р№С‚Р°.
+                    // Flaky networks drop (stalls, timeouts) - retry with resume,
+                    // so the user does not tap Start over the last megabyte.
                     var err: String? = null
                     var attempt = 0
                     while (attempt < MAX_JRE_ATTEMPTS) {
                         attempt++
                         err = downloadFileDetailed(url, tmpFile) { pct ->
-                            if (pct % 10 == 0) log("Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE: $pct%")
+                            if (pct % 10 == 0) log("Downloading JRE: $pct%")
                         }
                         if (err == null) break
                         if (!isRetryableDownloadError(err)) break
                         if (attempt < MAX_JRE_ATTEMPTS) {
                             val keptMb = try { tmpFile.length() / 1024 / 1024 } catch (_: Exception) { 0L }
-                            log("РЎРїСЂРѕР±Р° $attempt/$MAX_JRE_ATTEMPTS РїРµСЂРµСЂРІР°РЅР° ($err). Р—Р±РµСЂРµР¶РµРЅРѕ $keptMb MB вЂ” РїРѕРІС‚РѕСЂСЋСЋ РґРѕРєР°С‡РєСѓ...")
+                            log("Attempt $attempt/$MAX_JRE_ATTEMPTS interrupted ($err). Kept $keptMb MB - resuming...")
                             try { delay(3000) } catch (_: Exception) {}
                         }
                     }
@@ -165,41 +165,41 @@ object EmbeddedBootstrap {
                         break
                     } else {
                         lastError = err
-                        log("РЎРїСЂРѕР±Р° РЅРµ РІРґР°Р»Р°СЃСЏ: $err")
-                        // Р§Р°СЃС‚РєРѕРІРёР№ С„Р°Р№Р» РќР• РІРёРґР°Р»СЏС”РјРѕ вЂ” РЅР°СЃС‚СѓРїРЅРёР№ Start РґРѕРєР°С‡Р°С” С‡РµСЂРµР· Range.
+                        log("Attempt failed: $err")
+                        // Partial file is NOT deleted - next Start resumes via Range.
                     }
                 }
                 if (!downloaded) {
                     val keptMb = try { tmpFile.length() / 1024 / 1024 } catch (_: Exception) { 0L }
-                    log("РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё JRE ($lastError).")
-                    if (keptMb > 0) log("Р—Р±РµСЂРµР¶РµРЅРѕ С‡Р°СЃС‚РєРѕРІРёР№ С„Р°Р№Р» ($keptMb MB) вЂ” РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·, Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РїСЂРѕРґРѕРІР¶РёС‚СЊСЃСЏ.")
-                    log("РџРµСЂРµРІС–СЂ Console РІРёС‰Рµ: 404 = Р±РёС‚Рµ РїРѕСЃРёР»Р°РЅРЅСЏ, С–РЅС€РёР№ РєРѕРґ = Р±Р»РѕРєСѓРІР°РЅРЅСЏ РјРµСЂРµР¶С–/VPN.")
+                    log("Failed to download JRE ($lastError).")
+                    if (keptMb > 0) log("Partial file kept ($keptMb MB) - press Start again, download will resume.")
+                    log("Check Console above: 404 = dead link, other code = network/VPN block.")
                     return@withContext false
                 }
-                log("Р РѕР·РїР°РєСѓРІР°РЅРЅСЏ JRE...")
+                log("Extracting JRE...")
                 val dest = EmbeddedJava.bundledJreDir(context)
-                // РџСЂРёР±РёСЂР°С”РјРѕ СЃРјС–С‚С‚СЏ РЅРµРІРґР°Р»РёС… СЃРїСЂРѕР±: С‡Р°СЃС‚РєРѕРІРёР№ bin/java РјС–Рі Р±Рё
-                // РїСЂРёРєРёРЅСѓС‚РёСЃСЏ СЂРѕР±РѕС‡РёРј РїСЂРё РЅР°СЃС‚СѓРїРЅРѕРјСѓ РїРѕС€СѓРєСѓ Java.
+                // Clear smelly leftovers: partial bin/java could
+                // look working on next Java lookup.
                 try {
                     if (dest.exists() && (dest.listFiles()?.isNotEmpty() == true)) {
-                        log("Р§РёС‰Сѓ РЅРµР·Р°РІРµСЂС€РµРЅСѓ РїРѕРїРµСЂРµРґРЅСЋ СѓСЃС‚Р°РЅРѕРІРєСѓ JRE...")
+                        log("Clearing unfinished previous JRE install...")
                         dest.deleteRecursively()
                     }
                     dest.mkdirs()
                 } catch (_: Exception) {}
                 val extracted = extractTarXz(tmpFile, dest, log)
-                // РђСЂС…С–РІ РІРёРґР°Р»СЏС”РјРѕ Р»РёС€Рµ РїС–СЃР»СЏ РЈРЎРџР†РЁРќРћР“Рћ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ,
-                // С‰РѕР± РїРѕРІС‚РѕСЂРЅР° СЃРїСЂРѕР±Р° РЅРµ РєР°С‡Р°Р»Р° 37MB Р·Р°РЅРѕРІРѕ.
+                // Delete the archive only after SUCCESSFUL extraction,
+                // so a retry does not fetch 37MB again.
                 if (extracted) {
                     try { tmpFile.delete() } catch (_: Exception) {}
                 } else {
-                    log("РђСЂС…С–РІ Р·Р±РµСЂРµР¶РµРЅРѕ вЂ” РїРѕРІС‚РѕСЂРЅР° СЃРїСЂРѕР±Р° РїС–РґРµ Р±РµР· СЃРєР°С‡СѓРІР°РЅРЅСЏ.")
+                    log("Archive kept - retry will go without downloading.")
                 }
                 if (!extracted) {
-                    log("РќРµ РІРґР°Р»РѕСЃСЏ СЂРѕР·РїР°РєСѓРІР°С‚Рё JRE. Р”РµС‚Р°Р»С– РІРёС‰Рµ.")
+                    log("Failed to extract JRE. Details above.")
                     return@withContext false
                 }
-                // +x РЅР° Р±С–РЅР°СЂРЅРёРєРё
+                // +x on binaries
                 try {
                     File(dest, "bin/java").setExecutable(true)
                     File(dest, "bin").listFiles()?.forEach { it.setExecutable(true) }
@@ -209,15 +209,15 @@ object EmbeddedBootstrap {
                 EmbeddedJava.findJava(context) != null
             } catch (e: Exception) {
                 Log.e(TAG, "JRE install failed", e)
-                log("РџРѕРјРёР»РєР° РІСЃС‚Р°РЅРѕРІР»РµРЅРЅСЏ JRE: ${e.message}")
+                log("JRE install error: ${e.message}")
                 false
             }
         }
 
     /**
-     * Ubuntu rootfs РґР»СЏ UBUNTU_SERVER. РџРѕРІРµСЂС‚Р°С” true СЏРєС‰Рѕ РіРѕС‚РѕРІРёР№.
-     * РќР° MVP: СЏРєС‰Рѕ rootfs РЅРµРјР° - СЃРµСЂРІРµСЂ РІСЃРµ РѕРґРЅРѕ СЃС‚Р°СЂС‚СѓС” СЏРє РІР±СѓРґРѕРІР°РЅРёР№ shell (sh -i),
-     * Р° РїРѕРІРЅРёР№ Ubuntu РґРѕРІР°РЅС‚Р°Р¶СѓС”С‚СЊСЃСЏ Р·Р° РїРѕС‚СЂРµР±РѕСЋ РѕРєСЂРµРјРѕСЋ РєРЅРѕРїРєРѕСЋ.
+
+
+
      */
     /**
      * Ubuntu rootfs for UBUNTU_SERVER. Returns true when the full Ubuntu
@@ -417,27 +417,27 @@ object EmbeddedBootstrap {
 
     // ---------- io helpers ----------
 
-    /** РЎРєС–Р»СЊРєРё СЂР°Р·С–РІ РїРѕРІС‚РѕСЂСЋРІР°С‚Рё РѕР±С–СЂРІР°РЅРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE (Р· РґРѕРєР°С‡РєРѕСЋ) Р·Р° РѕРґРёРЅ Start. */
+    /** How many times to retry an interrupted JRE download (with resume) per Start. */
     private const val MAX_JRE_ATTEMPTS = 3
 
     /** How many times to retry an interrupted Ubuntu download (with resume) per Start. */
     private const val MAX_UBUNTU_ATTEMPTS = 3
 
     /**
-     * Р§Рё РјР°С” СЃРµРЅСЃ РїРѕРІС‚РѕСЂСЋРІР°С‚Рё РїРѕРјРёР»РєСѓ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ.
-     * 404/403/РїРѕРјРёР»РєРё РЅР°РІС–РіР°С†С–С— вЂ” С„Р°С‚Р°Р»СЊРЅС– (РїРѕРІС‚РѕСЂ РЅРµ РґРѕРїРѕРјРѕР¶Рµ),
-     * РІСЃРµ С–РЅС€Рµ (timeout, РѕР±СЂРёРІ, 5xx, 429) вЂ” С‚СЂР°РЅР·РёС‚РЅРµ.
+     * Whether a download error is worth retrying.
+     * 404/403/navigation errors are fatal (retry will not help),
+     * everything else (timeout, drop, 5xx, 429) is transient.
      */
     private fun isRetryableDownloadError(err: String): Boolean {
         if (err.contains("HTTP 404") || err.contains("HTTP 403") || err.contains("HTTP 401")) return false
-        if (err.contains("Р±РµР· Location") || err.contains("Р·Р°Р±Р°РіР°С‚Рѕ СЂРµРґРёСЂРµРєС‚С–РІ")) return false
+        if (err.contains("without Location") || err.contains("too many redirects")) return false
         return true
     }
 
     /**
-     * РљР°С‡Р°С” С„Р°Р№Р». РџРѕРІРµСЂС‚Р°С” null СЏРєС‰Рѕ СѓСЃРїС–С…, Р°Р±Рѕ С‚РµРєСЃС‚ РїРѕРјРёР»РєРё Р· HTTP-РєРѕРґРѕРј.
-     * GitHub-СЂРµР»С–Р·Рё РІС–РґРґР°СЋС‚СЊ 302 РЅР° objects.githubusercontent.com вЂ” СЂРµРґРёСЂРµРєС‚Рё РѕР±СЂРѕР±Р»СЏС”РјРѕ РІСЂСѓС‡РЅСѓ.
-     * РџС–РґС‚СЂРёРјСѓС” РґРѕРєР°С‡РєСѓ (Range): РѕР±С–СЂРІР°РЅРёР№ С„Р°Р№Р» РїСЂРѕРґРѕРІР¶СѓС”С‚СЊСЃСЏ, Р° РЅРµ РєР°С‡Р°С”С‚СЊСЃСЏ Р· РЅСѓР»СЏ.
+     * Downloads a file. Returns null on success, or error text with HTTP code.
+     * GitHub releases answer 302 to objects.githubusercontent.com - redirects handled manually.
+     * Supports resume (Range): an interrupted file continues instead of restarting.
      */
     private fun downloadFileDetailed(
         url: String,
@@ -454,14 +454,14 @@ object EmbeddedBootstrap {
                 val startAt = if (dest.exists()) dest.length() else 0L
                 val conn = (URL(current).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 30000
-                    // РќРµРґРѕРІРіРёР№ readTimeout: Р·Р°РІРёСЃР»С– stall-Рё РІРёСЏРІР»СЏС”РјРѕ С€РІРёРґРєРѕ,
-                    // Р±Рѕ РѕР±С–СЂРІР°РЅРµ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ РїРѕРІС‚РѕСЂСЋС”С‚СЊСЃСЏ Р· РґРѕРєР°С‡РєРѕСЋ (РґРёРІ. РІРёС‰Рµ).
+                    // Short readTimeout: hanging stalls surface fast,
+                    // since drops auto-retry with resume (see above).
                     readTimeout = 60000
                     instanceFollowRedirects = false
                     setRequestProperty("User-Agent", "PocketHost/1.0 (Android; +https://github.com/PocketHost/pockethost)")
                     setRequestProperty("Accept", "*/*")
-                    // Р‘РµР· keep-alive: РїРѕРІС‚РѕСЂРЅРµ РІРёРєРѕСЂРёСЃС‚Р°РЅРЅСЏ РїСЂРѕС‚СѓС…Р»РёС… OkHttp-Р·'С”РґРЅР°РЅСЊ РґР°С”
-                    // "unexpected end of stream" РЅР° РїРѕРІС–Р»СЊРЅРёС… РјРµСЂРµР¶Р°С….
+                    // No keep-alive: reusing lukewarm OkHttp connections gives
+                    // "unexpected end of stream" on slow networks.
                     setRequestProperty("Connection", "close")
                     if (startAt > 0) setRequestProperty("Range", "bytes=$startAt-")
                 }
@@ -470,22 +470,22 @@ object EmbeddedBootstrap {
                     conn.responseCode
                 } catch (e: Exception) {
                     try { conn.disconnect() } catch (_: Exception) {}
-                    return "РјРµСЂРµР¶РµРІР° РїРѕРјРёР»РєР°: ${e.message} (РґР»СЏ $current)"
+                    return "network error: ${e.message} (for $current)"
                 }
                 if (code in 300..399) {
                     val loc = conn.getHeaderField("Location")
                     conn.disconnect()
-                    if (loc.isNullOrEmpty()) return "HTTP $code redirect Р±РµР· Location (РґР»СЏ $current)"
-                    if (++redirects > 5) return "Р·Р°Р±Р°РіР°С‚Рѕ СЂРµРґРёСЂРµРєС‚С–РІ (РґР»СЏ $url)"
+                    if (loc.isNullOrEmpty()) return "HTTP $code redirect without Location (for $current)"
+                    if (++redirects > 5) return "too many redirects (for $url)"
                     current = try { URL(URL(current), loc).toString() } catch (_: Exception) { loc }
                     continue
                 }
                 if (code == 416) {
-                    // Р”С–Р°РїР°Р·РѕРЅ РЅРµР·Р°РґРѕРІС–Р»СЊРЅРёР№: Р»РѕРєР°Р»СЊРЅРёР№ С„Р°Р№Р» >= РІС–РґРґР°Р»РµРЅРѕРіРѕ. РџСЂРёР№РјР°С”РјРѕ СЏРєС‰Рѕ РЅРµ РєСЂРёС…С‚Р°.
+                    // Range unsatisfiable: local file >= remote. Accept if not tiny.
                     conn.disconnect()
                     if (dest.exists() && dest.length() >= minBytes) return null
                     try { dest.delete() } catch (_: Exception) {}
-                    if (rangeRestarted) return "HTTP 416, Р»РѕРєР°Р»СЊРЅРёР№ С„Р°Р№Р» Р±РёС‚РёР№ вЂ” РІРёРґР°Р»РµРЅРѕ, СЃРїСЂРѕР±СѓР№ С‰Рµ СЂР°Р·"
+                    if (rangeRestarted) return "HTTP 416, local file is bad - deleted, try again"
                     rangeRestarted = true
                     current = url
                     redirects = 0
@@ -496,9 +496,9 @@ object EmbeddedBootstrap {
                         (conn.errorStream ?: conn.inputStream).bufferedReader().readText().take(200)
                     } catch (_: Exception) { "" }
                     conn.disconnect()
-                    return "HTTP $code РґР»СЏ $current. $body".trim()
+                    return "HTTP $code for $current. $body".trim()
                 }
-                // 206 = СЃРµСЂРІРµСЂ РїСЂРѕРґРѕРІР¶РёРІ Р· startAt (РґРѕРїРёСЃСѓС”РјРѕ), 200 = РїРѕРІРЅРёР№ С„Р°Р№Р» (РїРµСЂРµР·Р°РїРёСЃСѓС”РјРѕ).
+                // 206 = server resumed from startAt (append), 200 = full file (overwrite).
                 val append = (code == HttpURLConnection.HTTP_PARTIAL && startAt > 0)
                 val bodyTotal = conn.contentLengthLong
                 val expectedTotal = if (append && bodyTotal > 0) startAt + bodyTotal else bodyTotal
@@ -537,26 +537,26 @@ object EmbeddedBootstrap {
                 }
                 val finalLen = dest.length()
                 if (expectedTotal > 0 && finalLen < expectedTotal) {
-                    // РўРёС…РёР№ РѕР±СЂРёРІ РїРѕС‚РѕРєСѓ (Р±РµР· РІРёРЅСЏС‚РєСѓ): С„Р°Р№Р» РќР• С‡С–РїР°С”РјРѕ вЂ” РЅР°СЃС‚СѓРїРЅРёР№ Start РґРѕРєР°С‡Р°С”.
-                    return "Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РѕР±С–СЂРІР°Р»РѕСЃСЊ (${finalLen / 1024 / 1024} Р· ${expectedTotal / 1024 / 1024} MB) вЂ” РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·, РґРѕРєР°С‡РєР° РїСЂРѕРґРѕРІР¶РёС‚СЊ"
+                    // Silent stream cut (no exception): do NOT touch the file - next Start resumes.
+                    return "download interrupted (${finalLen / 1024 / 1024} of ${expectedTotal / 1024 / 1024} MB) - press Start again, resume will continue"
                 }
                 if (!dest.exists() || finalLen < minBytes) {
                     val kb = finalLen / 1024
                     try { dest.delete() } catch (_: Exception) {}
-                    return "С„Р°Р№Р» РѕР±С–СЂРІР°РЅРёР№ ($kb KB)"
+                    return "truncated file ($kb KB)"
                 }
                 return null
             }
         } catch (e: Exception) {
             Log.e(TAG, "download failed $url", e)
-            return "РІРёРЅСЏС‚РѕРє: ${e.message}"
+            return "exception: ${e.message}"
         }
     }
 
     private fun extractTarXz(archive: File, dest: File, log: (String) -> Unit): Boolean {
         return try {
-            // РђСЂРіСѓРјРµРЅС‚Рё СЃРїРёСЃРєРѕРј С‰РѕР± СѓРЅРёРєРЅСѓС‚Рё shell-quoting РїСЂРѕР±Р»РµРј Р· РїСЂРѕР±С–Р»Р°РјРё РІ С€Р»СЏС…Р°С….
-            // Р§Р°СЃС‚РёРЅР° toybox-tar РЅРµ РјР°С” -J (xz), С‚РѕРјСѓ РїСЂРѕР±СѓС”РјРѕ -xJ, РїРѕС‚С–Рј -xjf, РїРѕС‚С–Рј С‡РёСЃС‚РёР№ tar.
+            // Args as a list to avoid shell-quoting problems with spaces in paths.
+            // toybox-tar often lacks -J (xz), so try -xJ, then -xjf, then plain tar.
             val attempts = listOf(
                 listOf("tar", "-xJf", archive.absolutePath, "-C", dest.absolutePath),
                 listOf("tar", "-xjf", archive.absolutePath, "-C", dest.absolutePath),
@@ -575,14 +575,14 @@ object EmbeddedBootstrap {
                         normalizeJreTopLevel(dest, log)
                         return true
                     }
-                    log("tar ${args[1]} РЅРµ РІРґР°РІСЃСЏ (РєРѕРґ $code), РїСЂРѕР±СѓСЋ РЅР°СЃС‚СѓРїРЅРёР№...")
+                    log("tar ${args[1]} failed (code $code), trying next...")
                 } catch (e: Exception) {
-                    log("tar Р·Р°РїСѓСЃРє РЅРµ РІРґР°РІСЃСЏ: ${e.message}")
+                    log("tar launch failed: ${e.message}")
                 }
             }
-            // РЎРёСЃС‚РµРјРЅРѕРіРѕ tar Р· xz-РїС–РґС‚СЂРёРјРєРѕСЋ РЅРµРјР° вЂ” РїСЂРѕР±СѓС”РјРѕ РІР±СѓРґРѕРІР°РЅРёР№
-            // Java-СЂРѕР·РїР°РєРѕРІСѓРІР°С‡ (Tukaani XZ + СЃРІС–Р№ tar-РїР°СЂСЃРµСЂ, Р±РµР· Р·РѕРІРЅС–С€РЅС–С… Р±С–РЅР°СЂРЅРёРєС–РІ).
-            log("РЎРёСЃС‚РµРјРЅРёР№ tar Р±РµР· xz-РїС–РґС‚СЂРёРјРєРё. РџСЂРѕР±СѓСЋ РІР±СѓРґРѕРІР°РЅРёР№ СЂРѕР·РїР°РєРѕРІСѓРІР°С‡...")
+            // No system tar with xz support - try the built-in
+            // Java unpacker (Tukaani XZ + own tar parser, no external binaries).
+            log("System tar lacks xz support. Trying built-in unpacker...")
             try {
                 if (TarExtractor.extractXzTar(archive, dest, log)) {
                     normalizeJreTopLevel(dest, log)
@@ -590,18 +590,18 @@ object EmbeddedBootstrap {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "embedded extractor failed", e)
-                log("Р’Р±СѓРґРѕРІР°РЅРёР№ СЂРѕР·РїР°РєРѕРІСѓРІР°С‡: ${e.message}")
+                log("Built-in unpacker: ${e.message}")
             }
-            log("Р РѕР·РїР°РєСѓРІР°С‚Рё JRE РЅРµ РІРґР°Р»РѕСЃСЏ. РЎРїСЂРѕР±СѓР№ СЃРёСЃС‚РµРјРЅРёР№ java Р°Р±Рѕ СЂСѓС‡РЅСѓ СѓСЃС‚Р°РЅРѕРІРєСѓ РІ tools/jre/ С‡РµСЂРµР· Files.")
+            log("Failed to unpack JRE. Try system java or manual install into tools/jre/ via Files.")
             false
         } catch (e: Exception) {
             Log.e(TAG, "extract failed", e)
-            log("РџРѕРјРёР»РєР° СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ: ${e.message}")
+            log("Extract error: ${e.message}")
             false
         }
     }
 
-    /** РЇРєС‰Рѕ Р°СЂС…С–РІ РјС–СЃС‚РёС‚СЊ top-level РїР°РїРєСѓ (jre17/.../bin/java), РїС–РґРЅС–РјР°С”РјРѕ РІРјС–СЃС‚ Сѓ dest. */
+    /** If the archive has a top-level folder (jre17/.../bin/java), lift contents into dest. */
     private fun normalizeJreTopLevel(dest: File, log: (String) -> Unit) {
         try {
             if (File(dest, "bin/java").exists()) return
@@ -609,11 +609,11 @@ object EmbeddedBootstrap {
             if (children.size == 1 && children[0].isDirectory) {
                 val top = children[0]
                 if (File(top, "bin/java").exists()) {
-                    log("РќРѕСЂРјР°Р»С–Р·СѓСЋ СЃС‚СЂСѓРєС‚СѓСЂСѓ JRE (РїСЂРёР±РёСЂР°СЋ ${top.name}/)...")
+                    log("Normalizing JRE layout (removing ${top.name}/)...")
                     top.listFiles()?.forEach { child ->
                         val target = File(dest, child.name)
                         if (!child.renameTo(target)) {
-                            // fallback РєРѕРїС–СЋРІР°РЅРЅСЏРј РґР»СЏ СЂС–Р·РЅРёС… mount-С–РІ
+                            // fallback copy for different mounts
                             if (child.isDirectory) child.copyRecursively(target, overwrite = true)
                             else child.copyTo(target, overwrite = true)
                         }

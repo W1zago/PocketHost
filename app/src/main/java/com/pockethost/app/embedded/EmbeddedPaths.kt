@@ -5,17 +5,17 @@ import android.net.Uri
 import java.io.File
 
 /**
- * Р’Р±СѓРґРѕРІР°РЅРµ СЃС…РѕРІРёС‰Рµ Р·Р°РјС–СЃС‚СЊ SAF + Termux.
+ * Built-in storage instead of SAF + Termux.
  *
- * РЎРµСЂРІРµСЂ РјРѕР¶Рµ Р¶РёС‚Рё Сѓ С‚СЂСЊРѕС… РјС–СЃС†СЏС…:
- *   INTERNAL: filesDir/servers/<serverId>/ ... (Р·Р° Р·Р°РјРѕРІС‡СѓРІР°РЅРЅСЏРј)
- *   EXTERNAL: getExternalFilesDir("servers")/<serverId>/ ... (РІРёРґРЅРѕ С‡РµСЂРµР· USB, Р±РµР· РґРѕР·РІРѕР»С–РІ)
- *   CUSTOM: РґРѕРІС–Р»СЊРЅР° РїР°РїРєР° (Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС…; Р»РёС€Рµ Р· РґРѕСЃС‚СѓРїРѕРј РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ)
- * РџРµСЂС€С– РґРІР° вЂ” Р±РµР· Р¶РѕРґРЅРёС… РґРѕР·РІРѕР»С–РІ С– РїС–РґС…РѕРґСЏС‚СЊ СЏРє СЂРѕР±РѕС‡Р° РїР°РїРєР° РїСЂРѕС†РµСЃСѓ.
- *   filesDir/tools/  - proot, jre, busybox (Р·Р°РІР°РЅС‚Р°Р¶СѓСЋС‚СЊСЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ, Р·Р°РІР¶РґРё internal)
- *   filesDir/ubuntu/ - rootfs РґР»СЏ Ubuntu (Р·Р°РІР°РЅС‚Р°Р¶СѓС”С‚СЊСЃСЏ Р·Р° РїРѕС‚СЂРµР±РѕСЋ, Р·Р°РІР¶РґРё internal)
+ * A server can live in three places:
+ *   INTERNAL: filesDir/servers/<serverId>/ ... (default)
+ *   EXTERNAL: getExternalFilesDir("servers")/<serverId>/ ... (visible over USB, no permissions)
+ *   CUSTOM: arbitrary folder (absolute path; only with all-files access)
+ * First two need no permissions and serve as the process workdir.
+ *   filesDir/tools/  - proot, jre, busybox (auto-downloaded, always internal)
+ *   filesDir/ubuntu/ - Ubuntu rootfs (on demand, always internal)
  *
- * РњС–СЃС†Рµ РєРѕРґСѓС”С‚СЊСЃСЏ СЃС…РµРјРѕСЋ URI СЃРµСЂРІРµСЂР°: "embedded://<id>" Р°Р±Рѕ "external://<id>".
+ * Location is encoded by the server URI scheme: "embedded://<id>" or "external://<id>".
  */
 object EmbeddedPaths {
 
@@ -33,9 +33,9 @@ object EmbeddedPaths {
         if (kind == StorageKind.EXTERNAL) "external://$serverId" else "embedded://$serverId"
 
     /**
-     * Р§Рё С” РґРѕСЃС‚СѓРї РґРѕ РґРѕРІС–Р»СЊРЅРёС… РїР°РїРѕРє СЃРїС–Р»СЊРЅРѕРіРѕ СЃС…РѕРІРёС‰Р°.
-     * Android 11+: "РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ" (СЃРёСЃС‚РµРјРЅС– РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ).
-     * РЎС‚Р°СЂС–С€С–: РєР»Р°СЃРёС‡РЅРёР№ WRITE_EXTERNAL_STORAGE.
+     * Is shared-storage custom-folder access available.
+     * Android 11+: "all files access" (system settings).
+     * Older: classic WRITE_EXTERNAL_STORAGE.
      */
     fun hasAllFilesAccess(context: Context): Boolean {
         return try {
@@ -49,7 +49,7 @@ object EmbeddedPaths {
         } catch (_: Exception) { false }
     }
 
-    /** Р†РЅС‚РµРЅС‚Рё РЅР° СЃРёСЃС‚РµРјРЅРёР№ РµРєСЂР°РЅ "РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ" (РїРµСЂС€РёР№ С‰Рѕ РІС–РґРєСЂРёС”С‚СЊСЃСЏ). */
+    /** Intents to the system "all files access" screen (first one that opens). */
     fun allFilesAccessIntents(context: Context): List<android.content.Intent> {
         val pkg = context.packageName
         return listOf(
@@ -65,7 +65,7 @@ object EmbeddedPaths {
         )
     }
 
-    /** РЎРїСЂР°РІР¶РЅСЏ РїРµСЂРµРІС–СЂРєР° Р·Р°РїРёСЃСѓ (canWrite С–РЅРѕРґС– Р±СЂРµС€Рµ РЅР° С‡СѓР¶РёС… Р¤РЎ). */
+    /** Real writability probe (canWrite sometimes lies on foreign FS). */
     fun isDirWritable(dir: File): Boolean {
         return try {
             if (!dir.isDirectory || !dir.canWrite()) return false
@@ -77,8 +77,8 @@ object EmbeddedPaths {
     }
 
     /**
-     * Р“РѕС‚СѓС” РґРѕРІС–Р»СЊРЅСѓ РїР°РїРєСѓ СЃРµСЂРІРµСЂР°: СЃС‚РІРѕСЂСЋС”, РїРµСЂРµРІС–СЂСЏС” Р·Р°РїРёСЃ.
-     * РџРѕРІРµСЂС‚Р°С” File Р°Р±Рѕ null (Р· РїСЂРёС‡РёРЅР°РјРё РІ Р»РѕРіР°С…).
+     * Prepares a custom server folder: creates, checks writability.
+     * Returns File or null (reasons in logs).
      */
     fun prepareCustomDir(path: String): File? {
         return try {
@@ -98,8 +98,8 @@ object EmbeddedPaths {
         File(context.filesDir, "servers").apply { mkdirs() }
 
     /**
-     * РљРѕСЂС–РЅСЊ СЃРµСЂРІРµСЂС–РІ Сѓ Р·РѕРІРЅС–С€РЅСЊРѕРјСѓ СЃС…РѕРІРёС‰С– РґРѕРґР°С‚РєСѓ (РЅРµ РїРѕС‚СЂРµР±СѓС” РґРѕР·РІРѕР»С–РІ).
-     * null СЏРєС‰Рѕ СЃС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ (РІРёС‚СЏРіРЅСѓС‚Р° SD-РєР°СЂС‚Р° С‚РѕС‰Рѕ).
+     * Server root on app-external storage (no permissions needed).
+     * null when storage unavailable (ejected SD card etc).
      */
     fun externalServersRoot(context: Context): File? {
         return try {
@@ -112,7 +112,7 @@ object EmbeddedPaths {
     fun isExternalStorageAvailable(context: Context): Boolean =
         externalServersRoot(context) != null
 
-    /** Р’С–Р»СЊРЅС– Р±Р°Р№С‚Рё РґР»СЏ СЃС…РѕРІРёС‰Р° (РґР»СЏ РїРѕРєР°Р·Сѓ РІ UI). -1 СЏРєС‰Рѕ РЅРµРґРѕСЃС‚СѓРїРЅРµ. */
+    /** Free bytes for the storage (for UI display). -1 when unavailable. */
     fun freeBytes(context: Context, kind: StorageKind): Long {
         return try {
             val dir = if (kind == StorageKind.EXTERNAL) {
@@ -131,15 +131,15 @@ object EmbeddedPaths {
         if (kind == StorageKind.EXTERNAL) {
             val root = externalServersRoot(context)
             if (root != null) return File(root, sanitizeId(serverId)).apply { mkdirs() }
-            // Р—РѕРІРЅС–С€РЅС” РЅРµРґРѕСЃС‚СѓРїРЅРµ вЂ” С‡РµСЃРЅРёР№ fallback Сѓ internal (РІРёРєР»РёРєР°С‡ РјР°С” РїРѕРїРµСЂРµРґРёС‚Рё).
+            // External unavailable - honest fallback to internal (caller must warn).
             return serverDir(context, serverId, StorageKind.INTERNAL)
         }
         return File(serversRoot(context), sanitizeId(serverId)).apply { mkdirs() }
     }
 
     /**
-     * Lookup Р±РµР· РїРѕР±С–С‡РЅРѕРіРѕ mkdirs() вЂ” РґР»СЏ РІС–РґРєСЂРёС‚С‚СЏ/РїРµСЂРµРІС–СЂРѕРє Р·Р° РґРѕРІС–Р»СЊРЅРёРј РІРІРѕРґРѕРј.
-     * РЁСѓРєР°С” Р·РѕРІРЅС–С€РЅСЋ РїР°РїРєСѓ РїРµСЂС€РѕСЋ (СЏРєС‰Рѕ С–СЃРЅСѓС”), С–РЅР°РєС€Рµ РІРЅСѓС‚СЂС–С€РЅСЋ.
+     * Lookup without side-effect mkdirs() - for open/check with arbitrary input.
+     * Checks the external folder first (when present), otherwise internal.
      */
     fun lookupServerDir(context: Context, serverId: String): File {
         val id = sanitizeId(serverId)
@@ -168,41 +168,41 @@ object EmbeddedPaths {
     fun isEmbeddedPath(path: String): Boolean {
         if (path.isEmpty()) return false
         if (path.startsWith("embedded://")) return true
-        // Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РІСЃРµСЂРµРґРёРЅС– РїСЂРёРІР°С‚РЅРѕС— РїР°РїРєРё РґРѕРґР°С‚РєСѓ
+        // absolute path inside the app private dir
         return path.startsWith("/data/") || path.startsWith("/storage/emulated/0/Android/data/")
     }
 
     /**
-     * Р РµР·РѕР»РІРёС‚СЊ СЂРѕР±РѕС‡Сѓ РїР°РїРєСѓ СЃРµСЂРІРµСЂР° Сѓ File.
-     * - content:// (СЃС‚Р°СЂС– SAF СЃРµСЂРІРµСЂРё) -> РїРѕРІРµСЂС‚Р°С”РјРѕ embedded dir РґР»СЏ РјС–РіСЂР°С†С–С—
-     *   (С‡РёС‚Р°РЅРЅСЏ SAF Р»РёС€Р°С”С‚СЊСЃСЏ РІ FileManager РґР»СЏ РїРµСЂРµРіР»СЏРґСѓ, Р°Р»Рµ Р·Р°РїСѓСЃРє С–РґРµ РІ embedded)
-     * - embedded://<id> -> РІРЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ
-     * - external://<id> -> Р·РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РґРѕРґР°С‚РєСѓ (СЏРєС‰Рѕ РЅРµРґРѕСЃС‚СѓРїРЅРµ вЂ” fallback internal)
-     * - Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РІСЃРµСЂРµРґРёРЅС– filesDir Р°Р±Рѕ app-external dirs -> File(path)
-     * - РїРѕСЂРѕР¶РЅСЊРѕ / С‡СѓР¶РёР№ С€Р»СЏС… -> embedded dir Р·Р° serverId
+     * Resolves the server work dir to a File.
+     * - content:// (old SAF servers) -> return embedded dir for migration
+     *   (SAF reading stays in FileManager for viewing, but launch goes embedded)
+     * - embedded://<id> -> internal storage
+     * - external://<id> -> app-external storage (fallback internal when unavailable)
+     * - absolute path inside filesDir or app-external dirs -> File(path)
+     * - empty / foreign path -> embedded dir for serverId
      */
     fun resolveWorkDir(context: Context, serverId: String, workDirUri: String): File {
         if (workDirUri.isEmpty() || isLegacySafPath(workDirUri)) {
             return serverDir(context, serverId)
         }
-        // embedded://<id> С„РѕСЂРјР°С‚
+        // embedded://<id> format
         if (workDirUri.startsWith("embedded://")) {
             val id = workDirUri.removePrefix("embedded://").ifEmpty { serverId }
             return serverDir(context, id)
         }
-        // external://<id> С„РѕСЂРјР°С‚
+        // external://<id> format
         if (workDirUri.startsWith("external://")) {
             val id = workDirUri.removePrefix("external://").ifEmpty { serverId }
             return serverDir(context, id, StorageKind.EXTERNAL)
         }
-        // СЃРїСЂРѕР±Р° СЏРє Uri -> СЏРєС‰Рѕ content, С‚Рѕ embedded
+        // try as Uri -> content means embedded
         try {
             val uri = Uri.parse(workDirUri)
             if (uri.scheme == "content") return serverDir(context, serverId)
         } catch (_: Exception) {}
-        // Р·РІРёС‡Р°Р№РЅРёР№ С„Р°Р№Р»РѕРІРёР№ С€Р»СЏС….
-        // Р”РѕРІС–Р»СЊРЅР° РїР°РїРєР° РїРѕР·Р° РїС–СЃРѕС‡РЅРёС†РµСЋ вЂ” Р»РёС€Рµ Р· РґРѕСЃС‚СѓРїРѕРј РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ,
-        // С–РЅР°РєС€Рµ fallback internal (РІРёРєР»РёРєР°С‡ РјР°С” РїРѕРєР°Р·Р°С‚Рё РїСЂРёС‡РёРЅСѓ).
+        // plain file path.
+        // A folder outside the sandbox - only with all-files access,
+        // otherwise fallback internal (caller must show the reason).
         return try {
             val f = File(workDirUri)
             if (f.isAbsolute) {
@@ -233,6 +233,6 @@ object EmbeddedPaths {
     fun embeddedUri(serverId: String): String = "embedded://$serverId"
 
     fun displayPath(context: Context, serverId: String, kind: StorageKind = StorageKind.INTERNAL): String =
-        if (kind == StorageKind.EXTERNAL) "Р—РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ/servers/$serverId"
-        else "Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ/servers/$serverId"
+        if (kind == StorageKind.EXTERNAL) "External storage/servers/$serverId"
+        else "Internal storage/servers/$serverId"
 }

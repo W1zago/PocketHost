@@ -50,7 +50,7 @@ class MainActivity : AppCompatActivity() {
     private var filterTag: String = "ALL"
     private var sortMode: String = "By Status"
     private val repository by lazy {
-        // РЈРЅС–С„С–РєРѕРІР°РЅРёР№ Р±РµР·РїРµС‡РЅРёР№ РґРѕСЃС‚СѓРї (РґРёРІ. PocketHostApplication.getRepositoryOrNull).
+        // Unified safe access (see PocketHostApplication.getRepositoryOrNull).
         PocketHostApplication.getRepositoryOrNull() ?: run {
             Log.e("MainActivity", "repo not ready, using fallback")
             ServerRepository(this@MainActivity)
@@ -74,8 +74,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р¶РѕРґРЅРѕРіРѕ РіРµР№С‚Сѓ Termux / RUN_COMMAND Р±С–Р»СЊС€Рµ РЅРµРјР°.
-        // Р”РѕРґР°С‚РѕРє РїСЂР°С†СЋС” РѕРґСЂР°Р·Сѓ, Р±РµР· Р·РѕРІРЅС–С€РЅС–С… Р·Р°Р»РµР¶РЅРѕСЃС‚РµР№.
+        // Built-in terminal: no Termux / RUN_COMMAND gate anymore.
+        // The app works immediately, no external dependencies.
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -93,7 +93,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // РіРµР№С‚ РІРёРґР°Р»РµРЅРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” Termux
+        // gate removed: built-in terminal does not need Termux
     }
 
     private fun setupToolbar() {
@@ -287,7 +287,7 @@ class MainActivity : AppCompatActivity() {
                 val selectedType = ServerType.entries[which]
                 navigateToServerCreation(selectedType)
             }
-            .setNeutralButton("РЎРєР°РЅСѓРІР°С‚Рё РїСЂРёСЃС‚СЂС–Р№") { _, _ ->
+            .setNeutralButton("Scan device") { _, _ ->
                 startActivity(Intent(this, DeviceScanActivity::class.java))
             }
             .show()
@@ -319,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         try { repository.clearAll() } catch (_: Exception) {}
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "РћС‡РёС‰РµРЅРѕ РїРѕС€РєРѕРґР¶РµРЅС– СЃРµСЂРІРµСЂРё. РЎС‚РІРѕСЂС–С‚СЊ Р·Р°РЅРѕРІРѕ", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "Cleared corrupted servers. Recreate them", Toast.LENGTH_LONG).show()
                         }
                     }
                 } catch (_: Exception) {}
@@ -345,16 +345,16 @@ class MainActivity : AppCompatActivity() {
             val pkg = packageName
             if (!pm.isIgnoringBatteryOptimizations(pkg)) {
                 // Show snackbar with action instead of auto-popup to avoid spam
-                Snackbar.make(binding.root, "Р”РѕР·РІРѕР»РёС‚Рё PocketHost РїСЂР°С†СЋРІР°С‚Рё РІ С„РѕРЅС–?", Snackbar.LENGTH_LONG)
-                    .setAction("Р”РѕР·РІРѕР»РёС‚Рё") { requestBattery(pkg) }
+                Snackbar.make(binding.root, "Allow PocketHost to run in background?", Snackbar.LENGTH_LONG)
+                    .setAction("Allow") { requestBattery(pkg) }
                     .show()
             }
-            // Р—РѕРІРЅС–С€РЅС–Р№ Termux Р±С–Р»СЊС€Рµ РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ - Р·Р°РїРёС‚ РґР»СЏ com.termux РїСЂРёР±СЂР°РЅРѕ
+            // External Termux is no longer used - the com.termux request is removed
         } catch (_: Exception) {}
     }
 
     private fun autoRequestAllPermissions() {
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р»РёС€Рµ notification + battery РґР»СЏ СЃР°РјРѕРіРѕ РґРѕРґР°С‚РєСѓ
+        // Built-in terminal: only notification + battery for the app itself
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_PERMISSIONS)
@@ -366,9 +366,9 @@ class MainActivity : AppCompatActivity() {
             requestBattery(packageName)
             return
         }
-        // Р’СЃРµ РіРѕС‚РѕРІРѕ - РІС–РґРєСЂРёРІР°С”РјРѕ РґС–Р°РіРЅРѕСЃС‚РёРєСѓ РІР±СѓРґРѕРІР°РЅРѕРіРѕ С‚РµСЂРјС–РЅР°Р»Сѓ
+        // Everything ready - open the built-in terminal diagnostics
         startActivity(Intent(this, DeviceScanActivity::class.java))
-        Snackbar.make(binding.root, "Р’СЃРµ РіРѕС‚РѕРІРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” РґРѕР·РІРѕР»С–РІ", Snackbar.LENGTH_LONG).show()
+        Snackbar.make(binding.root, "All set: built-in terminal needs no permissions", Snackbar.LENGTH_LONG).show()
     }
 
     private fun autoRequestOnStartup() {
@@ -384,11 +384,11 @@ class MainActivity : AppCompatActivity() {
                 val pm = getSystemService(POWER_SERVICE) as PowerManager
                 if (!pm.isIgnoringBatteryOptimizations(packageName)) {
                     // Auto-request battery for app
-                    Snackbar.make(binding.root, "Р—Р°РїРёС‚СѓС”РјРѕ РґРѕР·РІС–Р» РЅР° С„РѕРЅРѕРІРёР№ СЂРµР¶РёРј...", Snackbar.LENGTH_SHORT).show()
+                    Snackbar.make(binding.root, "Requesting background permission...", Snackbar.LENGTH_SHORT).show()
                     requestBattery(packageName)
                     return@launch
                 }
-                // com.termux Р±С–Р»СЊС€Рµ РЅРµ РїРѕС‚СЂС–Р±РµРЅ
+                // com.termux no longer needed
             } catch (_: Exception) {}
         }
     }
@@ -409,9 +409,9 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_PERMISSIONS) {
             val denied = grantResults.any { it != PackageManager.PERMISSION_GRANTED }
             if (denied) {
-                Snackbar.make(binding.root, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РІС–РґС…РёР»РµРЅРѕ. РЎРµСЂРІС–СЃ РјРѕР¶Рµ РЅРµ РїРѕРєР°Р·Р°С‚Рё СЃС‚Р°С‚СѓСЃ", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Notifications denied. Service may not show status", Snackbar.LENGTH_LONG).show()
             } else {
-                Snackbar.make(binding.root, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РґРѕР·РІРѕР»РµРЅРѕ", Snackbar.LENGTH_SHORT).show()
+                Snackbar.make(binding.root, "Notifications granted", Snackbar.LENGTH_SHORT).show()
             }
             // Chain to battery
             autoRequestBatteryIfNeeded()

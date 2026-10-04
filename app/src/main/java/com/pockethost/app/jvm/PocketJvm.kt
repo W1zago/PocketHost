@@ -8,9 +8,9 @@ import java.io.File
 import java.util.jar.JarFile
 
 /**
- * Kotlin-С€Р°СЂ Р·Р°РїСѓСЃРєСѓ JVM РІ РїСЂРѕС†РµСЃС– РґРѕРґР°С‚РєСѓ.
+ * Kotlin layer for launching the JVM in the app process.
  *
- * РџРѕСЂС‚ MojoLauncher/PojavLauncher РїС–Рґ СЃРµСЂРІРµСЂРЅРёР№ РєРµР№СЃ:
+ * Port of MojoLauncher/PojavLauncher for the server use-case:
  *   GameRunner.launchGame()  -> [PocketJvm.buildJvmArgs] + [InProcessServer.start]
  *   JavaRunner.startJvm()    -> [PocketJvm.startJvm]
  *   JavaRunner.getJavaArgs() -> [PocketJvm.baseJvmArgs]
@@ -18,16 +18,16 @@ import java.util.jar.JarFile
  *   JavaRunner.findVmPath()  -> [PocketJvm.findVmPath]
  *   jre_launcher.c           -> cpp/jvm_launcher.c (nativeLoadJVM)
  *
- * Р’С–РґРјС–РЅРЅРѕСЃС‚С– РІС–Рґ Mojo (РєР»С–С”РЅС‚):
- *  - headless=true (СЃРµСЂРІРµСЂСѓ РЅРµ РїРѕС‚СЂС–Р±РµРЅ Caciocavallo/AWT);
- *  - Р¶РѕРґРЅРёС… GL/LWJGL РїСЂР°РїРѕСЂС†С–РІ (-Dorg.lwjgl.*) С– authlib-injector;
- *  - classpath = РѕРґРёРЅ fat-jar СЃРµСЂРІРµСЂР° + Main-Class Р· Р№РѕРіРѕ MANIFEST.MF;
+ * Differences from Mojo (client):
+ *  - headless=true (the server needs no Caciocavallo/AWT);
+ *  - no GL/LWJGL props (-Dorg.lwjgl.*) and no authlib-injector;
+ *  - classpath = one fat server jar + Main-Class from its MANIFEST.MF;
  *  - appArgs = ["nogui"].
  *
- * Р’С–РґРјС–РЅРЅРѕСЃС‚С– РІС–Рґ СЃС‚Р°СЂРѕРіРѕ PocketHost (ProcessBuilder + /system/bin/linker):
- *  - Р¶РѕРґРЅРѕРіРѕ execve(), РѕС‚Р¶Рµ Р¶РѕРґРЅРѕРіРѕ error=13 (W^X Р·Р°Р±РѕСЂРѕРЅР° Android 10+);
- *  - СЃРµСЂРІРµСЂ Р¶РёРІРµ РІ С‚РѕРјСѓ Р¶ UID/РїСЂРѕС†РµСЃС–, LD_LIBRARY_PATH РІРёСЃС‚Р°РІР»СЏС”С‚СЊСЃСЏ
- *    С‡РµСЂРµР· android_update_LD_LIBRARY_PATH СЏРє Сѓ Mojo utils.c.
+ * Differences from old PocketHost (ProcessBuilder + /system/bin/linker):
+ *  - no execve(), hence no error=13 (W^X ban on Android 10+);
+ *  - the server lives in the same UID/process, LD_LIBRARY_PATH is set
+ *    via android_update_LD_LIBRARY_PATH as in Mojo utils.c.
  */
 object PocketJvm {
 
@@ -47,7 +47,7 @@ object PocketJvm {
         javaArgs: Array<String>,
         mainClass: String,
         appArgs: Array<String>,
-        /** Р”РІРѕРєСЂР°РїРєРѕРІРёР№ classpath РґР»СЏ URLClassLoader-С„РѕР»Р±РµРєР° РІ native (РґРёРІ. jvm_launcher.c). */
+        /** Double classpath for the URLClassLoader fallback in native (see jvm_launcher.c). */
         classpath: String
     ): Int
 
@@ -57,15 +57,15 @@ object PocketJvm {
     external fun nativeGetLastError(): String
 
     /**
-     * Р‘СѓРґРёР»СЊРЅРёРє native-РїР°СЂРєСѓРІР°РЅРЅСЏ (jvm_launcher.c parking loop).
-     * FAIL 17:44: Stop СЃС‚Р°РІРёРІ С‚С–Р»СЊРєРё Kotlin-С„Р»Р°Рі, Р° native РєСЂСѓС‚РёРІ
-     * while(!g_exit_requested) РЅР° chunk-РІРѕСЂРєРµСЂР°С… РІС–С‡РЅРѕ вЂ” futureDone=false.
-     * РџС–СЃР»СЏ С†СЊРѕРіРѕ РґР·РІС–РЅРєР° РїР°СЂРєСѓРІР°РЅРЅСЏ РґР°С” ~10СЃ grace РЅР° flush СЃРІС–С‚Сѓ С– РІРёС…РѕРґРёС‚СЊ.
-     * Р‘РµР· РІРёРЅСЏС‚РєС–РІ (СЃС‚Р°СЂРёР№ .so Р±РµР· РјРµС‚РѕРґСѓ -> UnsatisfiedLinkError Р»РѕРІРёРјРѕ).
+     * Native parking watchdog (jvm_launcher.c parking loop).
+     * FAIL 17:44: Stop set only the Kotlin flag, while native spun
+     * while(!g_exit_requested) on chunk workers forever - futureDone=false.
+     * Since then the parking bell gives ~10s grace to flush the world and exits.
+     * No exceptions (old .so without the method -> catch UnsatisfiedLinkError).
      */
     external fun nativeRequestStop()
 
-    /** Р‘РµР·РїРµС‡РЅР° РѕР±РіРѕСЂС‚РєР° РЅР°Рґ nativeRequestStop (РЅРµ РєРёРґР°С”). */
+    /** Safe wrapper over nativeRequestStop (never throws). */
     fun requestStop() {
         try {
             nativeRequestStop()
@@ -74,7 +74,7 @@ object PocketJvm {
         } catch (_: Exception) {}
     }
 
-    /** РўРµРєСЃС‚ РѕСЃС‚Р°РЅРЅСЊРѕС— РЅР°С‚РёРІРЅРѕС— РїРѕРјРёР»РєРё (РїРѕСЂРѕР¶РЅСЊРѕ СЏРєС‰Рѕ РЅРµ Р±СѓР»Рѕ). Р‘РµР· РІРёРЅСЏС‚РєС–РІ. */
+    /** Text of the last native error (empty when none). No exceptions. */
     fun lastError(): String = try {
         nativeGetLastError()
     } catch (_: Exception) {
@@ -90,7 +90,7 @@ object PocketJvm {
         true // lib loaded, VM just not created yet
     }
 
-    // ---- libjvm.so discovery (РїРѕСЂС‚ JavaRunner.findVmPath) ----
+    // ---- libjvm.so discovery (port of JavaRunner.findVmPath) ----
 
     private fun vmCandidate(home: File, arch: String?, flavor: String): File =
         if (arch != null) File(home, "lib/$arch/$flavor/libjvm.so")
@@ -105,8 +105,8 @@ object PocketJvm {
     }
 
     /**
-     * РЁСѓРєР°С” libjvm.so РІСЃРµСЂРµРґРёРЅС– JRE. РџРѕСЂСЏРґРѕРє СЏРє Сѓ Mojo:
-     * lib/server, lib/client, РїРѕС‚С–Рј arch-РїС–РґРїР°РїРєР° (i386/x86_64/aarch64...).
+     * Finds libjvm.so inside the JRE. Order as in Mojo:
+     * lib/server, lib/client, then arch subfolder (i386/x86_64/aarch64...).
      */
     fun findVmPath(runtimeHome: File): File? {
         findForArch(runtimeHome, null)?.let { return it }
@@ -121,19 +121,19 @@ object PocketJvm {
         for (a in archAliases) {
             findForArch(runtimeHome, a)?.let { return it }
         }
-        // РѕСЃС‚Р°РЅРЅС–Р№ С€Р°РЅСЃ: РїРѕС€СѓРє РїРµСЂС€РѕРіРѕ libjvm.so СЂРµРєСѓСЂСЃРёРІРЅРѕ (РґРµС€РµРІРѕ, JRE РјР°Р»РµРЅСЊРєРёР№).
-        // Р“Р»РёР±РёРЅСѓ РѕР±РјРµР¶СѓС”РјРѕ: СЃС‚Р°РЅРґР°СЂС‚РЅС– СЂРѕР·РєР»Р°РґРєРё С‚СЂРёРјР°СЋС‚СЊ libjvm.so РЅР° РіР»РёР±РёРЅС– <=3
-        // (lib/server/, lib/aarch64/server/), Р° Р±РµР· Р»С–РјС–С‚Сѓ С‡СѓР¶РёР№ runtimeHome
-        // (РЅР°РїСЂ. /system РІС–Рґ СЃРёСЃС‚РµРјРЅРѕРіРѕ java) РїРѕРІС–СЃРёРІ Р±Рё СЃС‚Р°СЂС‚ РЅР° С…РІРёР»РёРЅРё РѕР±С…РѕРґСѓ.
+        // last chance: recursive search for the first libjvm.so (cheap, the JRE is small).
+        // Bound the depth: standard layouts keep libjvm.so at depth <=3
+        // (lib/server/, lib/aarch64/server/), while no limit on a foreign runtimeHome
+        // (e.g. /system from system java) would stall start for minutes of walking.
         return try {
             runtimeHome.walkTopDown().maxDepth(4).firstOrNull { it.name == "libjvm.so" && it.isFile }
         } catch (_: Exception) { null }
     }
 
-    // ---- Main-Class Р· MANIFEST.MF (РґР»СЏ -jar РµРјСѓР»СЏС†С–С— С‡РµСЂРµР· classpath+main) ----
+    // ---- Main-Class from MANIFEST.MF (for -jar emulation via classpath+main) ----
 
     /**
-     * Р§РёС‚Р°С” Main-Class Р· MANIFEST.MF СЃРµСЂРІРµСЂРЅРѕРіРѕ jar.
+     * Reads Main-Class from MANIFEST.MF of the server jar.
      * Paper: io.papermc.paperclip.Paperclip, Vanilla: net.minecraft.server.Main, etc.
      */
     fun readMainClass(jar: File): String? {
@@ -148,10 +148,10 @@ object PocketJvm {
     }
 
     /**
-     * Р§РёС‚Р°С” Class-Path Р· MANIFEST.MF (РµРјСѓР»СЏС†С–СЏ `java -jar`: С‚РѕР№ РїС–РґС…РѕРїР»СЋС”
-     * РІС–РґРЅРѕСЃРЅС– jar Р· Class-Path Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ, Р° classpath+main вЂ” РЅС–).
-     * РџРѕС‚СЂС–Р±РЅРѕ Fabric/Forge-Р»Р°СѓРЅС‡РµСЂР°Рј Р· Р·РѕРІРЅС–С€РЅСЊРѕСЋ РїР°РїРєРѕСЋ libraries/.
-     * РџРѕРІРµСЂС‚Р°С” С–СЃРЅСѓСЋС‡С– С„Р°Р№Р»Рё/РїР°РїРєРё, РІС–РґРЅРѕСЃРЅС– С€Р»СЏС…Рё СЂРµР·РѕР»РІРёС‚СЊ РІС–Рґ РїР°РїРєРё jar.
+     * Reads Class-Path from MANIFEST.MF (`java -jar` emulation: it auto-attaches
+     * relative jars from Class-Path, while classpath+main does not).
+     * Needed by Fabric/Forge launchers with an external libraries/ folder.
+     * Returns existing files/dirs, relative entries resolve against the jar folder.
      */
     fun readClassPathEntries(jar: File): List<File> {
         return try {
@@ -176,8 +176,8 @@ object PocketJvm {
     }
 
     /**
-     * Major-РІРµСЂСЃС–СЏ JRE Р· С„Р°Р№Р»Сѓ `release` (JAVA_VERSION="17.0.10").
-     * Р”РµС€РµРІРѕ С– Р±РµР· Р·Р°РїСѓСЃРєСѓ РїСЂРѕС†РµСЃСѓ вЂ” РЅР° РІС–РґРјС–РЅСѓ РІС–Рґ `java -version`.
+     * Major JRE version from the `release` file (JAVA_VERSION="17.0.10").
+     * Cheap and process-free - unlike `java -version`.
      */
     fun readJreMajor(runtimeHome: File): Int? {
         return try {
@@ -192,19 +192,19 @@ object PocketJvm {
         } catch (_: Exception) { null }
     }
 
-    /** Р”РµС„С–РЅС–С‚РёРІРЅР° РїРѕРјРёР»РєР° РїС–РґРіРѕС‚РѕРІРєРё: legacy exec С—С— С‚РµР¶ РЅРµ РІРёРїСЂР°РІРёС‚СЊ, fallback Р±РµР·РіР»СѓР·РґРёР№. */
+    /** Definitive prepare failure: legacy exec cannot fix it either, fallback is pointless. */
     class DefinitiveFailureException(message: String) : Exception(message)
 
-    // ---- JVM args (РїРѕСЂС‚ JavaRunner.getJavaArgs + preprocessUserArgs) ----
+    // ---- JVM args (port of JavaRunner.getJavaArgs + preprocessUserArgs) ----
 
     /**
-     * Р’РёРґР°Р»СЏС” Р°СЂРіСѓРјРµРЅС‚Рё СЏРєС– Р»Р°СѓРЅС‡РµСЂ СЃС‚Р°РІРёС‚СЊ СЃР°Рј Р°Р±Рѕ СЏРєС– Р»Р°РјР°СЋС‚СЊ Android:
-     * -cp/-classpath (classpath РїРµСЂРµРґР°С”РјРѕ РѕРєСЂРµРјРѕ), -Xms/-Xmx (СЃС‚Р°РІРёРјРѕ Р· РєРѕРЅС„С–РіСѓ),
-     * -d32/-d64, -Xint, large-pages (РЅРµРјР° РЅР° РјРѕР±С–Р»С†С–),
-     * РєРѕРЅРєСѓСЂСѓСЋС‡С– GC (Р»Р°СѓРЅС‡РµСЂ РїСЂРёРјСѓСЃРѕРІРѕ СЃС‚Р°РІРёС‚СЊ UseSerialGC РґР»СЏ РјРѕР±С–Р»РєРё вЂ”
-     * РґРІР° РєРѕР»РµРєС‚РѕСЂРё РІ РєРѕРјР°РЅРґРЅРѕРјСѓ СЂСЏРґРєСѓ РІР°Р»СЏС‚СЊ СЃС‚РІРѕСЂРµРЅРЅСЏ JVM),
-     * -Djava.class.path (prepare РґРѕРґР°С” СЃРІС–Р№ РїРѕРІРЅРёР№).
-     * --module-path С„РѕСЂРјРё Р· РїСЂРѕР±С–Р»РѕРј РєР»РµС—С‚СЊ Сѓ --module-path=... (СЏРє Mojo).
+     * Drops args the launcher sets itself or that break Android:
+     * -cp/-classpath (we pass classpath separately), -Xms/-Xmx (set from config),
+     * -d32/-d64, -Xint, large-pages (absent on mobile),
+     * competing GCs (launcher forces UseSerialGC for mobile -
+     * two collectors in one command line kill JVM creation),
+     * -Djava.class.path (prepare adds its own full one).
+     * --module-path forms with a space are glued into --module-path=... (like Mojo).
      */
     fun sanitizeUserArgs(args: List<String>): MutableList<String> {
         val out = args.toMutableList()
@@ -231,8 +231,8 @@ object PocketJvm {
                 "-d32", "-d64", "-Xint",
                 "-XX:+UseTransparentHugePages", "-XX:+UseLargePagesInMetaspace",
                 "-XX:+UseLargePages",
-                // РљРѕРЅРєСѓСЂРµРЅС‚Рё РїСЂРёРјСѓСЃРѕРІРѕРіРѕ UseSerialGC (РґРёРІ. buildJvmArgs):
-                // СЃС‚Р°СЂС– РєРѕРЅС„С–РіРё СЃРµСЂРІРµСЂС–РІ Р·Р±РµСЂС–РіР°Р»Рё G1GC вЂ” РґРІР° РєРѕР»РµРєС‚РѕСЂРё РІР°Р»СЏС‚СЊ СЃС‚Р°СЂС‚.
+                // Competing forced UseSerialGC (see buildJvmArgs):
+                // old server configs kept G1GC - two collectors kill the start.
                 "-XX:+UseG1GC", "-XX:+UseParallelGC", "-XX:+UseConcMarkSweepGC",
                 "-XX:+UseZGC", "-XX:+UseShenandoahGC", "-XX:-UseSerialGC",
                 "-XX:+ParallelRefProcEnabled" -> it.remove()
@@ -252,8 +252,8 @@ object PocketJvm {
     }
 
     /**
-     * Р‘Р°Р·РѕРІС– VM-Р°СЂРіСѓРјРµРЅС‚Рё. РџРѕСЂСЏРґРѕРє СЏРє Сѓ Mojo: -Xmx/-Xms РїРµСЂС€РёРјРё,
-     * РїРѕС‚С–Рј СЋР·РµСЂСЃСЊРєС–, РїРѕС‚С–Рј overridable (СЋР·РµСЂСЃСЊРєС– РїРµСЂРµРјР°РіР°СЋС‚СЊ).
+     * Base VM args. Order as in Mojo: -Xmx/-Xms first,
+     * then user args, then overridable (user args win).
      */
     fun buildJvmArgs(
         context: Context,
@@ -266,7 +266,7 @@ object PocketJvm {
     ): List<String> {
         val vmArgs = sanitizeUserArgs(userArgs + extraArgs).toMutableList()
 
-        // RAM РїРµСЂС€РёРјРё (СЏРє Mojo: add(0, -Xms), add(0, -Xmx) -> Xmx РѕРїРёРЅСЏС”С‚СЊСЃСЏ РїРµСЂС€РёРј)
+        // RAM first (like Mojo: add(0, -Xms), add(0, -Xmx) -> Xmx ends up first)
         vmArgs.add(0, "-Xms${minMemoryMB}M")
         vmArgs.add(0, "-Xmx${maxMemoryMB}M")
 
@@ -278,27 +278,27 @@ object PocketJvm {
             "-Duser.country=US",
             "-Dfile.encoding=UTF-8",
             "-Djava.awt.headless=true",
-            "-Dlog4j2.formatMsgNoLookups=true", // Log4Shell РјС–С‚С–РіР°С†С–СЏ, СЏРє Сѓ Mojo
-            "-Djdk.lang.Process.launchMechanism=FORK", // POSIX_SPAWN РїРѕС‚СЂРµР±СѓС” jspawnhelper, СЏРєРѕРіРѕ РЅРµРјР° РЅР° Android
-            // Р’Р±СѓРґРѕРІР°РЅРёР№ JRE вЂ” adhoc-Р·Р±С–СЂРєР° Pojav, Р·РІС–С‚СѓС” "17-internal":
-            // Paper gate (contains("-") -> pre-release -> return) РІР±РёРІР°С” СЃС‚Р°СЂС‚.
-            // РћС„С–С†С–Р№РЅРёР№ РїСЂР°РїРѕСЂРµС†СЊ РѕР±С…РѕРґСѓ (docs.papermc.io: Paper.IgnoreJavaVersion).
-            // NOTE: -Djava.version РќР• РїСЂР°С†СЋС” (HotSpot РїРµСЂРµР·Р°РїРёСЃСѓС” РІР±СѓРґРѕРІР°РЅРёРј),
-            // С‚РѕРјСѓ Р»РёС€Рµ IgnoreJavaVersion.
+            "-Dlog4j2.formatMsgNoLookups=true", // Log4Shell mitigation, like Mojo
+            "-Djdk.lang.Process.launchMechanism=FORK", // POSIX_SPAWN needs jspawnhelper, absent on Android
+            // Bundled JRE is an adhoc Pojav build, reports "17-internal":
+            // Paper gate (contains("-") -> pre-release -> return) kills the start.
+            // Official bypass (docs.papermc.io: Paper.IgnoreJavaVersion).
+            // NOTE: -Djava.version does NOT work (HotSpot overwrites the built-in),
+            // so only IgnoreJavaVersion.
             "-DPaper.IgnoreJavaVersion=true",
-            // РњРѕР±С–Р»СЊРЅРёР№ С‚СЋРЅС–РЅРі СЃС‚Р°СЂС‚Сѓ: РјРµРЅС€Рµ РїР°СЂР°Р»РµР»СЊРЅРёС… РєРѕРјРїС–Р»СЏС‚РѕСЂС–РІ С– РІРёС‰С–
-            // РїРѕСЂРѕРіРё JIT вЂ” bulk classloading РїРµСЂС€РёС… СЃРµРєСѓРЅРґ РЅРµ С‚РѕРЅРµ РІ IC-СЃС‚РѕСЂРјС–
-            // (ICBufferFull safepoint + tag-abort РІ libjvm 2021 РЅР° РЅРѕРІРёС… Android).
-            // Р“Р°СЂСЏС‡С– РјРµС‚РѕРґРё РІСЃРµ РѕРґРЅРѕ СЃРєРѕРјРїС–Р»СЋСЋС‚СЊСЃСЏ Р·Р° С…РІРёР»РёРЅРё СЂРѕР±РѕС‚Рё СЃРµСЂРІРµСЂР°.
+            // Mobile start tuning: fewer parallel compilers and higher
+            // JIT thresholds - bulk classloading of the first seconds does not drown in IC storms
+            // (ICBufferFull safepoint + tag-abort in 2021 libjvm on new Android).
+            // Hot methods still compile within minutes of server uptime.
             "-XX:CICompilerCount=2",
             "-XX:Tier3CompileThreshold=5000",
             "-XX:Tier4CompileThreshold=50000",
             "-XX:+UseSerialGC",
             "-Xss256k",
-            "-XX:-UseCompressedOops", // MTE-С„С–РєСЃ Android 14+ (СЏРє Р±СѓР»Рѕ РІ СЃС‚Р°СЂРѕРјСѓ Р»Р°СѓРЅС‡РµСЂС–)
+            "-XX:-UseCompressedOops", // MTE fix for Android 14+ (as in the old launcher)
             "-XX:ActiveProcessorCount=" + Runtime.getRuntime().availableProcessors()
         )
-        // РјР°СЂС€РјРµР»РѕСѓ-x86 РєРѕСЃС‚РёР»СЊ Р· Mojo (signal/sigchain Р±Р°Рі): РґРµС€РµРІРѕ Р»РёС€РёС‚Рё
+        // marshmallow-x86 crutch from Mojo (signal/sigchain bug): cheap to keep
         if (Build.VERSION.SDK_INT == 23 && EmbeddedJava.abi() == "x86") {
             overridable.add("-Xrs")
         }
@@ -314,8 +314,8 @@ object PocketJvm {
     }
 
     /**
-     * LD_LIBRARY_PATH РґР»СЏ libjvm: <home>/lib/server : <home>/lib : <home>/lib/jli.
-     * РЇРє Mojo relocateLdLibPath(), Р°Р»Рµ Р±РµР· NATIVE_LIB_DIR (РіСЂР°С„С–РєРё РЅРµРјР°).
+     * LD_LIBRARY_PATH for libjvm: <home>/lib/server : <home>/lib : <home>/lib/jli.
+     * Like Mojo relocateLdLibPath(), but without NATIVE_LIB_DIR (no graphics).
      */
     fun ldLibraryPathFor(vmFile: File): String {
         val serverDir = vmFile.parentFile // .../lib/server
@@ -333,18 +333,18 @@ object PocketJvm {
         val jvmArgs: List<String>,
         val mainClass: String,
         val appArgs: List<String>,
-        /** РџРѕРІРЅРёР№ classpath (jar + Class-Path Р· РјР°РЅС–С„РµСЃС‚Сѓ). Р¤С–РєСЃСѓС”С‚СЊСЃСЏ РїСЂРё СЃС‚РІРѕСЂРµРЅРЅС– JVM. */
+        /** Full classpath (jar + Class-Path from manifest). Fixed at JVM creation. */
         val classpath: String
     )
 
     /**
-     * Р“РѕС‚СѓС” РІСЃРµ РґР»СЏ nativeLoadJVM: Р·РЅР°С…РѕРґРёС‚СЊ libjvm.so, РїРµСЂРµРІС–СЂСЏС” РІРµСЂСЃС–СЋ Java,
-     * С‡РёС‚Р°С” Main-Class (+ Class-Path Р· РјР°РЅС–С„РµСЃС‚Сѓ), Р±СѓРґСѓС” jvmArgs.
+     * Prepares everything for nativeLoadJVM: finds libjvm.so, checks the Java version,
+     * reads Main-Class (+ Class-Path from manifest), builds jvmArgs.
      *
-     * @param minecraftVersion РІРµСЂСЃС–СЏ РіСЂРё ("1.21.4") РґР»СЏ РїРµСЂРµРІС–СЂРєРё Java 17 vs 21.
-     * @throws DefinitiveFailureException СЏРєС‰Рѕ РїСЂРѕР±Р»РµРјР° РЅРµ Р»С–РєСѓС”С‚СЊСЃСЏ fallback'РѕРј
-     *         (Р±РёС‚РёР№ jar, РЅРµРјР° Main-Class, СЃС‚Р°СЂР° Java) вЂ” Р· РїСЂРёС‡РёРЅРѕСЋ РІР¶Рµ РІ log().
-     * @return null Р»РёС€Рµ РґР»СЏ retryable-РїРѕРјРёР»РѕРє (РЅР°РїСЂ. JRE С‰Рµ РґРѕРєР°С‡СѓС”С‚СЊСЃСЏ).
+     * @param minecraftVersion game version ("1.21.4") for the Java 17 vs 21 check.
+     * @throws DefinitiveFailureException when the problem is not fixable by fallback
+     *         (broken jar, no Main-Class, old Java) - reason already in log().
+     * @return null only for retryable failures (e.g. JRE still downloading).
      */
     fun prepare(
         context: Context,
@@ -359,39 +359,39 @@ object PocketJvm {
     ): StartParams? {
         val vmFile = findVmPath(runtimeHome)
         if (vmFile == null || !vmFile.exists()) {
-            log("ERROR: libjvm.so РЅРµ Р·РЅР°Р№РґРµРЅРѕ РІ ${runtimeHome.absolutePath}. JRE Р±РёС‚РёР№ вЂ” РІРёРґР°Р»Рё tools/jre С– РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·.")
+            log("ERROR: libjvm.so not found in ${runtimeHome.absolutePath}. JRE is broken - delete tools/jre and press Start again.")
             throw DefinitiveFailureException("no libjvm")
         }
-        // Р’РµСЂСЃС–СЏ Java Р”Рћ СЃС‚Р°СЂС‚Сѓ: С–РЅР°РєС€Рµ РѕС‚СЂРёРјР°С”РјРѕ РЅРµР·СЂРѕР·СѓРјС–Р»РёР№ -8
-        // (UnsupportedClassVersionError РІСЃРµСЂРµРґРёРЅС– FindClass).
+        // Java version BEFORE start: otherwise we get a cryptic -8
+        // (UnsupportedClassVersionError inside FindClass).
         if (minecraftVersion != null) {
             val need = EmbeddedJava.minJavaForMinecraft(minecraftVersion)
             val have = readJreMajor(runtimeHome)
             if (have != null && have < need) {
-                log("ERROR: Minecraft $minecraftVersion РїРѕС‚СЂРµР±СѓС” Java $need+, Р° РІР±СѓРґРѕРІР°РЅРёР№ JRE вЂ” Java $have.")
-                log("Р’Р°СЂС–Р°РЅС‚Рё: РѕР±РµСЂРё СЃРµСЂРІРµСЂ 1.20.4 Р°Р±Рѕ РЅРёР¶С‡Рµ, Р°Р±Рѕ РїРѕРєР»Р°РґРё JRE $need РІСЂСѓС‡РЅСѓ РІ tools/jre21/ С‡РµСЂРµР· Files.")
+                log("ERROR: Minecraft $minecraftVersion needs Java $need+, but bundled JRE is Java $have.")
+                log("Options: pick server 1.20.4 or lower, or drop JRE $need manually into tools/jre21/ via Files.")
                 throw DefinitiveFailureException("java $have < $need")
             }
         }
         if (!serverJar.isFile || serverJar.length() < 1024) {
-            log("ERROR: jar ${serverJar.name} Р±РёС‚РёР№ Р°Р±Рѕ РїРѕСЂРѕР¶РЅС–Р№ (${serverJar.length()} Р±Р°Р№С‚). Р’РёРґР°Р»Рё Р№РѕРіРѕ С‡РµСЂРµР· Files С– РЅР°С‚РёСЃРЅРё Start вЂ” Р·Р°РІР°РЅС‚Р°Р¶РёС‚СЊСЃСЏ Р·Р°РЅРѕРІРѕ.")
+            log("ERROR: jar ${serverJar.name} is broken or empty (${serverJar.length()} bytes). Delete it via Files and press Start - it will download again.")
             throw DefinitiveFailureException("broken jar")
         }
         val mainClass = readMainClass(serverJar)
         if (mainClass == null) {
-            log("ERROR: ${serverJar.name} Р±РµР· Main-Class РІ MANIFEST.MF. РџРѕРєР»Р°РґРё РїРѕРІРЅРёР№ СЃРµСЂРІРµСЂРЅРёР№ jar (Paper/Vanilla/Purpur/Fabric).")
+            log("ERROR: ${serverJar.name} has no Main-Class in MANIFEST.MF. Drop a full server jar (Paper/Vanilla/Purpur/Fabric).")
             throw DefinitiveFailureException("no Main-Class")
         }
         val jvmArgs = buildJvmArgs(
             context, runtimeHome, workDir, maxMemoryMB, minMemoryMB, userArgs
         ).toMutableList()
-        // classpath СЏРє РѕРєСЂРµРјРёР№ -D (СЏРє Mojo: РѕРґРёРЅ -Djava.class.path=a:b:c, РЅРµ -cp),
-        // РїР»СЋСЃ Class-Path Р· РјР°РЅС–С„РµСЃС‚Сѓ (РµРјСѓР»СЏС†С–СЏ `java -jar` РґР»СЏ Fabric/Forge).
+        // classpath as a separate -D (like Mojo: one -Djava.class.path=a:b:c, not -cp),
+        // plus Class-Path from the manifest (`java -jar` emulation for Fabric/Forge).
         val cpEntries = arrayListOf(serverJar.absolutePath)
         readClassPathEntries(serverJar).forEach { cpEntries.add(it.absolutePath) }
         val classpath = cpEntries.joinToString(":")
         jvmArgs.add("-Djava.class.path=$classpath")
-        // --- Р°РіСЂРµСЃРёРІРЅР° РґС–Р°РіРЅРѕСЃС‚РёРєР° -8: РІСЃРµ С‰Рѕ С‚СЂРµР±Р° С‰РѕР± Р·СЂРѕР·СѓРјС–С‚Рё С‡РѕРјСѓ РєР»Р°СЃ РЅРµ РІР°РЅС‚Р°Р¶РёС‚СЊСЃСЏ ---
+        // --- aggressive -8 diagnostics: everything needed to understand why the class did not load ---
         Log.i(TAG, "prepare: runtimeHome=${runtimeHome.absolutePath} exists=${runtimeHome.exists()}")
         Log.i(TAG, "prepare: vmFile=${vmFile.absolutePath} exists=${vmFile.exists()} size=${vmFile.length()}")
         Log.i(TAG, "prepare: serverJar=${serverJar.absolutePath} isFile=${serverJar.isFile} size=${serverJar.length()}")
@@ -405,7 +405,7 @@ object PocketJvm {
         log("DBG prepare: JVM already created=$alreadyCreated")
         log("JVM: ${vmFile.absolutePath}")
         log("Main: $mainClass")
-        if (cpEntries.size > 1) log("Class-Path: +${cpEntries.size - 1} entries Р· РјР°РЅС–С„РµСЃС‚Сѓ")
+        if (cpEntries.size > 1) log("Class-Path: +${cpEntries.size - 1} entries from manifest")
         return StartParams(vmFile, runtimeHome, jvmArgs, mainClass, listOf("nogui"), classpath)
     }
 }

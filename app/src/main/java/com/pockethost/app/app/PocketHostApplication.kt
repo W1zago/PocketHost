@@ -16,11 +16,11 @@ class PocketHostApplication : Application() {
         lateinit var serverRepository: ServerRepository
             private set
 
-        /** True СЏРєС‰Рѕ [serverRepository] РІР¶Рµ РїСЂРѕС–РЅС–С†С–Р°Р»С–Р·РѕРІР°РЅРѕ (Р±РµР· РєРёРґР°РЅРЅСЏ UninitializedPropertyAccessException). */
+        /** True if [serverRepository] is already initialized (without throwing UninitializedPropertyAccessException). */
         val isRepositoryInitialized: Boolean
             get() = ::serverRepository.isInitialized
 
-        /** Р‘РµР·РїРµС‡РЅРёР№ РґРѕСЃС‚СѓРї: null СЏРєС‰Рѕ СЂРµРїРѕР·РёС‚РѕСЂС–Р№ С‰Рµ РЅРµ РіРѕС‚РѕРІРёР№ Р°Р±Рѕ РїРѕС€РєРѕРґР¶РµРЅРёР№. */
+        /** Safe access: null if the repository is not ready or corrupted yet. */
         fun getRepositoryOrNull(): ServerRepository? =
             if (::serverRepository.isInitialized) {
                 runCatching { serverRepository }.getOrNull()
@@ -42,10 +42,10 @@ class PocketHostApplication : Application() {
             } catch (_: Exception) {}
             defaultHandler?.uncaughtException(thread, throwable)
         }
-        // Single init Р· Р·СЂРѕР·СѓРјС–Р»РёРј fallback: СЏРєС‰Рѕ DataStore РїРѕС€РєРѕРґР¶РµРЅРѕ вЂ” С‡РёСЃС‚РёРјРѕ
-        // С„Р°Р№Р»Рё РѕРґРёРЅ СЂР°Р· С– РїСЂРѕР±СѓС”РјРѕ С‰Рµ СЂР°Р·. РЇРєС‰Рѕ С– РґСЂСѓРіРёР№ СЂР°Р· РІРїР°РІ вЂ” Р»РёС€Р°С”РјРѕ
-        // РЅРµС–РЅС–С†С–Р°Р»С–Р·РѕРІР°РЅРёРј (getRepositoryOrNull() == null, isRepositoryInitialized == false),
-        // РІРёРєР»РёРєР°С‡С– РјР°СЋС‚СЊ РѕР±СЂРѕР±РёС‚Рё С‡РµСЂРµР· fallback/Toast+finish, Р° РЅРµ РєСЂР°С€РёС‚РёСЃСЊ РЅР° lateinit.
+        // Single init with sensible fallback: if DataStore is corrupted - wipe
+        // files once and retry. If the second attempt also fails - leave
+        // uninitialized (getRepositoryOrNull() == null, isRepositoryInitialized == false),
+        // callers must handle via fallback/Toast+finish instead of crashing on lateinit.
         runCatching {
             serverRepository = ServerRepository(this)
         }.onFailure { e ->
@@ -65,7 +65,7 @@ class PocketHostApplication : Application() {
     }
 
     private fun checkLegacyServers() {
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” filesDir/servers - С†Рµ С‚РµРїРµСЂ РѕСЃРЅРѕРІРЅРµ СЃС…РѕРІРёС‰Рµ, РЅС–С‡РѕРіРѕ С–РіРЅРѕСЂСѓРІР°С‚Рё РЅРµ С‚СЂРµР±Р°.
+        // Built-in terminal uses filesDir/servers - now the primary storage, nothing to ignore.
         try {
             val servers = java.io.File(filesDir, "servers")
             if (servers.exists()) {

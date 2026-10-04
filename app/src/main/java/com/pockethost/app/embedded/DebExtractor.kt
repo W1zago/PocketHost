@@ -50,7 +50,7 @@ object DebExtractor {
             tmp = File.createTempFile("deb-data-", ".tar", destDir.parentFile ?: destDir)
             FileOutputStream(tmp).use { it.write(payload) }
             val ok = when {
-                isXz(payload) -> TarExtractor.extractXzTar(tmp, destDir, log, stripComponents)
+                isXz(payload) -> TarExtractor.extractXzTar(tmp, destDir, log, stripComponents, requireBinJava = false)
                 isGz(payload) -> TarExtractor.extractGzTar(tmp, destDir, log, stripComponents)
                 else -> {
                     log("unknown data compression in ${debFile.name}")

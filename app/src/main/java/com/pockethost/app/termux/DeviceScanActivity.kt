@@ -28,24 +28,24 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Р”С–Р°РіРЅРѕСЃС‚РёРєР° Р’Р‘РЈР”РћР’РђРќРћР“Рћ С‚РµСЂРјС–РЅР°Р»Сѓ.
- * Р–РѕРґРЅРёС… РїРµСЂРµРІС–СЂРѕРє Termux / RUN_COMMAND / SAF - РІСЃРµ РІСЃРµСЂРµРґРёРЅС– РґРѕРґР°С‚РєСѓ.
+ * Built-in terminal diagnostics.
+ * No Termux / RUN_COMMAND / SAF checks - everything inside the app.
  */
 class DeviceScanActivity : AppCompatActivity() {
 
     private lateinit var container: LinearLayout
-    // H6: Р±СѓРІ CoroutineScope(Dispatchers.Main) Р· РІРёС‚РѕРєРѕРј РїСЂРё Р·РЅРёС‰РµРЅРЅС– Activity вЂ”
-    // С‚РµРїРµСЂ lifecycleScope РІСЃСЋРґРё (Р°РІС‚Рѕ-cancel РІ onDestroy).
+    // H6: was CoroutineScope(Dispatchers.Main) leaking on Activity destroy -
+    // now lifecycleScope everywhere (auto-cancel in onDestroy).
 
     private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) Toast.makeText(this, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РґРѕР·РІРѕР»РµРЅРѕ", Toast.LENGTH_SHORT).show()
-        else Toast.makeText(this, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РІС–РґС…РёР»РµРЅРѕ", Toast.LENGTH_SHORT).show()
+        if (granted) Toast.makeText(this, "Notifications granted", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "Notifications denied", Toast.LENGTH_SHORT).show()
         refresh()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        supportActionBar?.title = "Р”С–Р°РіРЅРѕСЃС‚РёРєР°"
+        supportActionBar?.title = "Diagnostics"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         val scroll = ScrollView(this)
@@ -82,11 +82,11 @@ class DeviceScanActivity : AppCompatActivity() {
     )
 
     private fun refresh() {
-        // РЎРєРµР»РµС‚ РѕРґСЂР°Р·Сѓ, РІР°Р¶РєС– РїРµСЂРµРІС–СЂРєРё (fork sh) вЂ” Сѓ IO С‰РѕР± РЅРµ ANR.
+        // Skeleton immediately, heavy checks (fork sh) - in IO to avoid ANR.
         container.removeAllViews()
         addHeader()
         val loading = TextView(this).apply {
-            text = "РџРµСЂРµРІС–СЂРєР°..."
+            text = "Checking..."
             gravity = Gravity.CENTER
             setPadding(0, 24, 0, 24)
             setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
@@ -104,15 +104,15 @@ class DeviceScanActivity : AppCompatActivity() {
                 try {
                     container.removeAllViews()
                     addHeader()
-                    addCheck("1. Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» (sh)", res.shellOk, "Р”РµС‚Р°Р»С–") { showShellInfo() }
-                    addCheck("2. Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ", res.storageOk, "Р’С–РґРєСЂРёС‚Рё СЃС…РѕРІРёС‰Рµ") { openStorageSettings() }
-                    addCheck("3. Р’Р±СѓРґРѕРІР°РЅР° Java", res.javaOk, "Р’СЃС‚Р°РЅРѕРІРёС‚Рё JRE") { installJre() }
-                    addCheck("4. Р’Р±СѓРґРѕРІР°РЅРёР№ shell РґР»СЏ Ubuntu", res.shellOk, "Р”РµС‚Р°Р»С–") { showShellInfo() }
-                    addCheck("5. Р‘Р°С‚Р°СЂРµСЏ: С–РіРЅРѕСЂ РѕРїС‚РёРјС–Р·Р°С†С–С— (PocketHost)", res.batteryOk, "Р”РѕР·РІРѕР»РёС‚Рё С„РѕРЅ") { requestBatterySelf() }
-                    addCheck("6. РЎРїРѕРІС–С‰РµРЅРЅСЏ POST_NOTIFICATIONS", res.notifOk, "Р—Р°РїСЂРѕСЃРёС‚Рё") { requestNotification() }
-                    addCheck("7. Р’С–Р»СЊРЅРѕ РјС–СЃС†СЏ >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "РћС‡РёСЃС‚РёС‚Рё") { openStorageSettings() }
-                    addCheck("8. Р†РЅС‚РµСЂРЅРµС‚", checkInternetSync(), "РџРµСЂРµРІС–СЂРёС‚Рё РјРµСЂРµР¶Сѓ") { openWifiSettings() }
-                    // РґРµС‚Р°Р»СЊ Java-С€Р»СЏС…Сѓ
+                    addCheck("1. Built-in terminal (sh)", res.shellOk, "Details") { showShellInfo() }
+                    addCheck("2. Internal storage", res.storageOk, "Open storage") { openStorageSettings() }
+                    addCheck("3. Built-in Java", res.javaOk, "Install JRE") { installJre() }
+                    addCheck("4. Built-in shell for Ubuntu", res.shellOk, "Details") { showShellInfo() }
+                    addCheck("5. Battery: ignore optimizations (PocketHost)", res.batteryOk, "Allow background") { requestBatterySelf() }
+                    addCheck("6. POST_NOTIFICATIONS permission", res.notifOk, "Request") { requestNotification() }
+                    addCheck("7. Free space >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "Clear") { openStorageSettings() }
+                    addCheck("8. Internet", checkInternetSync(), "Check network") { openWifiSettings() }
+                    // Java path detail
                     if (res.javaPath != null) {
                         container.addView(TextView(this@DeviceScanActivity).apply {
                             text = "Java: ${res.javaPath}"
@@ -129,7 +129,7 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun addHeader() {
         val title = TextView(this).apply {
-            text = "PocketHost вЂ” РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»"
+            text = "PocketHost - built-in terminal"
             textSize = 18f
             setTypeface(null, android.graphics.Typeface.BOLD)
             gravity = Gravity.CENTER
@@ -137,7 +137,7 @@ class DeviceScanActivity : AppCompatActivity() {
             setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface))
         }
         val subtitle = TextView(this).apply {
-            text = "Р—РѕРІРЅС–С€РЅС–Р№ Termux РќР• РїРѕС‚СЂС–Р±РµРЅ. Р’СЃРµ РїСЂР°С†СЋС” РІСЃРµСЂРµРґРёРЅС– РґРѕРґР°С‚РєСѓ Р±РµР· РґРѕР·РІРѕР»Сѓ В«РєРµСЂСѓРІР°РЅРЅСЏ TermuxВ»."
+            text = "External Termux NOT needed. Everything runs inside the app without the 'control Termux' permission."
             textSize = 12f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 16)
@@ -147,11 +147,11 @@ class DeviceScanActivity : AppCompatActivity() {
         container.addView(subtitle)
 
         val btnRescan = MaterialButton(this).apply {
-            text = "РЎРєР°РЅСѓРІР°С‚Рё Р·РЅРѕРІСѓ"
+            text = "Scan again"
             setOnClickListener { refreshWithInternet() }
         }
         val btnAuto = MaterialButton(this).apply {
-            text = "РќР°РґР°С‚Рё РґРѕР·РІРѕР»Рё Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ"
+            text = "Grant permissions automatically"
             setOnClickListener { autoRequestAll() }
         }
         container.addView(btnRescan.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 8) } })
@@ -160,7 +160,7 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun addActions() {
         val info = TextView(this).apply {
-            text = "РџСЂРёРјС–С‚РєР°: SAF-РїР°РїРєРё С‚Р° RUN_COMMAND Р±С–Р»СЊС€Рµ РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓСЋС‚СЊСЃСЏ. РЎС‚Р°СЂС– SAF-СЃРµСЂРІРµСЂРё Р·Р°РїСѓСЃРєР°СЋС‚СЊСЃСЏ РІ РјС–РіСЂР°С†С–Р№РЅРѕРјСѓ СЂРµР¶РёРјС– Сѓ РІРЅСѓС‚СЂС–С€РЅС–Р№ РїР°РїС†С–."
+            text = "Note: SAF folders and RUN_COMMAND are no longer used. Old SAF servers start in migration mode in the internal folder."
             textSize = 12f
             setPadding(0, 24, 0, 0)
             setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
@@ -181,7 +181,7 @@ class DeviceScanActivity : AppCompatActivity() {
         val okColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.tertiary)
         val errColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.error)
         val indicator = TextView(this).apply {
-            text = if (ok) "вњ“" else "вњ—"
+            text = if (ok) "✓" else "✗"
             textSize = 20f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(if (ok) okColor else errColor)
@@ -216,23 +216,23 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun getDetail(title: String, ok: Boolean): String {
         return when {
-            title.contains("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»") -> if (ok) "ProcessBuilder sh РїСЂР°С†СЋС”" else "sh РЅРµРґРѕСЃС‚СѓРїРЅРёР№ (РґСѓР¶Рµ СЂС–РґРєРѕ). РџРµСЂРµР·Р°РїСѓСЃС‚Рё РїСЂРёСЃС‚СЂС–Р№"
-            title.contains("Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ") -> {
+            title.contains("Built-in terminal") -> if (ok) "ProcessBuilder sh works" else "sh unavailable (very rare). Reboot the device"
+            title.contains("Internal storage") -> {
                 val root = filesDir.absolutePath
-                if (ok) "Р”РѕСЃС‚СѓРїРЅРѕ: $root" else "РќРµРјР° Р·Р°РїРёСЃСѓ РІ $root"
+                if (ok) "Available: $root" else "Not writable: $root"
             }
-            title.contains("Р’Р±СѓРґРѕРІР°РЅР° Java") -> {
+            title.contains("Built-in Java") -> {
                 val java = try { com.pockethost.app.embedded.EmbeddedJava.findJava(this) } catch (_: Exception) { null }
-                if (ok) "Р—РЅР°Р№РґРµРЅРѕ: $java" else "РќРµ Р·РЅР°Р№РґРµРЅРѕ. РќР°С‚РёСЃРЅРё В«Р’СЃС‚Р°РЅРѕРІРёС‚Рё JREВ» (РїРѕС‚СЂС–Р±РµРЅ С–РЅС‚РµСЂРЅРµС‚, ~100MB)"
+                if (ok) "Found: $java" else "Not found. Press Install JRE (needs internet, ~100MB)"
             }
-            title.contains("Ubuntu") -> if (ok) "sh -i РіРѕС‚РѕРІРёР№ РґР»СЏ РєРѕРјР°РЅРґ" else "sh РЅРµРґРѕСЃС‚СѓРїРЅРёР№"
-            title.contains("Р‘Р°С‚Р°СЂРµСЏ") -> if (ok) "Р†РіРЅРѕСЂ РѕРїС‚РёРјС–Р·Р°С†С–С— СѓРІС–РјРєРЅРµРЅРѕ" else "РЎРёСЃС‚РµРјР° РјРѕР¶Рµ РІР±РёРІР°С‚Рё С„РѕРЅРѕРІРёР№ СЃРµСЂРІС–СЃ"
-            title.contains("РЎРїРѕРІС–С‰РµРЅРЅСЏ") -> if (ok) "POST_NOTIFICATIONS РґРѕР·РІРѕР»РµРЅРѕ" else "РџРѕС‚СЂС–Р±РµРЅ РґР»СЏ foreground service"
-            title.contains("Р’С–Р»СЊРЅРѕ РјС–СЃС†СЏ") -> {
+            title.contains("Ubuntu") -> if (ok) "sh -i ready for commands" else "sh unavailable"
+            title.contains("Battery") -> if (ok) "Optimization ignore enabled" else "System may kill the background service"
+            title.contains("POST_NOTIFICATIONS") -> if (ok) "POST_NOTIFICATIONS granted" else "Required for foreground service"
+            title.contains("Free space") -> {
                 val free = getFreeSpaceGB()
-                if (ok) "${String.format("%.1f", free)} GB РІС–Р»СЊРЅРѕ" else "${String.format("%.1f", free)} GB <0.5GB, Р·РІС–Р»СЊРЅРё РјС–СЃС†Рµ"
+                if (ok) "${String.format("%.1f", free)} GB free" else "${String.format("%.1f", free)} GB <0.5GB, free up space"
             }
-            title.contains("Р†РЅС‚РµСЂРЅРµС‚") -> if (ok) "Р”РѕСЃС‚СѓРї С” (Р°Р±Рѕ РєРµС€)" else "РџРµСЂРµРІС–СЂРєР° РЅРµ РїСЂРѕР№С€Р»Р°. РЈРІС–РјРєРЅРё WiFi/РјРѕР±С–Р»СЊРЅС–"
+            title.contains("Internet") -> if (ok) "Reachable (or cached)" else "Check failed. Enable WiFi/mobile data"
             else -> ""
         }
     }
@@ -295,7 +295,7 @@ class DeviceScanActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) { checkInternet() }
             internetCache = result
             refresh()
-            if (!result) Toast.makeText(this@DeviceScanActivity, "Р†РЅС‚РµСЂРЅРµС‚ РЅРµРґРѕСЃС‚СѓРїРЅРёР№", Toast.LENGTH_SHORT).show()
+            if (!result) Toast.makeText(this@DeviceScanActivity, "Internet unavailable", Toast.LENGTH_SHORT).show()
         }
         refresh()
     }
@@ -320,16 +320,16 @@ class DeviceScanActivity : AppCompatActivity() {
             !checkNotification() -> requestNotification()
             !checkBatterySelf() -> requestBatterySelf()
             !checkJava() -> installJre()
-            else -> Toast.makeText(this, "Р’СЃРµ РіРѕС‚РѕРІРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” РґРѕР·РІРѕР»С–РІ", Toast.LENGTH_LONG).show()
+            else -> Toast.makeText(this, "All set: built-in terminal needs no permissions", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun showShellInfo() {
-        Toast.makeText(this, "Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: sh + stdin/stdout, Р»РѕРіРё РІ filesDir/servers/<id>/server.log", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Built-in terminal: sh + stdin/stdout, logs in filesDir/servers/<id>/server.log", Toast.LENGTH_LONG).show()
     }
 
     private fun installJre() {
-        Toast.makeText(this, "Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE СЃС‚Р°СЂС‚СѓС” РїСЂРё РїРµСЂС€РѕРјСѓ Р·Р°РїСѓСЃРєСѓ Minecraft-СЃРµСЂРІРµСЂР°", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "JRE download starts on first Minecraft server launch", Toast.LENGTH_LONG).show()
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 com.pockethost.app.embedded.EmbeddedBootstrap.ensureJava(this@DeviceScanActivity) {}

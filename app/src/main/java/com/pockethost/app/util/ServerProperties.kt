@@ -4,10 +4,10 @@ import android.util.Log
 import java.io.File
 
 /**
- * РўРѕС‡РєРѕРІРµ РѕРЅРѕРІР»РµРЅРЅСЏ server.properties.
- * РЎРїС–Р»СЊРЅРµ РґР»СЏ ServerService (РїР°С‚С‡ РїСЂРё РєРѕР¶РЅРѕРјСѓ СЃС‚Р°СЂС‚С–) С– ServerDetailActivity
- * (РјРёС‚С‚С”РІРµ Р·Р°СЃС‚РѕСЃСѓРІР°РЅРЅСЏ Р·РјС–РЅ РїРѕРІР·СѓРЅРєС–РІ РЅР° Р·СѓРїРёРЅРµРЅРѕРјСѓ СЃРµСЂРІРµСЂС–).
- * Р РµС€С‚Сѓ С„Р°Р№Р»Р° (motd, СЃС–Рґ, РіРµР№РјРјРѕРґ...) РЅРµ С‡С–РїР°С”.
+ * Targeted server.properties updates.
+ * Shared by ServerService (patch on every start) and ServerDetailActivity
+ * (instant slider changes applied on a stopped server).
+ * Leaves the rest of the file (motd, seed, gamemode...) alone.
  */
 object ServerProperties {
 
@@ -43,7 +43,7 @@ object ServerProperties {
                     "$key=${wanted[key]}"
                 } else line
             }.toMutableList()
-            // РєР»СЋС‡С–РІ РЅРµ Р±СѓР»Рѕ (СЃС‚Р°СЂРёР№/СЂСѓС‡РЅРёР№ С„Р°Р№Р») вЂ” РґРѕРїРёСЃСѓС”РјРѕ
+            // keys were missing (old/manual file) - append them
             for ((k, v) in wanted) {
                 if (!seen.contains(k)) out.add("$k=$v")
             }

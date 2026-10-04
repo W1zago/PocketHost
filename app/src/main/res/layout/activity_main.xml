@@ -235,7 +235,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|start"
         android:layout_margin="16dp"
-        android:text="Сканувати пристрій"
+        android:text="Scan device"
         android:textSize="12sp"
         app:backgroundTint="@color/surface_high"
         app:icon="@android:drawable/ic_menu_search"

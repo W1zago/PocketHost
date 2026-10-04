@@ -22,9 +22,9 @@ object TermuxPaths {
      * Convert SAF Uri to Termux absolute path for RUN_COMMAND_WORKDIR
      * content:// -> /data/data/com.termux/files/home/storage/shared/PocketHost/...
      */
-    // H4: Environment.getExternalStorageDirectory deprecated, Р°Р»Рµ С‚СѓС‚ РїРѕС‚СЂС–Р±РµРЅ СЃР°РјРµ
-    // legacy shared-root РґР»СЏ РјР°РїС–РЅРіСѓ SAF<->Termux. MediaStore-РјС–РіСЂР°С†С–СЏ СЃРєР»Р°РґРЅР°.
-    // TODO: РјС–РіСЂСѓРІР°С‚Рё РЅР° SAF-DocumentFile РЅР°РїСЂСЏРјСѓ / MediaStore.
+    // H4: Environment.getExternalStorageDirectory deprecated, but this exact
+    // legacy shared-root is needed for SAF<->Termux mapping. MediaStore migration is complex.
+    // TODO: migrate to SAF-DocumentFile directly / MediaStore.
     @Suppress("DEPRECATION")
     fun safToTermux(context: Context, uri: Uri): String {
         val display = SafHelper.getDisplayPath(context, uri)
@@ -50,7 +50,7 @@ object TermuxPaths {
         }
     }
 
-    // H4: legacy external root РґР»СЏ display-С€Р»СЏС…Сѓ. TODO: SAF/MediaStore.
+    // H4: legacy external root for display paths. TODO: SAF/MediaStore.
     @Suppress("DEPRECATION")
     fun termuxPathToDisplay(termuxPath: String): String {
         // /data/data/com.termux/files/home/storage/shared/PocketHost/x -> /storage/emulated/0/PocketHost/x

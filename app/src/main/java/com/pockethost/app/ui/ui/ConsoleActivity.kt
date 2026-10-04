@@ -38,14 +38,14 @@ import java.io.File
 import java.io.RandomAccessFile
 
 /**
- * Р’Р±СѓРґРѕРІР°РЅР° РєРѕРЅСЃРѕР»СЊ: С‡РёС‚Р°С” filesDir/servers/<id>/server.log
- * С– РїРёС€Рµ РІРІС–Рґ РЅР°РїСЂСЏРјСѓ РІ stdin РїСЂРѕС†РµСЃСѓ С‡РµСЂРµР· EmbeddedProcessManager.
- * Р–РѕРґРЅРёС… SAF / RUN_COMMAND РґРѕР·РІРѕР»С–РІ.
+ * Built-in console: reads filesDir/servers/<id>/server.log
+ * and writes input directly to the process stdin via EmbeddedProcessManager.
+ * No SAF / RUN_COMMAND permissions.
  */
 class ConsoleActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityConsoleBinding
-    // РЈРЅС–С„С–РєРѕРІР°РЅРѕ Р· MainActivity/CreateServerActivity: Р±РµР·РїРµС‡РЅРёР№ lazy-РґРѕСЃС‚СѓРї.
+    // Unified with MainActivity/CreateServerActivity: safe lazy access.
     private val repository by lazy {
         runCatching { PocketHostApplication.serverRepository }.getOrElse { e ->
             Log.e("ConsoleActivity", "repo not ready, using fallback", e)
@@ -147,7 +147,7 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    /** Quick command pills only fill the input вЂ” execution still goes through sendInput. */
+    /** Quick command pills only fill the input — execution still goes through sendInput. */
     private fun setupQuickPills() {
         val fill: (String) -> Unit = { cmd ->
             binding.inputCommand.setText(cmd)
@@ -180,10 +180,10 @@ class ConsoleActivity : AppCompatActivity() {
         menuInfo: ContextMenu.ContextMenuInfo?
     ) {
         super.onCreateContextMenu(menu, v, menuInfo)
-        menu?.add(0, 1, 0, "РљРѕРїС–СЋРІР°С‚Рё РІРёРґС–Р»РµРЅРµ")
-        menu?.add(0, 2, 0, "РљРѕРїС–СЋРІР°С‚Рё РІСЃРµ")
-        menu?.add(0, 3, 0, "РџРѕРґС–Р»РёС‚РёСЃСЏ Р»РѕРіРѕРј")
-        menu?.add(0, 4, 0, "РћС‡РёСЃС‚РёС‚Рё РєРѕРЅСЃРѕР»СЊ")
+        menu?.add(0, 1, 0, "Copy selection")
+        menu?.add(0, 2, 0, "Copy all")
+        menu?.add(0, 3, 0, "Share log")
+        menu?.add(0, 4, 0, "Clear console")
     }
 
     override fun onContextItemSelected(item: MenuItem): Boolean {
@@ -223,7 +223,7 @@ class ConsoleActivity : AppCompatActivity() {
 
     private fun copyAll() {
         copyToClipboard(fullLogText())
-        Toast.makeText(this, "РЎРєРѕРїС–Р№РѕРІР°РЅРѕ ${fullLogText().length} СЃРёРјРІРѕР»С–РІ", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Copied ${fullLogText().length} chars", Toast.LENGTH_SHORT).show()
     }
 
     private fun selectAll() {
@@ -242,27 +242,27 @@ class ConsoleActivity : AppCompatActivity() {
         errorCount = 0
         binding.consoleOutput.text = ""
         updateLevelCounts()
-        Toast.makeText(this, "РљРѕРЅСЃРѕР»СЊ РѕС‡РёС‰РµРЅРѕ (С„Р°Р№Р» Р»РѕРіСѓ РЅРµ РІРёРґР°Р»РµРЅРѕ)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Console cleared (log file kept)", Toast.LENGTH_SHORT).show()
     }
 
     private fun shareLog() {
         val logText = fullLogText()
         if (logText.isBlank()) {
-            Toast.makeText(this, "Р›РѕРі РїРѕСЂРѕР¶РЅС–Р№", Toast.LENGTH_SHORT).show(); return
+            Toast.makeText(this, "Log is empty", Toast.LENGTH_SHORT).show(); return
         }
         val intent = android.content.Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_TEXT, logText)
             putExtra(Intent.EXTRA_SUBJECT, "PocketHost server log")
         }
-        startActivity(Intent.createChooser(intent, "РџРѕРґС–Р»РёС‚РёСЃСЏ Р»РѕРіРѕРј"))
+        startActivity(Intent.createChooser(intent, "Share log"))
     }
 
     private fun copyToClipboard(text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("console", text)
         clipboard.setPrimaryClip(clip)
-        Toast.makeText(this, "РЎРєРѕРїС–Р№РѕРІР°РЅРѕ РІ Р±СѓС„РµСЂ", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
     private fun setupConsole() {
@@ -347,19 +347,19 @@ class ConsoleActivity : AppCompatActivity() {
             false
         }
         if (!ok) {
-            // РїСЂРѕС†РµСЃ РЅРµ Р·Р°РїСѓС‰РµРЅРёР№ - РїРѕРєР°Р·СѓС”РјРѕ РїС–РґРєР°Р·РєСѓ, Р°Р»Рµ РЅРµ РїСЂРѕСЃРёРјРѕ Р¶РѕРґРЅРёС… РґРѕР·РІРѕР»С–РІ
-            appendOutput("[РїСЂРѕС†РµСЃ РЅРµ Р·Р°РїСѓС‰РµРЅРёР№, РЅР°С‚РёСЃРЅРё Start]\n")
+            // process not running - show a hint, but never ask for permissions
+            appendOutput("[process not running, press Start]\n")
         }
     }
 
     private fun writeToProcessRaw(data: String) {
         val id = serverId ?: return
         val ok = try {
-            // СЃРїРµС†РєР»Р°РІС–С€С– С€Р»РµРјРѕ СЏРє СЃРёСЂС– Р±Р°Р№С‚Рё Р±РµР· Р·Р°Р№РІРѕРіРѕ \n
+            // send raw bytes as-is without trailing \n
             if (data.endsWith("\n")) EmbeddedProcessManager.sendInput(id, data)
             else EmbeddedProcessManager.sendRaw(id, data.toByteArray(Charsets.UTF_8))
         } catch (_: Exception) { false }
-        if (!ok) appendOutput("[РїСЂРѕС†РµСЃ РЅРµ Р·Р°РїСѓС‰РµРЅРёР№]\n")
+        if (!ok) appendOutput("[process not running]\n")
     }
 
     private fun loadServerInfo() {
@@ -426,8 +426,8 @@ class ConsoleActivity : AppCompatActivity() {
     private fun startOutputMonitoring() {
         val id = serverId ?: return
         lifecycleScope.launch(Dispatchers.IO) {
-            // РѕРґРЅРѕСЂР°Р·РѕРІРёР№ СЂРµР·РѕР»РІ РїР°РїРєРё: getServer().first() РїРѕРІРµСЂС‚Р°С” null СЏРєС‰Рѕ РЅРµРјР°,
-            // Р° РЅРµ РІРёСЃРёС‚СЊ (StateFlow Р·Р°РІР¶РґРё РµРјС–С‚РёС‚СЊ). Р РµС‚СЂС– Р»РёС€Рµ РїСЂРё РІРёРЅСЏС‚РєСѓ.
+            // one-shot dir resolve: getServer().first() returns null when missing,
+            // never hangs (StateFlow always emits). Retries only on exception.
             var dir: File? = null
             repeat(5) {
                 try {
@@ -440,7 +440,7 @@ class ConsoleActivity : AppCompatActivity() {
                         workDir = dir
                         return@repeat
                     } else {
-                        // СЃРµСЂРІРµСЂР° РЅРµРјР° РІ СЂРµРїРѕР·РёС‚РѕСЂС–С— - fallback РЅР° embedded dir, РґР°Р»С– РЅРµ СЂРµС‚СЂР°С—РјРѕ
+                        // no server in repository - fallback to embedded dir, no more retries
                         return@repeat
                     }
                 } catch (_: Exception) {
@@ -457,15 +457,15 @@ class ConsoleActivity : AppCompatActivity() {
                 offset = if (len > INITIAL_TAIL_SIZE) len - INITIAL_TAIL_SIZE else 0L
             } catch (_: Exception) {}
             if (offset == 0L) {
-                withContext(Dispatchers.Main) { appendOutput("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РіРѕС‚РѕРІРёР№.\n") }
+                withContext(Dispatchers.Main) { appendOutput("Built-in terminal ready.\n") }
             }
-            // legacy SAF Р»РѕРі: СЏРєС‰Рѕ СЃРµСЂРІРµСЂ СЃС‚Р°СЂРёР№ (content://), РїРѕРєР°Р·СѓС”РјРѕ РїС–РґРєР°Р·РєСѓ РїСЂРѕ РјС–РіСЂР°С†С–СЋ
+            // legacy SAF log: for old servers (content://) show a migration hint
             try {
                 val server = repository.getServer(id).first()
                 val uriStr = server?.effectiveWorkDirUri ?: ""
                 if (uriStr.startsWith("content://")) {
                     withContext(Dispatchers.Main) {
-                        appendOutput("[СЃС‚Р°СЂРёР№ SAF-СЃРµСЂРІРµСЂ: Р·Р°РїСѓСЃРє С‚РµРїРµСЂ С–РґРµ Сѓ РІРЅСѓС‚СЂС–С€РЅС–Р№ РїР°РїС†С– ${workDirFile.absolutePath}]\n")
+                        appendOutput("[old SAF server: launch now runs in the internal folder ${workDirFile.absolutePath}]\n")
                     }
                 }
             } catch (_: Exception) {}
@@ -599,8 +599,8 @@ class ConsoleActivity : AppCompatActivity() {
             } catch (_: Exception) { false }
             withContext(Dispatchers.Main) {
                 try {
-                    val state = if (running) "в—Џ running" else "в—‹ stopped"
-                    binding.tvFooterStatus.text = "$state вЂў server.log вЂў ${logBuffer.size} lines"
+                    val state = if (running) "● running" else "● stopped"
+                    binding.tvFooterStatus.text = "$state • server.log • ${logBuffer.size} lines"
                 } catch (_: Exception) {}
             }
         }

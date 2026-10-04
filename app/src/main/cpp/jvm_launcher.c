@@ -49,14 +49,14 @@ static sigjmp_buf g_exit_jmp;
 // volatile. volatile only stops compiler caching; on ARM64 the parking loop
 // (mc-server thread, HotSpot-attached) could spin on a stale cached copy of
 // g_stop_requested set by nativeRequestStop (Service thread) and never see
-// the latch вЂ” exactly the 17:58 hang (2 parking iters then silence, no
+// the latch — exactly the 17:58 hang (2 parking iters then silence, no
 // "grace over", futureDone=false 74s+). atomic_load/store give acquire/
 // release visibility across cores.
 static _Atomic int g_exit_code = 0;
 static _Atomic int g_in_server_main = 0;
 // Paperclip quirk: Paperclip.Main.main() spawns the server thread and returns
 // immediately (code 0) while the server keeps running. The mc-server thread
-// must NOT treat that return as death вЂ” it parks and waits for the real
+// must NOT treat that return as death — it parks and waits for the real
 // server threads or a trapped System.exit.
 // Cross-thread exit: "stop" calls System.exit(0) from the Server thread,
 // NOT from mc-server. longjmp across threads is UB, so the hook only
@@ -77,7 +77,7 @@ static _Atomic int g_stop_requested = 0;
 // Server thread, dying chunk workers), the counter never advances and the
 // forced-exit gate `stop_grace>=5` before enum never fires -> 30s+ silence,
 // no iter 20+, no "server exit trapped", mc-server thread alive in ps.
-// So nativeRequestStop stamps CLOCK_MONOTONIC here (single _Atomic long ms вЂ”
+// So nativeRequestStop stamps CLOCK_MONOTONIC here (single _Atomic long ms —
 // torn-read-free across cores) and the parking loop computes elapsed BEFORE
 // every enum. Forced exit at >=10s happens even if enum never returns.
 static _Atomic long g_stop_latch_ms = 0; // 0 = not latched for this boot
@@ -122,7 +122,7 @@ static void set_last_error(const char *fmt, ...) {
 // ORDER MATTERS: ExceptionOccurred + GlobalRef FIRST, then Describe, then
 // Clear, then the toString walk. (ExceptionDescribe clears the pending
 // exception on HotSpot, so Occurred-after-Describe always yields NULL and
-// the error text is lost вЂ” that bug made every -8 look "silent". Likewise
+// the error text is lost — that bug made every -8 look "silent". Likewise
 // CallObjectMethod is a no-op while an exception is pending, so the walk
 // must run only after Clear.)
 static void capture_vm_exception(JNIEnv *vm_env, const char *where) {
@@ -191,7 +191,7 @@ static void vm_exit_hook(int code) {
     // HotSpot JavaThread object in Threads list in _thread_in_vm state,
     // possibly holding Threads_lock / blocking the next safepoint. The
     // parked mc-server then hangs on its first JNI after the trap
-    // (ExceptionCheck/Detach need ThreadInVM transition) вЂ” "trapped during
+// (ExceptionCheck/Detach need ThreadInVM transition) — "trapped during
     // stop-wait" appears, "nativeLoadJVM exit" never does, g_in_server_main
     // stays 1, every reuse refuses -11. Detach first so the VM drops the
     // dead Server thread cleanly; pthread_exit then only kills the pthread.
@@ -544,7 +544,7 @@ static void redirect_std_fds(void) {
 // JNI_CreateJavaVM.
 //
 // WHY: on modern Android (SDK 34+) the app lives in a fixed linker namespace
-// (clns-N) whose search paths are frozen at creation вЂ” neither
+// (clns-N) whose search paths are frozen at creation — neither
 // android_update_LD_LIBRARY_PATH nor environ LD_LIBRARY_PATH can extend it
 // afterwards. When HotSpot lazily loads libnio.so, its DT_NEEDED "libnet.so"
 // (bare soname) has nowhere to resolve from:
@@ -747,7 +747,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
         jstring mainClass, jobjectArray appArgs, jstring classpath) {
     pthread_mutex_lock(&g_vm_lock);
     // Fresh attempt: drop stale text from a previous server run so
-    // server.log [РґРµС‚Р°Р»С–:] never shows yesterday's error.
+    // server.log [details:] never shows yesterday's error.
     g_last_error[0] = '\0';
 
     const char *jvm_path = (*env)->GetStringUTFChars(env, vmpath, NULL);
@@ -822,19 +822,19 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
         // ---- VM already exists: reuse it (same-process restart of same server).
         // NOTE: -Djava.class.path is fixed at creation time, so a DIFFERENT
         // server jar needs an app restart. Kotlin checks this before calling.
-        // STOP->START FIX 2026-09-07: СЏРєС‰Рѕ СЃС‚Р°СЂРёР№ mc-РїРѕС‚С–Рє С‰Рµ РІСЃРµСЂРµРґРёРЅС–
-        // main/parking (g_in_server_main==1), РЅРѕРІРёР№ РќР• СЃРјС–С” Р·Р°С…РѕРґРёС‚Рё:
-        // СЃРєРёРґР°РЅРЅСЏ С„Р»Р°РіС–РІ РЅРёР¶С‡Рµ РїРѕРІРµСЂС‚Р°Р»Рѕ Р± СЃС‚Р°СЂРёР№ РїРѕС‚С–Рє Р· no-enum wait
-        // РЅР°Р·Р°Рґ РІ enum (Threads_lock), Р° РІР»Р°СЃРЅРёР№ AttachCurrentThread РєР»РёРЅРёС‚СЊ
-        // РЅР° С‚РѕРјСѓ Р¶ lock -> РѕР±РёРґРІР° РјРѕРІС‡РєРё РІРёСЃСЏС‚СЊ (РЅРµРјР° Reusing/calling main),
-        // РІ server.log С‚РёС€Р°, С‡РµСЂРµР· 10СЃ liveness-poll РїРёС€Рµ "РџСЂРѕС†РµСЃ Р·Р°РІРµСЂС€РµРЅРѕ".
-        // Р§РµСЃРЅР° РІС–РґРјРѕРІР° -11 Р‘Р•Р— throw (РєРѕРґ РјР°С” РґС–Р№С‚Рё РІ Kotlin СЏРє exitCode):
-        // Kotlin РїРѕРєР°Р¶Рµ "Р·Р°С‡РµРєР°Р№, СЃС‚Р°СЂРёР№ РїРѕС‚С–Рє РІРёС…РѕРґРёС‚СЊ", СЂРµС‚СЂР°Р№ РїСЂРѕР№РґРµ С‡РёСЃС‚Рѕ.
+        // STOP->START FIX 2026-09-07: if the old mc thread is still inside
+        // main/parking (g_in_server_main==1), the new one MUST NOT enter:
+        // resetting flags below would return the old thread from no-enum wait
+        // back to enum (Threads_lock), while our own AttachCurrentThread would stick
+        // on the same lock -> both silently hang (no Reusing/calling main),
+        // server.log silent, after 10s liveness-poll writes "Process finished".
+        // Honest refusal -11 WITHOUT throw (code must reach Kotlin as exitCode):
+        // Kotlin shows "wait, the old thread is exiting", retry goes clean.
         LOGI("reuse entry: prevInMain=%d", atomic_load(&g_in_server_main));
         if (atomic_load(&g_in_server_main)) {
             (*env)->ReleaseStringUTFChars(env, vmpath, jvm_path);
             pthread_mutex_unlock(&g_vm_lock);
-            set_last_error("РїРѕРїРµСЂРµРґРЅС–Р№ СЃРµСЂРІРµСЂРЅРёР№ РїРѕС‚С–Рє С‰Рµ Р·Р°РІРµСЂС€СѓС”С‚СЊСЃСЏ вЂ” Р·Р°С‡РµРєР°Р№ РєС–Р»СЊРєР° СЃРµРєСѓРЅРґ С– С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·");
+            set_last_error("previous server thread still finishing - wait a few seconds and press Start again");
             LOGW("reuse refused: prev thread still in main, -11 (no flags touched)");
             return -11;
         }
@@ -990,7 +990,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                         // Stop / console "stop"), don't hang on straggler threads
                         // (Tuinity chunk workers) forever. The world save (Saving /
                         // Closing, port release) is already in progress on the Server
-                        // thread вЂ” returning here does NOT kill it, it keeps saving
+                        // thread — returning here does NOT kill it, it keeps saving
                         // in background. ~10s grace, then return anyway so future
                         // completes and restart can boot fresh.
                         // GUARANTEE (FAIL 18:08): after stop latch we exit in
@@ -1013,7 +1013,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                             double sel = stopReq ? stop_elapsed_sec() : -1.0;
                             // Forced-exit gate FIRST, TIME-BASED: never call
                             // has_live when grace is already over (protects
-                            // against a hanging enum вЂ” the 18:08 hang where
+                            // against a hanging enum — the 18:08 hang where
                             // stop_grace++ after enum never ran).
                             if (stopReq && (stop_grace >= 5 || sel >= 10.0)) {
                                 LOGI("parking iter %d: stopReq=1 grace over (elapsed %.1fs count %d/5), finishing anyway (forced exit code 0)",
@@ -1028,14 +1028,14 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                                      iter, atomic_load(&g_exit_code));
                                 break;
                             }
-                            // STUCK-STOPPING FIX 2026-09-07: РїС–СЃР»СЏ stop latch Р’Р—РђР“РђР›Р†
-                            // РЅРµ С‡С–РїР°С”РјРѕ Threads_lock. Р’РјРёСЂР°СЋС‡РёР№ Server-РїРѕС‚С–Рє,
-                            // СѓР±РёС‚РёР№ С‡РµСЂРµР· pthread_exit Сѓ vm_exit_hook, РјС–Рі
-                            // С‚СЂРёРјР°С‚Рё Р№РѕРіРѕ вЂ” getAllStackTraces РєР»РёРЅРёРІ РЅР°Р·Р°РІР¶РґРё,
-                            // parking РЅРµ РґРѕС…РѕРґРёРІ РґРѕ grace-gate, future РІС–С‡РЅРѕ
-                            // !done, Р° СЂРµСЃС‚Р°СЂС‚Рё РІС–С‡РЅРѕ РІС–РґРјРѕРІР»СЏР»Рё (STOPPING +
-                            // stopReq stuck). РџС–СЃР»СЏ stop Р¶РёРІС–СЃС‚СЊ РЅРµ РІР°Р¶Р»РёРІР°:
-                            // РїСЂРѕСЃС‚Рѕ С‡РµРєР°С”РјРѕ exit-РїР°СЃС‚РєСѓ Р°Р±Рѕ wall-clock grace.
+                            // STUCK-STOPPING FIX 2026-09-07: after the stop latch we do NOT touch Threads_lock. The dying Server thread,
+                            // killed via pthread_exit in vm_exit_hook, could
+                            // hold it - getAllStackTraces would wedge forever,
+                            // parking never reached grace-gate, future eternally
+                            // !done, and restarts refused forever (STOPPING +
+                            // stopReq stuck). After stop, liveness does not matter:
+                            // just wait for the exit trap or wall-clock grace.
+                            // simply wait for the exit trap or wall-clock grace.
                             if (stopReq) {
                                 stop_grace++;
                                 double selNow = stop_elapsed_sec();
@@ -1060,7 +1060,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                             LOGI("parking iter %d: stopReq=%d grace=%d/5 elapsed=%.1fs, enumerating threads...",
                                  iter, stopReq, stop_grace, sel < 0 ? 0.0 : sel);
                             // Pre-enum progress: grace advances even if enum is
-                            // slow вЂ” the 18:08 bug was ++ only AFTER enum.
+                            // slow — the 18:08 bug was ++ only AFTER enum.
                             if (stopReq) stop_grace++;
                             int hard = 0, soft = 0;
                             int r = has_live_server_threads_ex(vm_env, &hard, &soft);
@@ -1068,7 +1068,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                                  iter, stopReq, hard, soft, r);
                             // Post-enum checks FIRST: the hook may have fired
                             // while enum ran (it can take seconds), and elapsed
-                            // kept ticking вЂ” re-evaluate before any waiting.
+                            // kept ticking — re-evaluate before any waiting.
                             if (atomic_load(&g_exit_requested)) {
                                 LOGI("parking iter %d: server exit trapped after enum (code=%d), breaking",
                                      iter, atomic_load(&g_exit_code));
@@ -1116,7 +1116,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                             iter++;
                             // Interruptible 2s sleep: 10 x 200ms so the exit latch
                             // is seen within 200ms, not 2s solid. EVERY tick checks
-                            // the exit flag AND the wall-clock grace вЂ” the sleep
+                            // the exit flag AND the wall-clock grace — the sleep
                             // NEVER blocks the forced exit (18:08: vm_exit_hook
                             // during sleep must wake us here with an explicit log).
                             int woke_exit = 0, woke_grace = 0;
@@ -1144,7 +1144,7 @@ Java_com_pockethost_app_jvm_PocketJvm_nativeLoadJVM(JNIEnv *env, jobject thiz,
                             // NO JNI HERE (no ExceptionCheck/Clear): that call
                             // needs a ThreadInVM transition which blocks on a
                             // safepoint/Threads_lock the pthread_exit'd Server
-                            // thread may hold вЂ” the exact pre-fix hang. The
+                            // thread may hold — the exact pre-fix hang. The
                             // exception state is irrelevant on exit-trap path.
                             result = atomic_load(&g_exit_code);
                             LOGI("server exit trapped during wait: %d (skipped ExceptionCheck, immediate flag clear)", result);

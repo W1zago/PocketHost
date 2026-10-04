@@ -31,11 +31,11 @@ class MinecraftCreateFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // H4: getExternalFilesDir РјРѕР¶Рµ Р±СѓС‚Рё null (РЅРµРјР° СЃС…РѕРІРёС‰Р°) вЂ” fallback РЅР° filesDir Р· Toast.
+        // H4: getExternalFilesDir may be null (no storage) - fallback to filesDir with Toast.
         val extRoot = requireContext().getExternalFilesDir(null)?.absolutePath
         val baseRoot = extRoot ?: run {
             try {
-                android.widget.Toast.makeText(requireContext(), "Р—РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ вЂ” РІРёРєРѕСЂРёСЃС‚РѕРІСѓСЋ РІРЅСѓС‚СЂС–С€РЅС”", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(requireContext(), "External storage unavailable - using internal", android.widget.Toast.LENGTH_LONG).show()
             } catch (_: Exception) {}
             requireContext().filesDir.absolutePath
         }
@@ -81,7 +81,7 @@ class MinecraftCreateFragment : Fragment() {
         lifecycleScope.launch {
             val server = minecraftManager.createMinecraftServer(name, version, software, port)
 
-            // H8: РїС–СЃР»СЏ РјРµСЂРµР¶РµРІРѕРіРѕ await С„СЂР°РіРјРµРЅС‚ РјС–Рі РІС–Рґ'С”РґРЅР°С‚РёСЃСЏ вЂ” РЅРµ С‡С–РїР°С”РјРѕ binding.
+            // H8: after a network await the fragment may detach - do not touch binding.
             if (!isAdded || _binding == null) return@launch
             binding.progressBar.visibility = View.GONE
             binding.btnCreate.isEnabled = true

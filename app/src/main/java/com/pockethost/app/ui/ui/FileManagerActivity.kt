@@ -23,12 +23,12 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
- * Р¤Р°Р№Р»РѕРІРёР№ РјРµРЅРµРґР¶РµСЂ: РїСЂР°С†СЋС” Р· РІРЅСѓС‚СЂС–С€РЅСЊРѕСЋ РїР°РїРєРѕСЋ (File API, Р±РµР· РґРѕР·РІРѕР»С–РІ).
- * РЎС‚Р°СЂС– SAF-СЃРµСЂРІРµСЂРё (content://) РІС–РґРєСЂРёРІР°СЋС‚СЊСЃСЏ РІ СЂРµР¶РёРјС– С‡РёС‚Р°РЅРЅСЏ С‡РµСЂРµР· DocumentFile.
+ * File manager: works with the internal folder (File API, no permissions).
+ * Old SAF servers (content://) open in read mode via DocumentFile.
  *
- * Р РµР¶РёРј РІРёР±РѕСЂСѓ РїР°РїРєРё (selectMode): РіРѕСЂС‚Р°РЅРЅСЏ СЃРїС–Р»СЊРЅРёРј СЃС…РѕРІРёС‰РµРј + РєРЅРѕРїРєР°
- * "Р’РёР±СЂР°С‚Рё С†СЋ РїР°РїРєСѓ". Р’РёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ РµРєСЂР°РЅРѕРј СЃС‚РІРѕСЂРµРЅРЅСЏ СЃРµСЂРІРµСЂР° РґР»СЏ
- * РґРѕРІС–Р»СЊРЅРѕРіРѕ СЂРѕР·С‚Р°С€СѓРІР°РЅРЅСЏ (РїРѕС‚СЂС–Р±РµРЅ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ).
+ * Folder-pick mode (selectMode): browse shared storage + a
+ * "Select this folder" button. Used by the server-creation screen for
+ * custom placement (needs all-files access).
  */
 class FileManagerActivity : AppCompatActivity() {
 
@@ -80,7 +80,7 @@ class FileManagerActivity : AppCompatActivity() {
             ?: intent.getStringExtra("path")
 
         if (uriStr == null && !selectMode) {
-            Toast.makeText(this, "РќРµРІС–СЂРЅРёР№ С€Р»СЏС…", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bad path", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -94,9 +94,9 @@ class FileManagerActivity : AppCompatActivity() {
             openSelectRoot()
             return
         }
-        // H8: Р±РµР· !! вЂ” СЏРІРЅРёР№ null-check Р· Toast+return.
+        // H8: no !! - explicit null-check with Toast+return.
         val target = uriStr ?: run {
-            Toast.makeText(this, "РќРµРІС–СЂРЅРёР№ С€Р»СЏС…", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bad path", Toast.LENGTH_LONG).show()
             finish(); return
         }
         if (target.startsWith("content://")) {
@@ -104,15 +104,15 @@ class FileManagerActivity : AppCompatActivity() {
             currentDocUri = try { Uri.parse(target) } catch (_: Exception) { null }
             rootDocUri = currentDocUri
             val docUri = currentDocUri ?: run {
-                Toast.makeText(this, "РќРµРІС–СЂРЅРёР№ SAF С€Р»СЏС…", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Bad SAF path", Toast.LENGTH_LONG).show()
                 finish(); return
             }
             loadSafFiles(docUri)
         } else {
             useSaf = false
             val file = resolveFile(target)
-            // C5: РЅРµ finish() РѕРґСЂР°Р·Сѓ вЂ” resolveFile РІР¶Рµ РїСЂРѕР±СѓРІР°РІ mkdirs, РґР°С”РјРѕ РґСЂСѓРіРёР№ С€Р°РЅСЃ
-            // С‡РµСЂРµР· СЏРІРЅРёР№ mkdirs РїРµСЂРµРґ С‚РёРј СЏРє Р·РґР°С‚РёСЃСЏ.
+            // C5: no instant finish() - resolveFile already tried mkdirs, give a second chance
+            // via explicit mkdirs before giving up.
             val ready = file?.let {
                 if (!it.exists()) {
                     android.util.Log.w("FileManager", "onCreate: creating missing dir ${it.absolutePath}")
@@ -121,12 +121,12 @@ class FileManagerActivity : AppCompatActivity() {
                 it.exists()
             } == true
             if (!ready) {
-                Toast.makeText(this, "РџР°РїРєР° РЅРµ Р·РЅР°Р№РґРµРЅР°: $target", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Folder not found: $target", Toast.LENGTH_LONG).show()
                 finish(); return
             }
-            // H8: Р±РµР· !! вЂ” ready==true РіР°СЂР°РЅС‚СѓС” non-null, Р°Р»Рµ РїРµСЂРµРІС–СЂСЏС”РјРѕ СЏРІРЅРѕ.
+            // H8: no !! - ready==true guarantees non-null, but check explicitly.
             val safeFile = file ?: run {
-                Toast.makeText(this, "РџР°РїРєР° РЅРµ Р·РЅР°Р№РґРµРЅР°: $target", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Folder not found: $target", Toast.LENGTH_LONG).show()
                 finish(); return
             }
             currentFile = safeFile
@@ -135,10 +135,10 @@ class FileManagerActivity : AppCompatActivity() {
         }
     }
 
-    /** Р’С…С–Рґ Сѓ СЂРµР¶РёРј РІРёР±РѕСЂСѓ РїР°РїРєРё: РєРѕСЂС–РЅСЊ вЂ” СЃРїС–Р»СЊРЅРµ СЃС…РѕРІРёС‰Рµ. */
-    // H4: getExternalStorageDirectory deprecated, Р°Р»Рµ РґР»СЏ selectMode РїРѕС‚СЂС–Р±РµРЅ СЃР°РјРµ
-    // legacy shared-root (MediaStore/SAF-РјС–РіСЂР°С†С–СЏ СЃРєР»Р°РґРЅР° вЂ” Р»РёС€Р°С”РјРѕ Р· Suppress).
-    // TODO: РјС–РіСЂСѓРІР°С‚Рё РІРёР±С–СЂ РїР°РїРєРё РЅР° SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
+    /** Entering folder-pick mode: root is shared storage. */
+    // H4: getExternalStorageDirectory deprecated, but selectMode needs exactly
+    // the legacy shared-root (MediaStore/SAF migration is complex - keep Suppress).
+    // TODO: migrate folder picking to SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
     @Suppress("DEPRECATION")
     private fun openSelectRoot() {
         useSaf = false
@@ -147,7 +147,7 @@ class FileManagerActivity : AppCompatActivity() {
             ?: try { android.os.Environment.getExternalStorageDirectory().absolutePath } catch (_: Exception) { "/storage/emulated/0" }
         val root = try { File(startPath) } catch (_: Exception) { null }
         if (root == null || !root.isDirectory || !root.canRead()) {
-            Toast.makeText(this, "РЎС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ. РќР°РґР°Р№ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Storage unavailable. Grant all-files access.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -161,11 +161,11 @@ class FileManagerActivity : AppCompatActivity() {
     private fun confirmSelectFolder() {
         val dir = currentFile
         if (dir == null || !dir.isDirectory) {
-            Toast.makeText(this, "Р’С–РґРєСЂРёР№ РїРѕС‚СЂС–Р±РЅСѓ РїР°РїРєСѓ", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Open the target folder", Toast.LENGTH_SHORT).show()
             return
         }
         if (!EmbeddedPaths.isDirWritable(dir)) {
-            Toast.makeText(this, "РџР°РїРєР° РЅРµРґРѕСЃС‚СѓРїРЅР° РґР»СЏ Р·Р°РїРёСЃСѓ: ${dir.absolutePath}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Folder not writable: ${dir.absolutePath}", Toast.LENGTH_LONG).show()
             return
         }
         setResult(RESULT_OK, Intent().putExtra(RESULT_SELECTED_PATH, dir.absolutePath))
@@ -173,9 +173,9 @@ class FileManagerActivity : AppCompatActivity() {
     }
 
     private fun resolveFile(uriStr: String): File? {
-        // C5: embedded://external:// Р±С–Р»СЊС€Рµ РЅРµ РїРѕРІРµСЂС‚Р°СЋС‚СЊ null РґР»СЏ РЅРµС–СЃРЅСѓСЋС‡РѕС— РїР°РїРєРё вЂ”
-        // РїСЂРѕР±СѓС”РјРѕ СЃС‚РІРѕСЂРёС‚Рё С‡РµСЂРµР· lookupServerDir+mkdirs (РіРѕРЅРєР°: СЃРµСЂРІРµСЂ С‰Рµ РЅРµ СЃС‚РІРѕСЂРёРІ РїР°РїРєСѓ,
-        // Р° FileManager РІР¶Рµ РІС–РґРєСЂРёРІСЃСЏ). Log.w РєРѕР»Рё СЃС‚РІРѕСЂСЋС”РјРѕ.
+        // C5: embedded://external:// no longer return null for a missing folder -
+        // try creating via lookupServerDir+mkdirs (race: server has not created the folder yet,
+        // but FileManager already opened). Log.w when creating.
         return try {
             when {
                 uriStr.startsWith("embedded://") -> {
@@ -216,7 +216,7 @@ class FileManagerActivity : AppCompatActivity() {
                     if (f.exists()) f else null
                 }
                 else -> {
-                    // СЃРїСЂРѕР±Р° СЏРє serverId
+                    // try as serverId
                     val dir = EmbeddedPaths.lookupServerDir(this, uriStr)
                     if (!dir.exists()) {
                         android.util.Log.w("FileManager", "creating missing serverId dir: ${dir.absolutePath}")
@@ -231,7 +231,7 @@ class FileManagerActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = if (selectMode) "Р’РёР±С–СЂ РїР°РїРєРё" else "File Manager (РІР±СѓРґРѕРІР°РЅРёР№)"
+        supportActionBar?.title = if (selectMode) "Folder selection" else "File Manager (built-in)"
     }
 
     private fun setupRecyclerView() {
@@ -298,9 +298,9 @@ class FileManagerActivity : AppCompatActivity() {
             val root = rootFile
             val crumbs = if (root != null) {
                 val rel = try {
-                    dir.canonicalPath.removePrefix(root.canonicalPath).trim { it == '/' }.split('/').joinToString(" вЂє ")
+                    dir.canonicalPath.removePrefix(root.canonicalPath).trim { it == '/' }.split('/').joinToString(" › ")
                 } catch (_: Exception) { dir.name }
-                if (rel.isEmpty()) root.name.ifEmpty { "/" } else "${root.name.ifEmpty { "/" }} вЂє $rel"
+                if (rel.isEmpty()) root.name.ifEmpty { "/" } else "${root.name.ifEmpty { "/" }} › $rel"
             } else {
                 dir.absolutePath
             }
@@ -316,7 +316,7 @@ class FileManagerActivity : AppCompatActivity() {
                 java.util.Locale.US, "Free %.1f of %.1f GB", freeGb, totalGb
             )
         } catch (_: Exception) {
-            binding.tvStorageInfo.text = "вЂ”"
+            binding.tvStorageInfo.text = "—"
         }
     }
 
@@ -324,7 +324,7 @@ class FileManagerActivity : AppCompatActivity() {
         currentFile = dir
         supportActionBar?.subtitle = dir.name.ifEmpty { dir.absolutePath }
         if (selectMode) {
-            binding.btnSelectFolder.text = "вњ” Р’РёР±СЂР°С‚Рё: ${dir.absolutePath}"
+            binding.btnSelectFolder.text = "✔ Select: ${dir.absolutePath}"
         }
         val files = try { dir.listFiles()?.toList() ?: emptyList() } catch (_: Exception) { emptyList() }
         val items = files.map {
@@ -339,7 +339,7 @@ class FileManagerActivity : AppCompatActivity() {
         fullItems = items
         updateCrumbsAndStorage(dir)
         applyFilter()
-        if (items.isEmpty()) Toast.makeText(this, "РџР°РїРєР° РїРѕСЂРѕР¶РЅСЏ", Toast.LENGTH_SHORT).show()
+        if (items.isEmpty()) Toast.makeText(this, "Folder is empty", Toast.LENGTH_SHORT).show()
     }
 
     private fun openItem(item: FileItem) {
@@ -354,25 +354,25 @@ class FileManagerActivity : AppCompatActivity() {
                     .setTitle(item.name)
                     .setMessage(text)
                     .setPositiveButton("OK", null)
-                    .setNeutralButton("РџРѕРґС–Р»РёС‚РёСЃСЏ") { _, _ ->
+                    .setNeutralButton("Share") { _, _ ->
                         val intent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, text)
                             putExtra(Intent.EXTRA_SUBJECT, item.name)
                         }
-                        startActivity(Intent.createChooser(intent, "РџРѕРґС–Р»РёС‚РёСЃСЏ"))
+                        startActivity(Intent.createChooser(intent, "Share"))
                     }
                     .show()
             } else {
-                Toast.makeText(this, "РќРµ РІРґР°Р»РѕСЃСЏ РїСЂРѕС‡РёС‚Р°С‚Рё ${item.name} (Р±С–РЅР°СЂРЅРёР№ Р°Р±Рѕ РІРµР»РёРєРёР№?)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Cannot read ${item.name} (binary or huge?)", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "РџРѕРјРёР»РєР°: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun showFileOptions(item: FileItem) {
-        val options = arrayOf("Р’РёРґР°Р»РёС‚Рё", "РџРµСЂРµР№РјРµРЅСѓРІР°С‚Рё", "РЎС‚РІРѕСЂРёС‚Рё С„Р°Р№Р»", "РЎС‚РІРѕСЂРёС‚Рё РїР°РїРєСѓ", "РџРѕРґС–Р»РёС‚РёСЃСЏ")
+        val options = arrayOf("Delete", "Rename", "New file", "New folder", "Share")
         AlertDialog.Builder(this)
             .setTitle(item.name)
             .setItems(options) { _, which ->
@@ -388,8 +388,8 @@ class FileManagerActivity : AppCompatActivity() {
 
     private fun confirmDelete(item: FileItem) {
         AlertDialog.Builder(this)
-            .setTitle("Р’РёРґР°Р»РёС‚Рё ${item.name}?")
-            .setPositiveButton("Р’РёРґР°Р»РёС‚Рё") { _, _ ->
+            .setTitle("Delete ${item.name}?")
+            .setPositiveButton("Delete") { _, _ ->
                 val ok = if (useSaf && item.docUri != null) {
                     try {
                         (DocumentFile.fromSingleUri(this, item.docUri)?.delete() == true)
@@ -398,23 +398,23 @@ class FileManagerActivity : AppCompatActivity() {
                     try { item.file?.deleteRecursively() == true } catch (_: Exception) { false }
                 }
                 if (ok) {
-                    Toast.makeText(this, "Р’РёРґР°Р»РµРЅРѕ", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Deleted", Toast.LENGTH_SHORT).show()
                     refresh()
-                } else Toast.makeText(this, "РќРµ РІРґР°Р»РѕСЃСЏ РІРёРґР°Р»РёС‚Рё", Toast.LENGTH_SHORT).show()
+                } else Toast.makeText(this, "Failed to delete", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null).show()
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun renameItem(item: FileItem) {
         val input = android.widget.EditText(this).apply { setText(item.name) }
         AlertDialog.Builder(this)
-            .setTitle("РџРµСЂРµР№РјРµРЅСѓРІР°С‚Рё")
+            .setTitle("Rename")
             .setView(input)
             .setPositiveButton("OK") { _, _ ->
                 val newName = input.text.toString().trim()
                 if (newName.isEmpty()) return@setPositiveButton
                 if (newName.contains("/") || newName.contains(File.separator) || newName == "." || newName == "..") {
-                    Toast.makeText(this, "РќРµРґРѕРїСѓСЃС‚РёРјРµ С–РјКјСЏ", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Bad name", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 val ok = if (useSaf && item.docUri != null) {
@@ -427,17 +427,17 @@ class FileManagerActivity : AppCompatActivity() {
                         f.renameTo(File(f.parent, newName))
                     } catch (_: Exception) { false }
                 }
-                if (ok) refresh() else Toast.makeText(this, "РќРµ РІРґР°Р»РѕСЃСЏ РїРµСЂРµР№РјРµРЅСѓРІР°С‚Рё", Toast.LENGTH_SHORT).show()
+                if (ok) refresh() else Toast.makeText(this, "Failed to rename", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null).show()
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun createFileInCurrent() {
-        val input = android.widget.EditText(this).apply { hint = "С–Рј'СЏ С„Р°Р№Р»Сѓ" }
+        val input = android.widget.EditText(this).apply { hint = "file name" }
         AlertDialog.Builder(this)
-            .setTitle("РЎС‚РІРѕСЂРёС‚Рё С„Р°Р№Р»")
+            .setTitle("New file")
             .setView(input)
-            .setPositiveButton("РЎС‚РІРѕСЂРёС‚Рё") { _, _ ->
+            .setPositiveButton("Create") { _, _ ->
                 val name = input.text.toString().trim().ifEmpty { return@setPositiveButton }
                 if (useSaf) {
                     val dir = currentDocUri?.let { DocumentFile.fromTreeUri(this, it) } ?: return@setPositiveButton
@@ -449,15 +449,15 @@ class FileManagerActivity : AppCompatActivity() {
                     loadLocalFiles(dir)
                 }
             }
-            .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null).show()
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun createFolderInCurrent() {
-        val input = android.widget.EditText(this).apply { hint = "С–Рј'СЏ РїР°РїРєРё" }
+        val input = android.widget.EditText(this).apply { hint = "folder name" }
         AlertDialog.Builder(this)
-            .setTitle("РЎС‚РІРѕСЂРёС‚Рё РїР°РїРєСѓ")
+            .setTitle("New folder")
             .setView(input)
-            .setPositiveButton("РЎС‚РІРѕСЂРёС‚Рё") { _, _ ->
+            .setPositiveButton("Create") { _, _ ->
                 val name = input.text.toString().trim().ifEmpty { return@setPositiveButton }
                 if (useSaf) {
                     val dir = currentDocUri?.let { DocumentFile.fromTreeUri(this, it) } ?: return@setPositiveButton
@@ -469,29 +469,29 @@ class FileManagerActivity : AppCompatActivity() {
                     loadLocalFiles(dir)
                 }
             }
-            .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null).show()
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun shareItem(item: FileItem) {
         try {
-            // Р“Р°СЂРґ РІС–Рґ OOM / TransactionTooLarge: С€Р°СЂРёРјРѕ Р»РёС€Рµ С‚РµРєСЃС‚РѕРІС– С„Р°Р№Р»Рё РґРѕ 200KB.
+            // Guard against OOM / TransactionTooLarge: share text files up to 200KB only.
             if (item.isDirectory) {
-                Toast.makeText(this, "РџР°РїРєСѓ РЅРµ РјРѕР¶РЅР° РїРѕРґС–Р»РёС‚РёСЃСЏ С‚РµРєСЃС‚РѕРј", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Cannot share a folder as text", Toast.LENGTH_SHORT).show()
                 return
             }
             if (item.file != null && item.file.length() > 200 * 1024) {
-                Toast.makeText(this, "Р¤Р°Р№Р» Р·Р°РІРµР»РёРєРёР№ РґР»СЏ С€Р°СЂРёРЅРіСѓ (${item.file.length() / 1024}KB)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "File too large to share (${item.file.length() / 1024}KB)", Toast.LENGTH_SHORT).show()
                 return
             }
             val text: String = if (item.file != null) {
                 item.file.takeIf { it.length() < 200 * 1024 }?.readText()?.take(50000) ?: run {
-                    Toast.makeText(this, "Р‘С–РЅР°СЂРЅРёР№ Р°Р±Рѕ РІРµР»РёРєРёР№ С„Р°Р№Р»", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Binary or huge file", Toast.LENGTH_SHORT).show()
                     return
                 }
             } else {
-                // H8: Р±РµР· !! вЂ” null-check РґР»СЏ docUri Р· СЂР°РЅРЅС–Рј РІРёС…РѕРґРѕРј.
+                // H8: no !! - null-check for docUri with early return.
                 val docUri = item.docUri ?: run {
-                    Toast.makeText(this, "РќРµРјР° URI РґР»СЏ С€Р°СЂРёРЅРіСѓ", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "No URI to share", Toast.LENGTH_SHORT).show()
                     return
                 }
                 contentResolver.openInputStream(docUri)?.bufferedReader()?.readText()?.take(50000) ?: return
@@ -501,9 +501,9 @@ class FileManagerActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_TEXT, text)
                 putExtra(Intent.EXTRA_SUBJECT, item.name)
             }
-            startActivity(Intent.createChooser(intent, "РџРѕРґС–Р»РёС‚РёСЃСЏ"))
+            startActivity(Intent.createChooser(intent, "Share"))
         } catch (e: Exception) {
-            Toast.makeText(this, "РџРѕРјРёР»РєР° С€Р°СЂРёРЅРіСѓ: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Share error: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -518,12 +518,12 @@ class FileManagerActivity : AppCompatActivity() {
         currentDocUri = uri
         val doc = DocumentFile.fromTreeUri(this, uri) ?: DocumentFile.fromSingleUri(this, uri)
         if (doc == null) {
-            Toast.makeText(this, "РќРµ РІРґР°Р»РѕСЃСЏ РІС–РґРєСЂРёС‚Рё РїР°РїРєСѓ", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Failed to open folder", Toast.LENGTH_SHORT).show()
             return
         }
         supportActionBar?.subtitle = (doc.name ?: uri.toString()) + " [legacy SAF]"
         binding.tvCrumbs.text = (doc.name ?: uri.toString()) + " [legacy SAF]"
-        binding.tvStorageInfo.text = "вЂ”"
+            binding.tvStorageInfo.text = "—"
         val files = try { doc.listFiles().toList() } catch (_: Exception) { emptyList() }
         val items = files.map {
             FileItem(
@@ -536,7 +536,7 @@ class FileManagerActivity : AppCompatActivity() {
         }.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })).take(500)
         fullItems = items
         applyFilter()
-        if (items.isEmpty()) Toast.makeText(this, "РџР°РїРєР° РїРѕСЂРѕР¶РЅСЏ", Toast.LENGTH_SHORT).show()
+        if (items.isEmpty()) Toast.makeText(this, "Folder is empty", Toast.LENGTH_SHORT).show()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -609,7 +609,7 @@ class FileManagerActivity : AppCompatActivity() {
                     )
                     binding.fileSize.text = FileUtils.formatFileSize(item.length)
                 }
-                // Real unix-style perms for local files; SAF has no stat вЂ” show dash.
+                // Real unix-style perms for local files; SAF has no stat - show dash.
                 binding.filePerms.text = if (item.file != null) {
                     try {
                         val f = item.file
@@ -617,8 +617,8 @@ class FileManagerActivity : AppCompatActivity() {
                         val w = if (f.canWrite()) "w" else "-"
                         val x = if (f.canExecute() || f.isDirectory) "x" else "-"
                         "$r$w$x"
-                    } catch (_: Exception) { "вЂ”" }
-                } else "вЂ”"
+                    } catch (_: Exception) { "—" }
+                } else "—"
                 val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
                 binding.fileDate.text = fmt.format(java.util.Date(item.lastModified))
                 binding.root.setOnClickListener { onClick(item) }

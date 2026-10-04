@@ -15,12 +15,12 @@ object ServerPaths {
         } catch (_: Exception) { null }
     }
 
-    /** Р’Р±СѓРґРѕРІР°РЅРёР№ С€Р»СЏС… РґРѕ РїР°РїРєРё СЃРµСЂРІРµСЂР° (File). РџСЂР°С†СЋС” С– РґР»СЏ legacy SAF (РјС–РіСЂР°С†С–СЏ). */
+    /** Built-in server folder path (File). Also works for legacy SAF (migration). */
     fun getWorkDir(context: Context, serverId: String, uriString: String): File =
         EmbeddedPaths.resolveWorkDir(context, serverId, uriString)
 
     fun getTermuxPath(context: Context, uriString: String): String {
-        // Legacy РЅР°Р·РІР°: С‚РµРїРµСЂ РїРѕРІРµСЂС‚Р°С”РјРѕ РІР±СѓРґРѕРІР°РЅРёР№ Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС…
+        // Legacy name: now returns the built-in absolute path
         return try {
             if (uriString.startsWith("embedded://")) {
                 EmbeddedPaths.serverDir(context, uriString.removePrefix("embedded://")).absolutePath
@@ -31,7 +31,7 @@ object ServerPaths {
                     EmbeddedPaths.StorageKind.EXTERNAL
                 ).absolutePath
             } else if (uriString.startsWith("content://")) {
-                // РјС–РіСЂР°С†С–Р№РЅР° РїР°РїРєР° - РІРёР·РЅР°С‡РёС‚Рё serverId РЅРµРјРѕР¶Р»РёРІРѕ, РїРѕРІРµСЂС‚Р°С”РјРѕ СЏРє С” РґР»СЏ Р»РѕРіС–РІ
+                // migration folder - serverId cannot be determined, return as-is for logs
                 uriString
             } else if (uriString.startsWith("/")) {
                 uriString

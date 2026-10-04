@@ -51,11 +51,11 @@ data class ServerConfig(
     val minecraftVersion: String? = null,
     val minecraftLoader: MinecraftLoader? = null,
     val loaderVersion: String? = null,
-    // Nullable РґР»СЏ Gson-СЃСѓРјС–СЃРЅРѕСЃС‚С– Р·С– СЃС‚Р°СЂРёРјРё Р·Р±РµСЂРµР¶РµРЅРЅСЏРјРё (РІС–РґСЃСѓС‚РЅС” РїРѕР»Рµ -> null -> РґРµС„РѕР»С‚).
-    // onlineMode: null -> true (РїРµСЂРµРІС–СЂРєР° Р»С–С†РµРЅР·С–С— Mojang СѓРІС–РјРєРЅРµРЅР°).
-    // false = "РїС–СЂР°С‚РєР°": Р·Р°С…РѕРґРёС‚Рё РјРѕР¶СѓС‚СЊ РіСЂР°РІС†С– Р±РµР· Р»С–С†РµРЅР·С–С—.
+    // Nullable for Gson compatibility with old saves (missing field -> null -> default).
+    // onlineMode: null -> true (Mojang license check enabled).
+    // false = cracked: players without a license may join.
     val onlineMode: Boolean? = null,
-    // viewDistance: null -> 10 (РґРµС„РѕР»С‚ СЃРµСЂРІРµСЂР°). Р”С–Р°РїР°Р·РѕРЅ 2..32.
+    // viewDistance: null -> 10 (server default). Range 2..32.
     val viewDistance: Int? = null
 ) {
     val effectiveOnlineMode: Boolean get() = onlineMode ?: true

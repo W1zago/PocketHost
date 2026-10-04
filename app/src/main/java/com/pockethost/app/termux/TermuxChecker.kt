@@ -49,7 +49,7 @@ object TermuxChecker {
 
     fun isRunCommandGranted(context: Context): Boolean {
         // Check runtime grant of com.termux.permission.RUN_COMMAND (declared in Manifest)
-        // This permission on Samsung OneUI appears under "Р†РЅС€Рµ" / "Р”РѕРґР°С‚РєРѕРІС– РґРѕР·РІРѕР»Рё"
+        // This permission on Samsung OneUI appears under "Other" / "Additional permissions"
         return try {
             // First, check if we hold the permission (most reliable on Android 13+ with targetSdk 34)
             val hasPerm = try {
@@ -71,7 +71,7 @@ object TermuxChecker {
         }
     }
 
-    /** For diagnostics: returns why permission appears as "Р†РЅС€Рµ" */
+    /** For diagnostics: returns why the permission appears as "Other" */
     fun getRunCommandDetails(context: Context): String {
         return try {
             val check = androidx.core.content.ContextCompat.checkSelfPermission(context, "com.termux.permission.RUN_COMMAND")
@@ -81,8 +81,8 @@ object TermuxChecker {
     }
 
     fun isStorageSetup(context: Context): Boolean {
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” SAF: Р·Р°РІР¶РґРё true, СЂРµР°Р»СЊРЅР° РїРµСЂРµРІС–СЂРєР° Р·Р°РїРёСЃСѓ
-        // СЂРѕР±РёС‚СЊСЃСЏ С‡РµСЂРµР· EmbeddedPaths.isDirWritable РїРµСЂРµРґ СЃС‚Р°СЂС‚РѕРј.
+        // Built-in terminal does not need SAF: always true, real writability
+        // is checked via EmbeddedPaths.isDirWritable before start.
         return try {
             context.contentResolver.persistedUriPermissions
             true
@@ -90,13 +90,13 @@ object TermuxChecker {
     }
 
     /**
-     * Legacy: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” Р·РѕРІРЅС–С€РЅСЊРѕРіРѕ Termux,
-     * С‚РѕРјСѓ Р·Р°РІР¶РґРё РїРѕРІРµСЂС‚Р°С”РјРѕ true С‰РѕР± Р¶РѕРґРµРЅ gate РЅРµ Р±Р»РѕРєСѓРІР°РІ РґРѕРґР°С‚РѕРє.
+     * Legacy: built-in terminal does not need external Termux,
+     * so always return true to avoid any gate blocking the app.
      */
-    @Deprecated("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» Р·Р°РІР¶РґРё OK")
+    @Deprecated("Built-in terminal always OK")
     fun isAllOk(context: Context): Boolean = true
 
-    @Deprecated("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» Р·Р°РІР¶РґРё OK")
+    @Deprecated("Built-in terminal always OK")
     fun getGateReason(context: Context): GateReason = GateReason.OK
 
     enum class GateReason {

@@ -10,16 +10,16 @@ import java.io.FileOutputStream
 import java.io.InputStream
 
 /**
- * Р РѕР·РїР°РєРѕРІСѓРІР°С‡ .tar.xz РЅР° С‡РёСЃС‚С–Р№ Java.
+ * .tar.xz / .tar.gz unpacker in pure Java.
  *
- * РќР°РІС–С‰Рѕ: СЃРёСЃС‚РµРјРЅРёР№ toybox-tar РЅР° Р±Р°РіР°С‚СЊРѕС… РїСЂРёСЃС‚СЂРѕСЏС… Р·С–Р±СЂР°РЅРёР№ Р±РµР· xz
- * ("tar: exec xz: No such file or directory", РєРѕРґ 127), С‚РѕРјСѓ JRE-Р°СЂС…С–РІ
- * Pojav РЅРµРјРѕР¶Р»РёРІРѕ СЂРѕР·РїР°РєСѓРІР°С‚Рё Р·РѕРІРЅС–С€РЅС–Рј РїСЂРѕС†РµСЃРѕРј. XZ-С€Р°СЂ Р±РµСЂРµРјРѕ Р·
- * org.tukaani:xz (РІР¶Рµ С” РІ Р·Р°Р»РµР¶РЅРѕСЃС‚СЏС…), tar-РїР°СЂСЃРµСЂ вЂ” СЃРІС–Р№ РјС–РЅС–РјР°Р»СЊРЅРёР№:
- * ustar/gnu Р·Р°РіРѕР»РѕРІРєРё, С„Р°Р№Р»Рё, РїР°РїРєРё, СЃРёРјР»С–РЅРєРё/С…Р°СЂРґР»С–РЅРєРё, GNU longname ('L'),
- * РјС–РЅС–РјР°Р»СЊРЅРёР№ pax ('x': path/size). РџСЂР°С†СЋС” СЃС‚СЂС–РјС–РЅРіРѕРј, РІ РїР°Рј'СЏС‚С– Р»РёС€Рµ Р±СѓС„РµСЂРё.
+ * Why: system toybox-tar on many devices is built without xz
+ * ("tar: exec xz: No such file or directory", code 127), so the Pojav JRE archive
+ * cannot be unpacked by an external process. XZ layer comes from
+ * org.tukaani:xz (already a dependency), gzip from stdlib, tar parser is our own minimal one:
+ * ustar/gnu headers, files, dirs, symlinks/hardlinks, GNU longname ('L'),
+ * minimal pax ('x': path/size). Streams, only buffers in memory.
  *
- * Р‘РµР·РїРµРєР°: zip-slip РІС–РґСЃС–РєР°С”С‚СЊСЃСЏ (Р°Р±СЃРѕР»СЋС‚РЅС– С€Р»СЏС…Рё, "..", РІРёС…С–Рґ Р·Р° dest).
+ * Safety: zip-slip is rejected (absolute paths, "..", escape from dest).
  */
 object TarExtractor {
 
@@ -30,34 +30,35 @@ object TarExtractor {
         archive: File,
         destDir: File,
         log: (String) -> Unit = {},
-        stripComponents: Int = 0
+        stripComponents: Int = 0,
+        requireBinJava: Boolean = true
     ): Boolean {
         return try {
             if (!archive.exists() || archive.length() < 1024) {
-                log("РђСЂС…С–РІ РІС–РґСЃСѓС‚РЅС–Р№ Р°Р±Рѕ РєСЂРёС…С–С‚РЅРёР№ (${archive.length()} B)")
+                log("Archive missing or truncated (${archive.length()} B)")
                 return false
             }
             destDir.mkdirs()
             FileInputStream(archive).use { fis ->
                 BufferedInputStream(fis, 128 * 1024).use { bis ->
                     XZInputStream(bis).use { xz ->
-                        extractTar(xz, destDir, log, stripComponents, requireBinJava = true)
+                        extractTar(xz, destDir, log, stripComponents, requireBinJava)
                     }
                 }
             }
             true
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OOM while extracting " + archive.name, e)
-            log("Р РѕР·РїР°РєСѓРІР°РЅРЅСЋ РЅРµ РІРёСЃС‚Р°С‡РёР»Рѕ РїР°Рј'СЏС‚С–. Р—Р°РєСЂРёР№ С–РЅС€С– РґРѕРґР°С‚РєРё С– СЃРїСЂРѕР±СѓР№ С‰Рµ СЂР°Р·.")
+            log("Out of memory during extraction. Close other apps and retry.")
             false
         } catch (e: Exception) {
             Log.e(TAG, "extract failed for " + archive.name, e)
-            log("Р’Р±СѓРґРѕРІР°РЅРёР№ СЂРѕР·РїР°РєРѕРІСѓРІР°С‡: ${e.message}")
+            log("Built-in unpacker: ${e.message}")
             false
         }
     }
 
-    /** РЁРІРёРґРєР° РїРµСЂРµРІС–СЂРєР°: С‡Рё С„Р°Р№Р» РІР·Р°РіР°Р»С– СЃС…РѕР¶РёР№ РЅР° .xz (РјР°РіС–С‡РЅС– Р±Р°Р№С‚Рё FD 37 7A 58 5A 00). */
+    /** Quick check: does the file look like .xz at all (magic bytes FD 37 7A 58 5A 00). */
     fun looksLikeXz(file: File): Boolean {
         return try {
             if (!file.isFile || file.length() < 1024) return false
@@ -147,10 +148,10 @@ object TarExtractor {
             try {
                 readFully(input, header)
             } catch (e: java.io.EOFException) {
-                if (entries == 0) throw IllegalStateException("РїРѕСЂРѕР¶РЅС–Р№ Р°Р±Рѕ РѕР±С–СЂРІР°РЅРёР№ tar-РїРѕС‚С–Рє")
+                if (entries == 0) throw IllegalStateException("empty or truncated tar stream")
                 break
             }
-            if (isZeroBlock(header)) break // РєС–РЅРµС†СЊ Р°СЂС…С–РІСѓ (РґРІР° РЅСѓР»СЊРѕРІС– Р±Р»РѕРєРё; РІРёСЃС‚Р°С‡РёС‚СЊ РїРµСЂС€РѕРіРѕ)
+            if (isZeroBlock(header)) break // end of archive (two zero blocks; first suffices)
 
             val rawName = readName(header)
             val mode = parseOctal(header, 100, 8)
@@ -159,7 +160,7 @@ object TarExtractor {
             val type = header[156].toInt().toChar()
             val linkName = readString(header, 157, 100)
 
-            // РЎР»СѓР¶Р±РѕРІС– Р·Р°РїРёСЃРё: РґРѕРІРіС– С–РјРµРЅР° С‚Р° pax-РјРµС‚Р°РґР°РЅС– вЂ” Р·Р°СЃС‚РѕСЃРѕРІСѓС”РјРѕ РґРѕ РќРђРЎРўРЈРџРќРћР“Рћ Р·Р°РїРёСЃСѓ.
+            // Service records: long names and pax metadata apply to the NEXT record.
             if (type == 'L' || type == 'K' || type == 'x' || type == 'g') {
                 val text = readDataAsString(input, dataSize)
                 skipPadding(input, dataSize)
@@ -167,7 +168,7 @@ object TarExtractor {
                     'L' -> pendingLongName = text
                     'K' -> pendingLongLink = text
                     'x' -> parsePax(text)?.let { (p, s) -> paxPath = p; paxSize = s }
-                    // 'g': РіР»РѕР±Р°Р»СЊРЅС– pax-РІР»Р°СЃС‚РёРІРѕСЃС‚С– вЂ” С–РіРЅРѕСЂСѓС”РјРѕ
+                    // 'g': global pax properties - ignored
                 }
                 continue
             }
@@ -194,7 +195,7 @@ object TarExtractor {
                     applyMode(target, mode, isDir = true, mtime)
                 }
                 '2' -> {
-                    // РЎРёРјР»С–РЅРє. РЈ JRE С—С… Р±Р°РіР°С‚Рѕ; РЅР° ext4 РїСЂР°С†СЋС”, РєСЂС–Р·СЊ РЅРµС–СЃРЅСѓСЋС‡РёР№ target вЂ” С‚РµР¶ (dangling РѕРє).
+                    // Symlink. JRE has many; works on ext4, dangling target is fine too.
                     try {
                         target.parentFile?.mkdirs()
                         if (target.exists() || isSymlink(target)) {
@@ -206,7 +207,7 @@ object TarExtractor {
                     }
                 }
                 '1' -> {
-                    // РҐР°СЂРґР»С–РЅРє: РєРѕРїС–СЋС”РјРѕ РІРјС–СЃС‚ (РїСЂРѕСЃС‚С–С€Рµ С– РїСЂР°С†СЋС” РІСЃСЋРґРё).
+                    // Hardlink: copy contents (simpler and works everywhere).
                     try {
                         val src = safeTarget(destDir, destCanon, entryLink, stripComponents)
                         if (src != null && src.isFile) {
@@ -226,7 +227,7 @@ object TarExtractor {
                     writtenMb += entrySize / 1024 / 1024
                 }
                 else -> {
-                    // РџСЂРёСЃС‚СЂРѕС—, fifo, СЃРѕРєРµС‚Рё С‚РѕС‰Рѕ РІ JRE РЅРµ РїРѕС‚СЂС–Р±РЅС– вЂ” РїСЂРѕРїСѓСЃРєР°С”РјРѕ РґР°РЅС–.
+                    // Devices, fifos, sockets etc. are not needed in a JRE - skip the data.
                     skipFully(input, entrySize)
                 }
             }
@@ -234,17 +235,17 @@ object TarExtractor {
             entries++
             if (writtenMb - lastLogMb >= 10) {
                 lastLogMb = writtenMb
-                log("Р РѕР·РїР°РєРѕРІР°РЅРѕ ~$writtenMb MB ($files С„Р°Р№Р»С–РІ)...")
+                log("Extracted ~$writtenMb MB ($files files)...")
             }
         }
 
-        log("Р РѕР·РїР°РєРѕРІР°РЅРѕ Р·Р°РїРёСЃС–РІ: $entries, С„Р°Р№Р»С–РІ: $files")
-        if (entries == 0) throw IllegalStateException("РІ Р°СЂС…С–РІС– РЅРµРјР°С” Р·Р°РїРёСЃС–РІ")
-        // РЎР°РЅС–С‚Р°СЂРЅР° РїРµСЂРµРІС–СЂРєР° JRE: bin/java РїСЂСЏРјРѕ Р°Р±Рѕ РЅР° СЂС–РІРµРЅСЊ РіР»РёР±С€Рµ (РЅРѕСЂРјР°Р»С–Р·СѓС” РІРёРєР»РёРєР°С‡).
+        log("Extracted records: $entries, files: $files")
+        if (entries == 0) throw IllegalStateException("no records in archive")
+        // JRE sanity check: bin/java directly or one level deeper (caller normalizes).
         if (requireBinJava) {
             val direct = File(destDir, "bin/java").exists()
             val nested = !direct && (destDir.listFiles()?.any { it.isDirectory && File(it, "bin/java").exists() } == true)
-            if (!direct && !nested) throw IllegalStateException("bin/java РЅРµ Р·РЅР°Р№РґРµРЅРѕ РїС–СЃР»СЏ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ")
+            if (!direct && !nested) throw IllegalStateException("bin/java not found after extraction")
         }
     }
 
@@ -259,7 +260,7 @@ object TarExtractor {
         var off = 0
         while (off < buf.size) {
             val n = input.read(buf, off, buf.size - off)
-            if (n == -1) throw java.io.EOFException("РЅРµСЃРїРѕРґС–РІР°РЅРёР№ РєС–РЅРµС†СЊ РїРѕС‚РѕРєСѓ РЅР° Р±Р°Р№С‚С– $off/${buf.size}")
+            if (n == -1) throw java.io.EOFException("unexpected end of stream at byte $off/${buf.size}")
             if (n == 0) continue
             off += n
         }
@@ -282,7 +283,7 @@ object TarExtractor {
         return if (prefix.isNotEmpty()) "$prefix/$name" else name
     }
 
-    /** РџР°СЂСЃРёРЅРі octal; РїС–РґС‚СЂРёРјСѓС” GNU base-256 РґР»СЏ РІРµР»РёРєРёС… Р·РЅР°С‡РµРЅСЊ. */
+    /** Octal parsing; supports GNU base-256 for large values. */
     private fun parseOctal(buf: ByteArray, off: Int, len: Int): Long {
         if (off < buf.size && (buf[off].toInt() and 0x80) != 0) {
             var v = (buf[off].toInt() and 0x7F).toLong()
@@ -308,7 +309,7 @@ object TarExtractor {
 
     private fun readDataAsString(input: InputStream, size: Long): String {
         if (size <= 0) return ""
-        if (size > 16 * 1024 * 1024) throw IllegalStateException("Р·Р°РЅР°РґС‚Рѕ РІРµР»РёРєРёР№ СЃР»СѓР¶Р±РѕРІРёР№ Р±Р»РѕРє ($size B)")
+        if (size > 16 * 1024 * 1024) throw IllegalStateException("oversized service block ($size B)")
         val data = ByteArray(size.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
         readFully(input, data)
         var end = data.size
@@ -316,7 +317,7 @@ object TarExtractor {
         return try { String(data, 0, end, Charsets.UTF_8) } catch (_: Exception) { String(data, 0, end) }
     }
 
-    /** РњС–РЅС–РјР°Р»СЊРЅРёР№ pax: РІРёС‚СЏРіСѓС” path= С‚Р° size=. Р¤РѕСЂРјР°С‚ Р·Р°РїРёСЃС–РІ: "<len> <key>=<value>\n". */
+    /** Minimal pax: extracts path= and size=. Record format: "<len> <key>=<value>\n". */
     private fun parsePax(text: String): Pair<String?, Long?> {
         var path: String? = null
         var size: Long? = null
@@ -342,7 +343,7 @@ object TarExtractor {
         while (left > 0) {
             val want = minOf(buf.size.toLong(), left).toInt()
             val r = input.read(buf, 0, want)
-            if (r == -1) throw java.io.EOFException("РїРѕС‚С–Рє РѕР±С–СЂРІР°РІСЃСЏ РїС–Рґ С‡Р°СЃ РїСЂРѕРїСѓСЃРєСѓ ($left B Р»РёС€РёР»РѕСЃСЊ)")
+            if (r == -1) throw java.io.EOFException("stream cut while skipping ($left B left)")
             if (r == 0) continue
             left -= r
         }
@@ -360,7 +361,7 @@ object TarExtractor {
             while (left > 0) {
                 val want = minOf(buf.size.toLong(), left).toInt()
                 val r = input.read(buf, 0, want)
-                if (r == -1) throw java.io.EOFException("С„Р°Р№Р» РѕР±С–СЂРІР°РЅРѕ, Р»РёС€РёР»РѕСЃСЊ $left B")
+                if (r == -1) throw java.io.EOFException("file truncated, $left B left")
                 if (r == 0) continue
                 out.write(buf, 0, r)
                 left -= r
@@ -386,7 +387,7 @@ object TarExtractor {
         }
     }
 
-    /** Р—Р°С…РёСЃС‚ РІС–Рґ zip-slip: С‚С–Р»СЊРєРё РІСЃРµСЂРµРґРёРЅС– destDir. null = РІС–РґС…РёР»РёС‚Рё Р·Р°РїРёСЃ. */
+    /** zip-slip guard: only inside destDir. null = reject the record. */
     private fun safeTarget(
         destDir: File,
         destCanon: String,
@@ -405,7 +406,7 @@ object TarExtractor {
             while (n.startsWith("./")) n = n.removePrefix("./")
             if (n.isEmpty()) return null
             if (n.startsWith("/") || n.startsWith("\\")) return null
-            if (n.length > 2 && n[1] == ':' && n[0].isLetter()) return null // Windows-РґРёСЃРє
+            if (n.length > 2 && n[1] == ':' && n[0].isLetter()) return null // Windows drive
             val parts = n.split('/')
             if (parts.any { it == ".." }) return null
             val target = File(destDir, n)
@@ -428,7 +429,7 @@ object TarExtractor {
                 f.setReadable(true, false)
                 f.setWritable(true, false)
             } else {
-                // Р‘СѓРґСЊ-СЏРєРёР№ exec-Р±С–С‚ -> РІРёРєРѕРЅСѓРІР°РЅРёР№ (JRE-Р±С–РЅР°СЂРЅРёРєРё С‚Р° .so).
+                // Any exec bit -> executable (JRE binaries and .so).
                 if ((mode and 0b001001001L) != 0L) f.setExecutable(true, false)
                 f.setReadable(true, false)
                 if ((mode and 0b010000000L) != 0L) f.setWritable(true, false)

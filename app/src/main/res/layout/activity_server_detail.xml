@@ -171,7 +171,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Папка: …"
+                        android:text="Folder: …"
                         android:textSize="11sp"
                         android:textColor="@color/on_surface_variant"
                         android:fontFamily="monospace"
@@ -553,7 +553,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Налаштування Minecraft"
+                        android:text="Minecraft Settings"
                         android:textSize="15sp"
                         android:textStyle="bold"
                         android:textColor="@color/on_surface" />
@@ -563,13 +563,13 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="Дозволити гравців без ліцензії (піратка)" />
+                        android:text="Allow cracked (non-premium) players" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Вимикає перевірку ліцензії Mojang (online-mode=false)."
+                        android:text="Disables Mojang license check (online-mode=false)."
                         android:textSize="11sp"
                         android:textColor="@color/on_surface_variant" />
 
@@ -578,7 +578,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:text="Дальність промальовки: 10 чанків"
+                        android:text="View distance: 10 chunks"
                         android:textSize="13sp"
                         android:textColor="@color/on_surface" />
 
@@ -596,7 +596,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="На зупиненому сервері застосовується одразу, на запущеному — після рестарту."
+                        android:text="On a stopped server applies immediately, on a running one — after restart."
                         android:textSize="11sp"
                         android:textColor="@color/on_surface_variant" />
 

@@ -22,24 +22,24 @@ import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
- * РЎС‚РІРѕСЂРµРЅРЅСЏ СЃРµСЂРІРµСЂР° Р· РІРёР±РѕСЂРѕРј СЂРѕР·С‚Р°С€СѓРІР°РЅРЅСЏ: РІРЅСѓС‚СЂС–С€РЅС”, Р·РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ
- * РґРѕРґР°С‚РєСѓ Р°Р±Рѕ РґРѕРІС–Р»СЊРЅР° РїР°РїРєР° (РѕСЃС‚Р°РЅРЅСЏ вЂ” Р»РёС€Рµ Р· РґРѕСЃС‚СѓРїРѕРј РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ).
- * Р”РѕРІС–Р»СЊРЅС– РїР°РїРєРё С‚РёРїСѓ Downloads Р±РµР· С†СЊРѕРіРѕ РґРѕР·РІРѕР»Сѓ РЅРµРґРѕСЃС‚СѓРїРЅС– СЏРє СЂРѕР±РѕС‡Р°
- * РїР°РїРєР° РїСЂРѕС†РµСЃСѓ РЅР° СЃСѓС‡Р°СЃРЅРѕРјСѓ Android вЂ” С†Рµ РѕР±РјРµР¶РµРЅРЅСЏ СЃРёСЃС‚РµРјРё, РЅРµ РґРѕРґР°С‚РєСѓ.
+ * Creating a server with placement choice: internal, external app storage,
+ * or an arbitrary folder (the last one - only with all-files access).
+ * Arbitrary Download-type folders without this permission are unavailable as a process
+ * work folder on modern Android - a system limitation, not the app’s.
  */
 class CreateServerActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "CreateServerActivity"
         private val SAFE_NAME_REGEX = Regex("[^a-zA-Z0-9._-]")
-        // RAM-СЃР»Р°Р№РґРµСЂ (activity_create_server.xml): valueFrom=128, valueTo=3072, stepSize=64.
-        // BaseSlider.validateValues РєРёРґР°С” IllegalStateException, СЏРєС‰Рѕ value РЅРµ РґРѕСЂС–РІРЅСЋС”
-        // valueFrom + k*stepSize (РЅР°РїСЂ. 2613.0 = totalMem*0.35 вЂ” FATAL РїСЂРё С‚Р°РїС– MINECRAFT).
+        // RAM slider (activity_create_server.xml): valueFrom=128, valueTo=3072, stepSize=64.
+        // BaseSlider.validateValues throws IllegalStateException when value is not
+        // valueFrom + k*stepSize (e.g. 2613.0 = totalMem*0.35 - FATAL on MINECRAFT tap).
         const val RAM_MIN = 128f
         const val RAM_MAX = 3072f
         const val RAM_STEP = 64f
 
-        /** РќРѕСЂРјР°Р»С–Р·СѓС” Р‘РЈР”Р¬-РЇРљР• Р·РЅР°С‡РµРЅРЅСЏ RAM РґРѕ РЅР°Р№Р±Р»РёР¶С‡РѕРіРѕ РІР°Р»С–РґРЅРѕРіРѕ РєСЂРѕРєСѓ СЃР»Р°Р№РґРµСЂР°. */
+        /** Normalizes ANY RAM value to the nearest valid slider step. */
         fun snapRam(value: Float): Float {
             val coerced = value.coerceIn(RAM_MIN, RAM_MAX)
             val steps = ((coerced - RAM_MIN) / RAM_STEP).roundToInt()
@@ -49,15 +49,15 @@ class CreateServerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityCreateServerBinding
     private val repository by lazy {
-        // РЈРЅС–С„С–РєРѕРІР°РЅРёР№ Р±РµР·РїРµС‡РЅРёР№ РґРѕСЃС‚СѓРї (РґРёРІ. PocketHostApplication.getRepositoryOrNull).
+        // Unified safe access (see PocketHostApplication.getRepositoryOrNull).
         com.pockethost.app.PocketHostApplication.getRepositoryOrNull()
             ?: com.pockethost.core.repository.ServerRepository(this@CreateServerActivity)
     }
     private var selectedServerType: ServerType = ServerType.MINECRAFT
     private var selectedStorage = EmbeddedPaths.StorageKind.INTERNAL
-    /** РљРѕСЂС–РЅСЊ РґРѕРІС–Р»СЊРЅРѕРіРѕ СЂРѕР·С‚Р°С€СѓРІР°РЅРЅСЏ (РІРёР±СЂР°РЅРёР№ Сѓ С„Р°Р№Р»РѕРІРѕРјСѓ РјРµРЅРµРґР¶РµСЂС–). */
+    /** Custom-placement root (picked in the file manager). */
     private var customRoot: String? = null
-    /** РџС–СЃР»СЏ РїРѕРІРµСЂРЅРµРЅРЅСЏ Р· СЃРёСЃС‚РµРјРЅРёС… РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ вЂ” РѕРґСЂР°Р·Сѓ РІС–РґРєСЂРёС‚Рё РІРёР±С–СЂ РїР°РїРєРё. */
+    /** After returning from system settings - open folder picker at once. */
     private var pendingFolderPickAfterSettings = false
 
     private val folderPickerLauncher = registerForActivityResult(
@@ -78,7 +78,7 @@ class CreateServerActivity : AppCompatActivity() {
     ) { granted ->
         if (granted) openFolderPicker()
         else {
-            Snackbar.make(binding.root, "Р‘РµР· РґРѕР·РІРѕР»Сѓ РґРѕРІС–Р»СЊРЅСѓ РїР°РїРєСѓ РЅРµ РІРёР±СЂР°С‚Рё", Snackbar.LENGTH_LONG).show()
+            Snackbar.make(binding.root, "No permission - cannot pick a custom folder", Snackbar.LENGTH_LONG).show()
             updateStoragePreview()
         }
     }
@@ -113,9 +113,9 @@ class CreateServerActivity : AppCompatActivity() {
             selectRuntime(selectedServerType)
         }
 
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РіРµРЅРµСЂСѓС” РєРѕРјР°РЅРґСѓ СЃР°Рј
+        // Built-in terminal generates the command itself
         binding.etStartCommand.isEnabled = false
-        binding.etStartCommand.hint = "Р“РµРЅРµСЂСѓС”С‚СЊСЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ (РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»)"
+        binding.etStartCommand.hint = "Generated automatically (built-in terminal)"
     }
 
     private fun setupToolbar() {
@@ -124,7 +124,7 @@ class CreateServerActivity : AppCompatActivity() {
         supportActionBar?.title = "Create Server"
     }
 
-    /** Runtime selector cards вЂ” same visual language as design, but only REAL backend types. */
+    /** Runtime selector cards - same visual language as design, but only REAL backend types. */
     private fun setupRuntimeCards() {
         binding.cardMinecraft.setOnClickListener { selectRuntime(ServerType.MINECRAFT) }
         binding.cardUbuntu.setOnClickListener { selectRuntime(ServerType.UBUNTU_SERVER) }
@@ -169,9 +169,9 @@ class CreateServerActivity : AppCompatActivity() {
         )
         val verAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, versions)
         binding.spinnerMinecraftVersion.setAdapter(verAdapter)
-        // Default 1.20.4: РІР±СѓРґРѕРІР°РЅРёР№ JRE17 Р·Р°РїСѓСЃРєР°С” Р»РёС€Рµ Minecraft <=1.20.4
-        // (1.20.5+ РїРѕС‚СЂРµР±СѓС” Java 21). РЎРїРёСЃРѕРє Р»РёС€Р°С”РјРѕ РїРѕРІРЅРёРј вЂ” РґР»СЏ 1.21.x
-        // СЃС‚Р°СЂС‚ С‡РµСЃРЅРѕ РІС–РґРјРѕРІРёС‚СЊ Р· РїС–РґРєР°Р·РєРѕСЋ РїСЂРѕ JRE 21.
+        // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4
+        // (1.20.5+ needs Java 21). Keep the list full - for 1.21.x
+        // start honestly refuses with a JRE 21 hint.
         binding.spinnerMinecraftVersion.setText("1.20.4", false)
 
         val loaders = MinecraftLoader.entries.map { it.name }
@@ -179,13 +179,13 @@ class CreateServerActivity : AppCompatActivity() {
         binding.spinnerMinecraftLoader.setAdapter(loaderAdapter)
         binding.spinnerMinecraftLoader.setText(MinecraftLoader.PAPER.name, false)
 
-        // Р”Р°Р»СЊРЅС–СЃС‚СЊ РїСЂРѕРјР°Р»СЊРѕРІРєРё: Р¶РёРІРёР№ РїС–РґРїРёСЃ РїС–Рґ РїРѕРІР·СѓРЅРєРѕРј
+        // Live render distance: live caption under the slider
         binding.tvViewDistance.text = viewDistanceLabel(binding.sliderViewDistance.value.toInt())
         binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
             binding.tvViewDistance.text = viewDistanceLabel(value.toInt())
         }
 
-        // РџР°РјКјСЏС‚СЊ РїСЂРёСЃС‚СЂРѕСЋ (РЅРµ heap РґРѕРґР°С‚РєСѓ!): РґРѕС‡С–СЂРЅС–Р№ java-РїСЂРѕС†РµСЃ РјР°С” РІР»Р°СЃРЅСѓ РєСѓРїСѓ.
+        // Device memory (not app heap!): a child java process has its own heap.
         fun deviceTotalMb(): Int {
             return try {
                 val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
@@ -199,11 +199,11 @@ class CreateServerActivity : AppCompatActivity() {
         val totalMb = deviceTotalMb()
         val recommendedMax = (totalMb * 0.35).toInt().coerceIn(512, 3072)
         val recommendedMin = (recommendedMax * 0.5).toInt().coerceAtLeast(256)
-        // РћРєСЂСѓРіР»СЋС”РјРѕ РґРµС„РѕР»С‚ РґРѕ РІР°Р»С–РґРЅРѕРіРѕ РєСЂРѕРєСѓ СЃР»Р°Р№РґРµСЂР° (128 + k*64), С–РЅР°РєС€Рµ FATAL 2613.
+        // Round the default to a valid slider step (128 + k*64), otherwise FATAL 2613.
         val snappedRecommended = snapRam(recommendedMax.toFloat()).toInt()
         binding.etMaxMemory.setText(snappedRecommended.toString())
         binding.etMinMemory.setText(recommendedMin.toString())
-        binding.tvRamHost.text = "Host вЂў ${totalMb / 1024} GB total, $snappedRecommended MB recommended"
+        binding.tvRamHost.text = "Host • ${totalMb / 1024} GB total, $snappedRecommended MB recommended"
         binding.tvRamValue.text = "$snappedRecommended MB"
         setRamSliderSafe(snappedRecommended.toFloat())
 
@@ -214,17 +214,17 @@ class CreateServerActivity : AppCompatActivity() {
             binding.etMaxMemory.setText(maxAllowed.toString())
             binding.etMinMemory.setText(minAllowed.toString())
             binding.tvRamValue.text = "$maxAllowed MB"
-            // et Р»РёС€Р°С”РјРѕ С‚РѕС‡РЅРёРј РґР»СЏ backend (JVM РїСЂРёР№РјР°С” Р±СѓРґСЊ-СЏРєС– MB),
-            // СЃР»Р°Р№РґРµСЂ вЂ” Р»РёС€Рµ snapped+coerced РїСЂРµРІ'СЋ (valueTo=3072, РєСЂРѕРє 64).
+            // et stays exact for backend (JVM accepts any MB),
+            // slider is only snapped+coerced preview (valueTo=3072, step 64).
             setRamSliderSafe(maxAllowed.toFloat())
-            Snackbar.make(binding.root, "Using device RAM share: $maxAllowed MB (Р· ${total} MB)", Snackbar.LENGTH_SHORT).show()
+            Snackbar.make(binding.root, "Using device RAM share: $maxAllowed MB (of ${total} MB)", Snackbar.LENGTH_SHORT).show()
         }
     }
 
     /**
-     * Р‘РµР·РїРµС‡РЅРµ РїСЂРѕРіСЂР°РјРЅРµ РІСЃС‚Р°РЅРѕРІР»РµРЅРЅСЏ RAM-СЃР»Р°Р№РґРµСЂР°.
-     * coerceIn + snapToStep РїРµСЂРµРґ set, runCatching + Log.w вЂ” РќР†РљРћР›Р РЅРµ РєРёРґР°С”,
-     * Р‘РЈР”Р¬-РЇРљР• Р·РЅР°С‡РµРЅРЅСЏ RAM (128..deviceMem) РЅРѕСЂРјР°Р»С–Р·СѓС”С‚СЊСЃСЏ.
+     * Safe programmatic RAM-slider set.
+     * coerceIn + snapToStep before set, runCatching + Log.w - NEVER throws,
+     * ANY RAM value (128..deviceMem) is normalized.
      */
     private fun setRamSliderSafe(valueMb: Float) {
         val snapped = snapRam(valueMb)
@@ -264,7 +264,7 @@ class CreateServerActivity : AppCompatActivity() {
                 if (v in 128..3072) {
                     syncingRam = true
                     try {
-                        // Р СѓС‡РЅРµ РІРІРµРґРµРЅРЅСЏ РјРѕР¶Рµ Р±СѓС‚Рё РЅРµ РєСЂР°С‚РЅРёРј 64 (РЅР°РїСЂ. 2613) вЂ” СЃРЅР°РїР°С”РјРѕ РїРµСЂРµРґ set.
+                        // Manual input may not be a multiple of 64 (e.g. 2613) - snap before set.
                         setRamSliderSafe(v.toFloat())
                         binding.tvRamValue.text = "$v MB"
                     } finally {
@@ -280,7 +280,7 @@ class CreateServerActivity : AppCompatActivity() {
         binding.btnVerifyPort.setOnClickListener {
             val port = binding.etPort.text?.toString()?.trim()?.toIntOrNull()
             if (port == null || port !in 1..65535) {
-                binding.tvPortStatus.text = "Invalid port (1вЂ“65535)"
+                binding.tvPortStatus.text = "Invalid port (1–65535)"
                 binding.tvPortStatus.setTextColor(
                     androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.badge_error_fg)
                 )
@@ -308,8 +308,8 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun setupDirectorySection() {
-        // Р’РёР±С–СЂ СЂРѕР·С‚Р°С€СѓРІР°РЅРЅСЏ: РІРЅСѓС‚СЂС–С€РЅС” Р°Р±Рѕ Р·РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РґРѕРґР°С‚РєСѓ (Р±РµР· РґРѕР·РІРѕР»С–РІ).
-        // РџР°РїРєР° СЃРµСЂРІРµСЂР° РІСЃРµСЂРµРґРёРЅС– СЃС‚РІРѕСЂСЋС”С‚СЊСЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ.
+        // Placement choice: internal or app-external storage (no permissions).
+        // Server folder inside is created automatically.
         binding.etWorkingDir.isEnabled = false
         binding.etWorkingDir.isFocusable = false
         binding.etWorkingDir.isClickable = false
@@ -331,25 +331,25 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun viewDistanceLabel(chunks: Int): String =
-        "Р”Р°Р»СЊРЅС–СЃС‚СЊ РїСЂРѕРјР°Р»СЊРѕРІРєРё: $chunks С‡Р°РЅРєС–РІ"
+        "View distance: $chunks chunks"
 
     private fun storageShortName(kind: EmbeddedPaths.StorageKind): String = when (kind) {
-        EmbeddedPaths.StorageKind.EXTERNAL -> "Р·РѕРІРЅС–С€РЅСЊРѕРјСѓ"
-        EmbeddedPaths.StorageKind.CUSTOM -> "РІРєР°Р·Р°РЅС–Р№ РїР°РїС†С–"
-        else -> "РІРЅСѓС‚СЂС–С€РЅСЊРѕРјСѓ"
+        EmbeddedPaths.StorageKind.EXTERNAL -> "external"
+        EmbeddedPaths.StorageKind.CUSTOM -> "custom folder"
+        else -> "internal"
     }
 
     private fun formatFree(bytes: Long): String {
-        if (bytes < 0) return "РЅРµРІС–РґРѕРјРѕ"
+        if (bytes < 0) return "unknown"
         val gb = bytes / 1024.0 / 1024.0 / 1024.0
-        return if (gb >= 1) String.format(java.util.Locale.US, "%.1f Р“Р‘", gb)
-        else "${bytes / 1024 / 1024} РњР‘"
+        return if (gb >= 1) String.format(java.util.Locale.US, "%.1f GB", gb)
+        else "${bytes / 1024 / 1024} MB"
     }
 
     private fun storageRootPath(kind: EmbeddedPaths.StorageKind): String {
         return try {
             if (kind == EmbeddedPaths.StorageKind.EXTERNAL) {
-                EmbeddedPaths.externalServersRoot(this)?.absolutePath ?: "РЅРµРґРѕСЃС‚СѓРїРЅРµ"
+                EmbeddedPaths.externalServersRoot(this)?.absolutePath ?: "unavailable"
             } else {
                 EmbeddedPaths.serversRoot(this).absolutePath
             }
@@ -363,29 +363,29 @@ class CreateServerActivity : AppCompatActivity() {
         val label: String
         when (selectedStorage) {
             EmbeddedPaths.StorageKind.EXTERNAL -> {
-                rootText = storageRootPath(EmbeddedPaths.StorageKind.EXTERNAL) + "/<Р°РІС‚Рѕ>"
+                rootText = storageRootPath(EmbeddedPaths.StorageKind.EXTERNAL) + "/<auto>"
                 freeText = formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.EXTERNAL))
-                label = "Р·РѕРІРЅС–С€РЅС”"
+                label = "external"
             }
             EmbeddedPaths.StorageKind.CUSTOM -> {
                 val root = customRoot
                 if (root.isNullOrEmpty()) {
-                    rootText = "(РїР°РїРєСѓ С‰Рµ РЅРµ РІРёР±СЂР°РЅРѕ вЂ” РЅР°С‚РёСЃРЅРё РєРЅРѕРїРєСѓ РЅРёР¶С‡Рµ)"
-                    freeText = "вЂ”"
+                    rootText = "(folder not picked yet - press the button below)"
+                    freeText = "—"
                 } else {
-                    rootText = "$root/<РЅР°Р·РІР° СЃРµСЂРІРµСЂР°>"
+                    rootText = "$root/<server name>"
                     freeText = formatFree(freeOfPath(root))
                 }
-                label = "РґРѕРІС–Р»СЊРЅР° РїР°РїРєР°"
+                label = "custom folder"
             }
             else -> {
-                rootText = storageRootPath(EmbeddedPaths.StorageKind.INTERNAL) + "/<Р°РІС‚Рѕ>"
+                rootText = storageRootPath(EmbeddedPaths.StorageKind.INTERNAL) + "/<auto>"
                 freeText = formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.INTERNAL))
-                label = "РІРЅСѓС‚СЂС–С€РЅС”"
+                label = "internal"
             }
         }
-        binding.etWorkingDir.setText("$rootText вЂ” РІС–Р»СЊРЅРѕ $freeText")
-        binding.btnBrowseDirectory.text = "Р РѕР·С‚Р°С€СѓРІР°РЅРЅСЏ: $label (Р·РјС–РЅРёС‚Рё)"
+        binding.etWorkingDir.setText("$rootText - free $freeText")
+        binding.btnBrowseDirectory.text = "Location: $label (change)"
     }
 
     private fun freeOfPath(path: String): Long {
@@ -397,7 +397,7 @@ class CreateServerActivity : AppCompatActivity() {
         val items = mutableListOf<String>()
         kinds.add(EmbeddedPaths.StorageKind.INTERNAL)
         items.add(
-            "Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ (РІС–Р»СЊРЅРѕ ${formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.INTERNAL))})\n" +
+            "Internal storage (free ${formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.INTERNAL))})\n" +
                 storageRootPath(EmbeddedPaths.StorageKind.INTERNAL)
         )
         val notes = mutableListOf<String>()
@@ -405,25 +405,25 @@ class CreateServerActivity : AppCompatActivity() {
         if (extRoot != null) {
             kinds.add(EmbeddedPaths.StorageKind.EXTERNAL)
             items.add(
-                "Р—РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ вЂ” SD/USB, РІРёРґРЅРѕ С‡РµСЂРµР· USB (РІС–Р»СЊРЅРѕ ${formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.EXTERNAL))})\n" +
+                "External storage - SD/USB, visible over USB (free ${formatFree(EmbeddedPaths.freeBytes(this, EmbeddedPaths.StorageKind.EXTERNAL))})\n" +
                     extRoot.absolutePath
             )
         } else {
-            notes.add("Р—РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ РЅР° С†СЊРѕРјСѓ РїСЂРёСЃС‚СЂРѕС— (РЅРµРјР° SD-РєР°СЂС‚Рё Р°Р±Рѕ СЃС…РѕРІРёС‰Рµ РІРёРјРєРЅРµРЅРµ).")
+            notes.add("External storage unavailable on this device (no SD card or storage ejected).")
         }
         kinds.add(EmbeddedPaths.StorageKind.CUSTOM)
         items.add(
-            "Р”РѕРІС–Р»СЊРЅР° РїР°РїРєР°вЂ¦\n" +
-                (customRoot ?: "РЅР°РїСЂРёРєР»Р°Рґ Downloads (РїРѕС‚СЂС–Р±РµРЅ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ)")
+            "Custom folder...\n" +
+                (customRoot ?: "e.g. Downloads (needs all-files access)")
         )
         if (!EmbeddedPaths.hasAllFilesAccess(this) &&
             android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R
         ) {
-            notes.add("Р”Р»СЏ РґРѕРІС–Р»СЊРЅРѕС— РїР°РїРєРё РїРѕС‚СЂС–Р±РµРЅ В«РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІВ» вЂ” РІС–РґРєСЂРёС”С‚СЊСЃСЏ СЃРёСЃС‚РµРјРЅРёР№ РµРєСЂР°РЅ.")
+            notes.add("A custom folder needs 'all files access' - a system screen will open.")
         }
         val checked = kinds.indexOf(selectedStorage).coerceAtLeast(0)
         AlertDialog.Builder(this)
-            .setTitle("Р РѕР·С‚Р°С€СѓРІР°РЅРЅСЏ СЃРµСЂРІРµСЂР°")
+            .setTitle("Server location")
             .setMessage(if (notes.isEmpty()) null else notes.joinToString("\n\n"))
             .setSingleChoiceItems(items.toTypedArray(), checked) { d, which ->
                 val picked = kinds[which]
@@ -434,7 +434,7 @@ class CreateServerActivity : AppCompatActivity() {
                     updateStoragePreview()
                 }
             }
-            .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null)
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -445,13 +445,13 @@ class CreateServerActivity : AppCompatActivity() {
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             AlertDialog.Builder(this)
-                .setTitle("Р”РѕСЃС‚СѓРї РґРѕ С„Р°Р№Р»С–РІ")
-                .setMessage("Р©РѕР± РѕР±СЂР°С‚Рё РґРѕРІС–Р»СЊРЅСѓ РїР°РїРєСѓ (РЅР°РїСЂРёРєР»Р°Рґ Downloads), РЅР°РґР°Р№ В«РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІВ» РЅР° РЅР°СЃС‚СѓРїРЅРѕРјСѓ СЃРёСЃС‚РµРјРЅРѕРјСѓ РµРєСЂР°РЅС–. Р‘РµР· РЅСЊРѕРіРѕ РґРѕСЃС‚СѓРїРЅС– РІРЅСѓС‚СЂС–С€РЅС” С‚Р° Р·РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РґРѕРґР°С‚РєСѓ.")
-                .setPositiveButton("Р’С–РґРєСЂРёС‚Рё РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ") { _, _ ->
+                .setTitle("Files access")
+                .setMessage("To pick a custom folder (e.g. Downloads), grant 'all files access' on the next system screen. Without it only the app internal and external storage are available.")
+                .setPositiveButton("Open settings") { _, _ ->
                     pendingFolderPickAfterSettings = true
                     openAllFilesSettings()
                 }
-                .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё", null)
+                .setNegativeButton("Cancel", null)
                 .show()
         } else {
             writePermLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -466,11 +466,11 @@ class CreateServerActivity : AppCompatActivity() {
             } catch (_: Exception) {}
         }
         pendingFolderPickAfterSettings = false
-        Snackbar.make(binding.root, "РќРµ РІРґР°Р»РѕСЃСЏ РІС–РґРєСЂРёС‚Рё РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ", Snackbar.LENGTH_LONG).show()
+        Snackbar.make(binding.root, "Failed to open settings", Snackbar.LENGTH_LONG).show()
     }
 
-    // H4: getExternalStorageDirectory deprecated вЂ” С‚СѓС‚ Р»РёС€Рµ СЃС‚Р°СЂС‚РѕРІР° РїР°РїРєР° РґР»СЏ picker.
-    // TODO: РјС–РіСЂСѓРІР°С‚Рё РЅР° SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
+    // H4: getExternalStorageDirectory deprecated - here only the start folder for picker.
+    // TODO: migrate folder picking to SAF (ACTION_OPEN_DOCUMENT_TREE) / MediaStore.
     @Suppress("DEPRECATION")
     private fun openFolderPicker() {
         val startDir = customRoot?.let {
@@ -487,26 +487,26 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     /**
-     * Р¦С–Р»СЊРѕРІР° РїР°РїРєР° + URI + display РґР»СЏ РЅРѕРІРѕРіРѕ СЃРµСЂРІРµСЂР°.
-     * null = РїСЂРёС‡РёРЅСѓ РІР¶Рµ РїРѕРєР°Р·Р°РЅРѕ С‡РµСЂРµР· Snackbar.
+     * Target folder + URI + display for the new server.
+     * null = reason already shown via Snackbar.
      */
     private fun resolveTargetDir(serverId: String, serverName: String): Triple<File, String, String>? {
         if (selectedStorage == EmbeddedPaths.StorageKind.CUSTOM) {
             val rootPath = customRoot
             if (rootPath.isNullOrEmpty()) {
-                Snackbar.make(binding.root, "РЎРїРѕС‡Р°С‚РєСѓ РѕР±РµСЂРё РґРѕРІС–Р»СЊРЅСѓ РїР°РїРєСѓ", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Pick a custom folder first", Snackbar.LENGTH_LONG).show()
                 return null
             }
             if (!EmbeddedPaths.hasAllFilesAccess(this)) {
-                Snackbar.make(binding.root, "РќРµРјР° РґРѕСЃС‚СѓРїСѓ РґРѕ РїР°РїРєРё. РќР°РґР°Р№ В«РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІВ».", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "No access to the folder. Grant 'all files access'.", Snackbar.LENGTH_LONG).show()
                 return null
             }
             val root = File(rootPath)
             if (!root.isDirectory) {
-                Snackbar.make(binding.root, "РџР°РїРєСѓ РЅРµ Р·РЅР°Р№РґРµРЅРѕ: $rootPath", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Folder not found: $rootPath", Snackbar.LENGTH_LONG).show()
                 return null
             }
-            // РџС–РґРїР°РїРєР° Р·Р° РЅР°Р·РІРѕСЋ СЃРµСЂРІРµСЂР°, РїСЂРё Р·Р°Р№РЅСЏС‚РѕСЃС‚С– вЂ” Р· СЃСѓС„С–РєСЃРѕРј. РќРµРїРѕСЂРѕР¶РЅСЋ С‡СѓР¶Сѓ РїР°РїРєСѓ РЅРµ С‡С–РїР°С”РјРѕ.
+            // Subfolder by server name, on collision - with suffix. Never touch a foreign non-empty folder.
             val base = serverName.replace(SAFE_NAME_REGEX, "_").take(48).ifEmpty { "server" }
             var dir = File(root, base)
             var i = 2
@@ -515,7 +515,7 @@ class CreateServerActivity : AppCompatActivity() {
                 i++
             }
             if (EmbeddedPaths.prepareCustomDir(dir.absolutePath) == null) {
-                Snackbar.make(binding.root, "РџР°РїРєР° РЅРµРґРѕСЃС‚СѓРїРЅР° РґР»СЏ Р·Р°РїРёСЃСѓ: ${dir.absolutePath}", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Folder not writable: ${dir.absolutePath}", Snackbar.LENGTH_LONG).show()
                 return null
             }
             val abs = dir.absolutePath
@@ -524,11 +524,11 @@ class CreateServerActivity : AppCompatActivity() {
         val dir = try {
             EmbeddedPaths.serverDir(this, serverId, selectedStorage).apply { mkdirs() }
         } catch (e: Exception) {
-            Snackbar.make(binding.root, "РќРµ РІРґР°Р»РѕСЃСЏ СЃС‚РІРѕСЂРёС‚Рё РїР°РїРєСѓ: ${e.message}", Snackbar.LENGTH_LONG).show()
+            Snackbar.make(binding.root, "Failed to create folder: ${e.message}", Snackbar.LENGTH_LONG).show()
             return null
         }
         if (!dir.exists() || !dir.canWrite()) {
-            Snackbar.make(binding.root, "РЎС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ РґР»СЏ Р·Р°РїРёСЃСѓ. РћР±РµСЂРё С–РЅС€Рµ СЂРѕР·С‚Р°С€СѓРІР°РЅРЅСЏ.", Snackbar.LENGTH_LONG).show()
+            Snackbar.make(binding.root, "Storage not writable. Pick another location.", Snackbar.LENGTH_LONG).show()
             return null
         }
         val uri = EmbeddedPaths.storageUri(serverId, selectedStorage)
@@ -580,21 +580,21 @@ class CreateServerActivity : AppCompatActivity() {
         }
         val portStr = binding.etPort.text.toString().trim()
         if (name.isEmpty()) {
-            Snackbar.make(binding.root, "Р’РІРµРґС–С‚СЊ РЅР°Р·РІСѓ СЃРµСЂРІРµСЂР°", Snackbar.LENGTH_SHORT).show(); return
+            Snackbar.make(binding.root, "Enter server name", Snackbar.LENGTH_SHORT).show(); return
         }
         val port = portStr.toIntOrNull()
         if (port == null || port !in 1..65535) {
-            Snackbar.make(binding.root, "РќРµРІС–СЂРЅРёР№ РїРѕСЂС‚", Snackbar.LENGTH_SHORT).show(); return
+            Snackbar.make(binding.root, "Bad port", Snackbar.LENGTH_SHORT).show(); return
         }
         if (selectedServerType == ServerType.MINECRAFT) {
             val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
             val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
             if (loader == MinecraftLoader.SPIGOT || loader == MinecraftLoader.BUKKIT || loader == MinecraftLoader.FORGE || loader == MinecraftLoader.NEOFORGE) {
                 AlertDialog.Builder(this)
-                    .setTitle("РџРѕРїРµСЂРµРґР¶РµРЅРЅСЏ")
-                    .setMessage("Р—Р°РІР°РЅС‚Р°Р¶СѓРІР°С‡ $loaderName РјРѕР¶Рµ РЅРµ РїС–РґС‚СЂРёРјСѓРІР°С‚РёСЃСЏ. Р РµРєРѕРјРµРЅРґСѓС”С‚СЊСЃСЏ PAPER, PURPUR, VANILLA С‡Рё FABRIC.\n\nРџСЂРѕРґРѕРІР¶РёС‚Рё Р· $loaderName?")
-                    .setPositiveButton("РџСЂРѕРґРѕРІР¶РёС‚Рё") { _, _ -> proceedCreateMinecraft(name, port) }
-                    .setNegativeButton("РЎРєР°СЃСѓРІР°С‚Рё") { d, _ -> d.dismiss() }
+                    .setTitle("Warning")
+                    .setMessage("The $loaderName downloader may be unsupported. PAPER, PURPUR, VANILLA or FABRIC recommended.\n\nContinue with $loaderName?")
+                    .setPositiveButton("Continue") { _, _ -> proceedCreateMinecraft(name, port) }
+                    .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
                     .show()
                 return
             }
@@ -611,13 +611,13 @@ class CreateServerActivity : AppCompatActivity() {
         val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
         val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
 
-        // РџС–СЂР°С‚РєР° = РІРёРјРєРЅРµРЅР° РїРµСЂРµРІС–СЂРєР° Р»С–С†РµРЅР·С–С— (online-mode=false).
-        // РџСЂРѕРјР°Р»СЊРѕРІРєР° 2..32 С‡Р°РЅРєРё, РґРµС„РѕР»С‚ 10.
+        // Cracked = license check disabled (online-mode=false).
+        // Render distance 2..32 chunks, default 10.
         val allowPirate = binding.switchPirate.isChecked
         val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
 
         binding.btnCreate.isEnabled = false
-        binding.btnCreate.text = "РЎС‚РІРѕСЂРµРЅРЅСЏ..."
+        binding.btnCreate.text = "Creating..."
 
         val serverId = UUID.randomUUID().toString()
         val target = resolveTargetDir(serverId, name) ?: run {
@@ -673,7 +673,7 @@ class CreateServerActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 lifecycleScope.launch {
                     repository.createServer(server)
-                    Snackbar.make(binding.root, "РЎРµСЂРІРµСЂ \"$name\" СЃС‚РІРѕСЂРµРЅРѕ Сѓ ${storageShortName(selectedStorage)} СЃС…РѕРІРёС‰С–. РќР°С‚РёСЃРЅС–С‚СЊ Start ($version, $loader)", Snackbar.LENGTH_LONG).show()
+                    Snackbar.make(binding.root, "Server \"$name\" created in ${storageShortName(selectedStorage)} storage. Press Start ($version, $loader)", Snackbar.LENGTH_LONG).show()
                     showProvisionDialog(server, dir)
                 }
             }
@@ -682,13 +682,13 @@ class CreateServerActivity : AppCompatActivity() {
 
     private fun showProvisionDialog(server: Server, dir: File) {
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ Minecraft")
-            .setMessage("Р—Р°РІР°РЅС‚Р°Р¶РёС‚Рё ${server.config.minecraftLoader} ${server.config.minecraftVersion} Р·Р°СЂР°Р·?\n(~50-100 MB)\n\nРњРѕР¶РЅР° РїСЂРѕРїСѓСЃС‚РёС‚Рё - Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РІС–РґР±СѓРґРµС‚СЊСЃСЏ РїСЂРё РїРµСЂС€РѕРјСѓ Start.")
-            .setPositiveButton("Р—Р°РІР°РЅС‚Р°Р¶РёС‚Рё") { d, _ ->
+            .setTitle("Downloading Minecraft")
+            .setMessage("Download ${server.config.minecraftLoader} ${server.config.minecraftVersion} now?\n(~50-100 MB)\n\nYou may skip - download happens on first Start.")
+            .setPositiveButton("Download") { d, _ ->
                 d.dismiss()
                 startProvisioning(server, dir)
             }
-            .setNegativeButton("РџС–Р·РЅС–С€Рµ") { d, _ ->
+            .setNegativeButton("Later") { d, _ ->
                 d.dismiss()
                 finish()
             }
@@ -699,8 +699,8 @@ class CreateServerActivity : AppCompatActivity() {
 
     private fun startProvisioning(server: Server, dir: File) {
         val progressDialog = AlertDialog.Builder(this)
-            .setTitle("Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ...")
-            .setMessage("РџС–РґРіРѕС‚РѕРІРєР° Minecraft СЃРµСЂРІРµСЂСѓ...\n${server.config.minecraftLoader} ${server.config.minecraftVersion}")
+            .setTitle("Downloading...")
+            .setMessage("Preparing Minecraft server...\n${server.config.minecraftLoader} ${server.config.minecraftVersion}")
             .setCancelable(false)
             .create()
         progressDialog.show()
@@ -715,21 +715,21 @@ class CreateServerActivity : AppCompatActivity() {
                     runOnUiThread { progressDialog.setMessage(logLines.takeLast(8).joinToString("\n")) }
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { progressDialog.setMessage("РџРѕРјРёР»РєР°: ${e.message}") }
+                withContext(Dispatchers.Main) { progressDialog.setMessage("Error: ${e.message}") }
                 false
             }
             progressDialog.dismiss()
             binding.btnCreate.isEnabled = true
             binding.btnCreate.text = getString(com.pockethost.app.R.string.create_server)
             if (ok) {
-                Snackbar.make(binding.root, "Р“РѕС‚РѕРІРѕ! РќР°С‚РёСЃРЅС–С‚СЊ Start РґР»СЏ Р·Р°РїСѓСЃРєСѓ.", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Ready! Press Start to launch.", Snackbar.LENGTH_LONG).show()
                 kotlinx.coroutines.delay(1200)
                 finish()
             } else {
-                val details = if (logLines.isNotEmpty()) logLines.takeLast(10).joinToString("\n") else lastMsg.ifEmpty { "РЅРµРІС–РґРѕРјР° РїРѕРјРёР»РєР°" }
+                val details = if (logLines.isNotEmpty()) logLines.takeLast(10).joinToString("\n") else lastMsg.ifEmpty { "unknown error" }
                 AlertDialog.Builder(this@CreateServerActivity)
-                    .setTitle("РџРѕРјРёР»РєР° Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ")
-                    .setMessage("РќРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё jar.\n\nР”РµС‚Р°Р»С–:\n$details\n\nРЇРєС‰Рѕ С–РЅС‚РµСЂРЅРµС‚ СѓРІС–РјРєРЅРµРЅРёР№ - СЃРїСЂРѕР±СѓР№ VANILLA/PURPUR/FABRIC Р·Р°РјС–СЃС‚СЊ PAPER, Р°Р±Рѕ РїРѕРєР»Р°РґРё jar РІСЂСѓС‡РЅСѓ С‡РµСЂРµР· Files.")
+                    .setTitle("Download error")
+                    .setMessage("Failed to download jar.\n\nDetails:\n$details\n\nWith internet on - try VANILLA/PURPUR/FABRIC instead of PAPER, or drop the jar manually via Files.")
                     .setPositiveButton("OK") { _, _ -> finish() }
                     .show()
             }
@@ -771,7 +771,7 @@ class CreateServerActivity : AppCompatActivity() {
         )
         lifecycleScope.launch {
             repository.createServer(server)
-            Snackbar.make(binding.root, "РЎРµСЂРІРµСЂ СЃС‚РІРѕСЂРµРЅРѕ Сѓ ${storageShortName(selectedStorage)} СЃС…РѕРІРёС‰С– (РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»)", Snackbar.LENGTH_SHORT).show()
+            Snackbar.make(binding.root, "Server created in ${storageShortName(selectedStorage)} storage (built-in terminal)", Snackbar.LENGTH_SHORT).show()
             finish()
         }
     }

@@ -5,9 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <!-- Р”РѕРІС–Р»СЊРЅР° РїР°РїРєР° СЃРµСЂРІРµСЂР° (РѕРїС†С–Р№РЅРѕ, Р»РёС€Рµ Р·Р° РІРёР±РѕСЂРѕРј РєРѕСЂРёСЃС‚СѓРІР°С‡Р°):
-         РЅР° Android 11+ РїРѕС‚СЂС–Р±РµРЅ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ (СЃРёСЃС‚РµРјРЅС– РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏ),
-         РЅР° СЃС‚Р°СЂС–С€РёС… вЂ” РєР»Р°СЃРёС‡РЅРёР№ WRITE_EXTERNAL_STORAGE. -->
+    <!-- Custom server folder (optional, only by user choice):
+         on Android 11+ needs all-files access (system settings),
+         on older versions the classic WRITE_EXTERNAL_STORAGE. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
@@ -17,9 +17,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р·РѕРІРЅС–С€РЅС–Р№ Termux Р±С–Р»СЊС€Рµ РЅРµ РїРѕС‚СЂС–Р±РµРЅ,
-         РґРѕР·РІС–Р» com.termux.permission.RUN_COMMAND РїСЂРёР±СЂР°РЅРѕ С‰РѕР± СЃРёСЃС‚РµРјР°
-         РЅРµ РїСЂРѕСЃРёР»Р° "РєРµСЂСѓРІР°РЅРЅСЏ / РІРІС–Рґ РєРѕРјР°РЅРґ РІ Termux". -->
+    <!-- Built-in terminal: external Termux is no longer needed,
+         com.termux.permission.RUN_COMMAND removed so the system
+         never asks for "control / command input in Termux". -->
 
     <application
         android:name=".PocketHostApplication"
@@ -78,8 +78,8 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Legacy Termux callback, Р»РёС€РµРЅРѕ РґР»СЏ СЃСѓРјС–СЃРЅРѕСЃС‚С– СЃС‚Р°СЂРёС… РІСЃС‚Р°РЅРѕРІР»РµРЅСЊ.
-             РќРµ РІРёРјР°РіР°С” RUN_COMMAND, РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ РІР±СѓРґРѕРІР°РЅРёРј С‚РµСЂРјС–РЅР°Р»РѕРј. -->
+        <!-- Legacy Termux callback, kept for compatibility with old installs.
+             Does not require RUN_COMMAND, not used by the built-in terminal. -->
         <service
             android:name=".termux.TermuxResultsService"
             android:enabled="true"

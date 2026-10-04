@@ -160,7 +160,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:layout_margin="16dp"
-        android:text="Вибрати цю папку"
+        android:text="Select this folder"
         android:visibility="gone"
         style="@style/PocketHost.Button.Primary" />
 

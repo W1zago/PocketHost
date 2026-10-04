@@ -14,7 +14,7 @@ object MinecraftProvisioner {
         log: (String) -> Unit
     ): Boolean {
         if (server.type != ServerType.MINECRAFT) return true
-        // Default 1.20.4: РІР±СѓРґРѕРІР°РЅРёР№ JRE17 Р·Р°РїСѓСЃРєР°С” Р»РёС€Рµ Minecraft <=1.20.4.
+        // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4.
         val version = server.config.minecraftVersion ?: "1.20.4"
         val loader = server.config.minecraftLoader
         val maxMem = server.config.maxMemory

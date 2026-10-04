@@ -38,10 +38,10 @@ class FileAdapter(
                 fileName.text = file.name
 
                 if (file.isDirectory) {
-                    fileIcon.text = "рџ“Ѓ"
+                    fileIcon.text = "📁"
                     fileSize.text = "${file.listFiles()?.size ?: 0} items"
                 } else {
-                    fileIcon.text = "рџ“„"
+                    fileIcon.text = "📄"
                     fileSize.text = FileUtils.formatFileSize(file.length())
                 }
 

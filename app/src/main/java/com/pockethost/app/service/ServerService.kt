@@ -41,23 +41,23 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Р’Р±СѓРґРѕРІР°РЅРёР№ СЃРµСЂРІС–СЃ Р·Р°РїСѓСЃРєСѓ СЃРµСЂРІРµСЂС–РІ.
- * Р‘Р•Р— Р·РѕРІРЅС–С€РЅСЊРѕРіРѕ Termux, Р‘Р•Р— RUN_COMMAND, Р‘Р•Р— SAF.
- * Р’СЃРµ РІРёРєРѕРЅСѓС”С‚СЊСЃСЏ РІ РїСЂРёРІР°С‚РЅС–Р№ РїР°РїС†С– РґРѕРґР°С‚РєСѓ С‡РµСЂРµР· EmbeddedProcessManager.
+ * Built-in server launch service.
+ * WITHOUT external Termux, WITHOUT RUN_COMMAND, WITHOUT SAF.
+ * Everything runs in the app private dir via EmbeddedProcessManager.
  */
 class ServerService : Service() {
 
     private val binder = ServerBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val startMutex = Mutex()
-    // РљРµС€ СЂРѕР±РѕС‡РёС… РїР°РїРѕРє: Р»РѕРіРё РјР°СЋС‚СЊ РїРёСЃР°С‚РёСЃСЊ Сѓ СЃРїСЂР°РІР¶РЅСЋ РїР°РїРєСѓ СЃРµСЂРІРµСЂР°
-    // (РІРєР»СЋС‡РЅРѕ Р· РєР°СЃС‚РѕРјРЅРѕСЋ), Р° РЅРµ РІРіР°РґСѓРІР°С‚РёСЃСЊ С‡РµСЂРµР· probe.
+    // Cache of work dirs: logs must go to the real server folder
+    // (including custom ones), never guessed via probe.
     private val workDirCache = ConcurrentHashMap<String, File>()
-    // РЎРµСЂРІРµСЂРё С‰Рѕ Р·Р°СЂР°Р· РїСЂРѕС…РѕРґСЏС‚СЊ РґРѕРІРіРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ (jar/JRE) РїРѕР·Р° Р»РѕРєРѕРј.
-    // Р—Р°С…РёС‰РµРЅРѕ startMutex.
+    // Servers currently going through long downloads (jar/JRE) outside the lock.
+    // Guarded by startMutex.
     private val startingIds = mutableSetOf<String>()
-    // РЈРЅС–С„С–РєРѕРІР°РЅРѕ Р· MainActivity/CreateServerActivity: Р±РµР·РїРµС‡РЅРёР№ lazy-РґРѕСЃС‚СѓРї.
-    // Service РЅРµ РјРѕР¶Рµ finish(), С‚РѕРјСѓ fallback вЂ” Р»РѕРєР°Р»СЊРЅРёР№ СЂРµРїРѕР·РёС‚РѕСЂС–Р№.
+    // Unified with MainActivity/CreateServerActivity: safe lazy access.
+    // Service cannot finish(), so fallback is a local repository.
     private val repository by lazy {
         runCatching { PocketHostApplication.serverRepository }.getOrElse { e ->
             Log.e("ServerService", "repo not ready, using fallback", e)
@@ -92,12 +92,12 @@ class ServerService : Service() {
 
     private fun startServer(serverId: String) {
         serviceScope.launch {
-            // 1. РЁРІРёРґРєР° С„Р°Р·Р° РїС–Рґ Р»РѕРєРѕРј: РїРµСЂРµРІС–СЂРєРё + СЂРµР·РµСЂРІ СЃР»РѕС‚Р°, Р±РµР· РјРµСЂРµР¶РµРІРѕРіРѕ I/O.
+            // 1. Fast phase under lock: checks + slot reserve, no network I/O.
             val reservedWorkDir: File? = startMutex.withLock {
                 try {
                     Log.d("ServerService", "startServer embedded $serverId")
                     if (startingIds.contains(serverId)) {
-                        log(serverId, "РЎРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ")
+                        log(serverId, "Server is already launching")
                         return@withLock null
                     }
                     val server = repository.getServer(serverId).first()
@@ -106,17 +106,17 @@ class ServerService : Service() {
                         return@withLock null
                     }
                     if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) {
-                        log(serverId, "РЎРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓС‰РµРЅРёР№")
+                        log(serverId, "Server already running")
                         return@withLock null
                     }
                     if (EmbeddedProcessManager.runningCount() >= EmbeddedProcessManager.MAX_SERVERS) {
-                        log(serverId, "Р—СѓРїРёРЅРё РїРµСЂС€РёР№ СЃРµСЂРІРµСЂ (РјР°РєСЃРёРјСѓРј ${EmbeddedProcessManager.MAX_SERVERS})")
-                        // РЅРµ Р±Р»РѕРєСѓС”РјРѕ РјКјСЋС‚РµРєСЃ РЅР° persist
+                        log(serverId, "Stop the first server (max ${EmbeddedProcessManager.MAX_SERVERS})")
+                        // never block the mutex on persist
                         serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.ERROR) }
                         return@withLock null
                     }
-                    // C4: 1 JVM РЅР° РїСЂРѕС†РµСЃ вЂ” РґСЂСѓРіРёР№ Minecraft Р· С–РЅС€РёРј classpath РЅРµ СЃС‚Р°СЂС‚СѓС”.
-                    // Р§РµСЃРЅР° РІС–РґРјРѕРІР° Р·Р°РјС–СЃС‚СЊ РјРѕРІС‡Р°Р·РЅРѕРіРѕ FAILED_DEFINITIVE РіР»РёР±РѕРєРѕ РІ InProcessServer.
+                    // C4: 1 JVM per process - second Minecraft with another classpath will not start.
+                    // Honest refusal instead of a silent FAILED_DEFINITIVE deep in InProcessServer.
                     if (server.type == ServerType.MINECRAFT) {
                         val (canStart, reason) = try {
                             EmbeddedProcessManager.canStartMinecraft(serverId)
@@ -134,9 +134,9 @@ class ServerService : Service() {
                         }
                     }
                     if (EmbeddedProcessManager.isRunning(serverId)) {
-                        log(serverId, "РЎРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓС‰РµРЅРёР№")
-                        // FAIL 17:44: reserve РјРѕРІС‡РєРё Р±Р»РѕРєСѓРІР°РІ СЂРµСЃС‚Р°СЂС‚ ("РЎРµСЂРІРµСЂ РІР¶Рµ
-                        // Р·Р°РїСѓС‰РµРЅРёР№", РїРѕСЂС‚ РїРѕСЂРѕР¶РЅС–Р№). Р¤Р°РєС‚Рё РІ logcat РїРѕРєР°Р·СѓСЋС‚СЊ С‡РѕРјСѓ.
+                        log(serverId, "Server already running")
+                        // FAIL 17:44: silent reserve blocked restart ("Server already
+                        // running", port idle). Facts in logcat show why.
                         try {
                             Log.i(
                                 "ServerService",
@@ -146,7 +146,7 @@ class ServerService : Service() {
                         return@withLock null
                     }
                     startingIds.add(serverId)
-                    // СЃС‚Р°С‚СѓСЃ STARTING РІРёСЃС‚Р°РІР»СЏС”РјРѕ РѕРґСЂР°Р·Сѓ С‰РѕР± UI РІС–РґСЂРµР°РіСѓРІР°РІ
+                    // STARTING status is set at once so UI reacts
                     serviceScope.launch { repository.updateServerStatus(serverId, ServerStatus.STARTING) }
 
                     val workDir = EmbeddedPaths.resolveWorkDir(
@@ -162,16 +162,16 @@ class ServerService : Service() {
             }
             if (reservedWorkDir == null) return@launch
 
-            // 2. Р”РѕРІРіР° С„Р°Р·Р° РџРћР—Рђ Р»РѕРєРѕРј: С„Р°Р№Р»Рё, Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ jar/JRE, Р·Р°РїСѓСЃРє РїСЂРѕС†РµСЃСѓ.
+            // 2. Slow phase OUTSIDE the lock: files, jar/JRE downloads, process launch.
             try {
                 val server = repository.getServer(serverId).first()
                 if (server == null) {
                     startMutex.withLock { startingIds.remove(serverId) }
                     return@launch
                 }
-                // Р‘Р°Рі A: stale isRunning РїС–СЃР»СЏ РїРѕРїРµСЂРµРґРЅСЊРѕРіРѕ СЃС‚РѕРїР° (Done Р±РµР· Closing)
-                // Р±Р»РѕРєСѓРІР°РІ СЂРµСЃС‚Р°СЂС‚ РІ С‚РѕРјСѓ Р¶ РїСЂРѕС†РµСЃС–. Р¤Р°РєС‚Рё РІР¶Рµ РІРёРїСЂР°РІР»РµРЅС– РІ
-                // InProcessServer (СЃРІС–Р¶РёР№ Done + РїРѕСЂС‚-first), С‚СѓС‚ Р»РёС€Рµ РґС–Р°РіРЅРѕСЃС‚РёРєР°.
+                // Bug A: stale isRunning after a previous stop (Done without Closing)
+                // blocked restart in the same process. Facts are already fixed in
+                // InProcessServer (fresh Done + port-first), here only diagnostics.
                 try {
                     val alive = EmbeddedProcessManager.isRunning(serverId) ||
                         InProcessServer.isRunning(serverId)
@@ -187,21 +187,21 @@ class ServerService : Service() {
                 workDirCache[serverId] = reservedWorkDir
                 EmbeddedBootstrap.ensureServerDirReady(reservedWorkDir)
 
-                // РЎС…РѕРІРёС‰Рµ РјРѕРіР»Рё РІС‚СЂР°С‚РёС‚Рё РїС–СЃР»СЏ СЃС‚РІРѕСЂРµРЅРЅСЏ СЃРµСЂРІРµСЂР° (РІРёС‚СЏРіРЅСѓС‚Р° SD,
-                // РІС–РґРєР»РёРєР°РЅРёР№ РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІ). РЎС‚Р°СЂС‚СѓРІР°С‚Рё РІ С‡СѓР¶С–Р№/РїСѓСЃС‚С–Р№
-                // РїР°РїС†С– РЅРµ РјРѕР¶РЅР° вЂ” С‡РµСЃРЅРѕ РІС–РґРјРѕРІР»СЏС”РјРѕ.
+                // Storage may vanish after server creation (ejected SD,
+                // revoked all-files access). Never start in a foreign/empty
+                // folder - refuse honestly.
                 val storedUri = server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
                 when (EmbeddedPaths.kindOfUri(storedUri)) {
                     EmbeddedPaths.StorageKind.EXTERNAL -> {
                         if (!EmbeddedPaths.isExternalStorageAvailable(this@ServerService)) {
-                            log(serverId, "ERROR: Р·РѕРІРЅС–С€РЅС” СЃС…РѕРІРёС‰Рµ РЅРµРґРѕСЃС‚СѓРїРЅРµ (РІРёС‚СЏРіРЅСѓС‚Р° SD-РєР°СЂС‚Р°?). Р’СЃС‚Р°РІ РєР°СЂС‚Сѓ Р°Р±Рѕ РїРµСЂРµРЅРµСЃРё СЃРµСЂРІРµСЂ Сѓ РІРЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ.")
+                            log(serverId, "ERROR: external storage unavailable (ejected SD card?). Insert it or move the server to internal storage.")
                             repository.updateServerStatus(serverId, ServerStatus.ERROR)
                             return@launch
                         }
                     }
                     EmbeddedPaths.StorageKind.CUSTOM -> {
                         if (!EmbeddedPaths.hasAllFilesAccess(this@ServerService)) {
-                            log(serverId, "ERROR: РЅРµРјР° РґРѕСЃС‚СѓРїСѓ РґРѕ РїР°РїРєРё СЃРµСЂРІРµСЂР°. РќР°РґР°Р№ В«РґРѕСЃС‚СѓРї РґРѕ РІСЃС–С… С„Р°Р№Р»С–РІВ» Сѓ СЃРёСЃС‚РµРјРЅРёС… РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏС… С– СЃРїСЂРѕР±СѓР№ С‰Рµ СЂР°Р·.")
+                            log(serverId, "ERROR: no access to the server folder. Grant 'all files access' in system settings and retry.")
                             repository.updateServerStatus(serverId, ServerStatus.ERROR)
                             return@launch
                         }
@@ -209,19 +209,19 @@ class ServerService : Service() {
                     else -> {}
                 }
                 if (!EmbeddedPaths.isDirWritable(reservedWorkDir)) {
-                    log(serverId, "ERROR: РїР°РїРєР° РЅРµРґРѕСЃС‚СѓРїРЅР° РґР»СЏ Р·Р°РїРёСЃСѓ: ${reservedWorkDir.absolutePath}")
+                    log(serverId, "ERROR: folder not writable: ${reservedWorkDir.absolutePath}")
                     repository.updateServerStatus(serverId, ServerStatus.ERROR)
                     return@launch
                 }
 
-                log(serverId, "Р—Р°РїСѓСЃРє СЃРµСЂРІРµСЂР° (РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»)...")
-                log(serverId, "РЎРµСЂРІРµСЂ: ${server.name} type=${server.type} port=${server.port}")
-                log(serverId, "РџР°РїРєР°: ${reservedWorkDir.absolutePath}")
+                log(serverId, "Starting server (built-in terminal)...")
+                log(serverId, "Server: ${server.name} type=${server.type} port=${server.port}")
+                log(serverId, "Folder: ${reservedWorkDir.absolutePath}")
 
                 try {
                     val stat = StatFs(reservedWorkDir.absolutePath)
                     if (stat.availableBytes < 512L * 1024 * 1024) {
-                        log(serverId, "РџРѕРїРµСЂРµРґР¶РµРЅРЅСЏ: РјР°Р»Рѕ РјС–СЃС†СЏ <512MB")
+                        log(serverId, "Warning: low space <512MB")
                     }
                 } catch (_: Exception) {}
 
@@ -242,10 +242,10 @@ class ServerService : Service() {
     private suspend fun startMinecraft(serverId: String, workDir: File) {
         val server = repository.getServer(serverId).first() ?: return
 
-        // eula + properties Сѓ РІРЅСѓС‚СЂС–С€РЅС–Р№ РїР°РїС†С–.
-        // online-mode / view-distance Р±РµСЂРµРјРѕ Р·С– Р·Р±РµСЂРµР¶РµРЅРѕРіРѕ РєРѕРЅС„С–РіСѓ РџР Р РљРћР–РќРћРњРЈ
-        // СЃС‚Р°СЂС‚С– (РїР°С‚С‡РёРјРѕ С–СЃРЅСѓСЋС‡РёР№ С„Р°Р№Р», СЂРµС€С‚Сѓ РєР»СЋС‡С–РІ РЅРµ С‡С–РїР°С”РјРѕ) вЂ” С‚Р°Рє РїРѕРІР·СѓРЅРєРё
-        // РїСЂР°С†СЋСЋС‚СЊ С– РґР»СЏ СЃРµСЂРІРµСЂС–РІ, СЃС‚РІРѕСЂРµРЅРёС… РґРѕ С—С… РїРѕСЏРІРё.
+        // eula + properties in the internal folder.
+        // online-mode / view-distance are taken from the saved config ON EVERY
+        // start (patch the existing file, never touch other keys) - so sliders
+        // work for servers created before they existed.
         try {
             val eula = File(workDir, "eula.txt")
             if (!eula.exists()) eula.writeText("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://account.mojang.com/documents/minecraft_eula).\neula=true")
@@ -258,23 +258,23 @@ class ServerService : Service() {
             )
         } catch (_: Exception) {}
 
-        // Provision jar Сѓ РІРЅСѓС‚СЂС–С€РЅСЋ РїР°РїРєСѓ (Р·РІРёС‡Р°Р№РЅРёР№ File I/O, Р±РµР· SAF)
-        // Default 1.20.4: РІР±СѓРґРѕРІР°РЅРёР№ JRE17 Р·Р°РїСѓСЃРєР°С” Р»РёС€Рµ Minecraft <=1.20.4
-        // (1.20.5+ РїРѕС‚СЂРµР±СѓС” Java 21 вЂ” РґРёРІ. advisory РЅРёР¶С‡Рµ).
+        // Provision jar into the internal folder (plain File I/O, no SAF)
+        // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4
+        // (1.20.5+ needs Java 21 - see advisory below).
         val version = server.config.minecraftVersion ?: "1.20.4"
         val loader = server.config.minecraftLoader
         if (EmbeddedJava.minJavaForMinecraft(version) > 17) {
-            log(serverId, "РЈР’РђР“Рђ: $version РїРѕС‚СЂРµР±СѓС” Java 21+, Р° РІР±СѓРґРѕРІР°РЅРёР№ JRE вЂ” Java 17. РЎС‚Р°СЂС‚ С€РІРёРґС€Рµ Р·Р° РІСЃРµ РЅРµ РІРґР°СЃС‚СЊСЃСЏ; СЂРµРєРѕРјРµРЅРґРѕРІР°РЅРѕ 1.20.4 (Р°Р±Рѕ С–РјРїРѕСЂС‚СѓР№ JRE 21 РІСЂСѓС‡РЅСѓ РІ tools/jre21/ С‡РµСЂРµР· Files).")
+            log(serverId, "WARNING: $version needs Java 21+, but bundled JRE is Java 17. Start will fail anyway; 1.20.4 recommended (or import JRE 21 manually into tools/jre21/ via Files).")
         }
-        // Р—Р°Р№РЅСЏС‚РёР№ РїРѕСЂС‚: СЏРєС‰Рѕ С†Рµ РќРђРЁ Р¶РёРІРёР№ СЃРµСЂРІРµСЂ вЂ” no-op, С–РЅР°РєС€Рµ ERROR.
-        // Р‘РµР· С†СЊРѕРіРѕ РїРѕРІС‚РѕСЂРЅРёР№ Start Р·Р°РїСѓСЃРєР°РІ РґСЂСѓРіРёР№ Paper РїРѕРІРµСЂС… Р·Р°Р»РѕС‡РµРЅРѕРіРѕ
-        // СЃРІС–С‚Сѓ -> OverlappingFileLockException.
+        // Busy port: when it is OUR live server - no-op, otherwise ERROR.
+        // Without this a second Start launched another Paper over a locked
+        // world -> OverlappingFileLockException.
         try {
             if (!NetworkUtils.isPortAvailable(server.port)) {
                 if (EmbeddedProcessManager.isRunning(serverId) ||
                     InProcessServer.isRunning(serverId)
                 ) {
-                    log(serverId, "РЎРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓС‰РµРЅРёР№ (РїРѕСЂС‚ ${server.port} Р·Р°Р№РЅСЏС‚РёР№ РЅРёРј) вЂ” РїРѕРІС‚РѕСЂРЅРёР№ СЃС‚Р°СЂС‚ РїСЂРѕРїСѓС‰РµРЅРѕ")
+                    log(serverId, "Server already running (port ${server.port} busy with it) - duplicate start skipped")
                     try {
                         val cur = repository.getServer(serverId).first()
                         if (cur?.status != ServerStatus.RUNNING) {
@@ -283,7 +283,7 @@ class ServerService : Service() {
                     } catch (_: Exception) {}
                     return
                 }
-                log(serverId, "ERROR: РїРѕСЂС‚ ${server.port} РІР¶Рµ Р·Р°Р№РЅСЏС‚РёР№ С–РЅС€РёРј РїСЂРѕС†РµСЃРѕРј. Р—РјС–РЅРё РїРѕСЂС‚ Сѓ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏС… СЃРµСЂРІРµСЂР°.")
+                log(serverId, "ERROR: port ${server.port} is already busy with another process. Change the port in server settings.")
                 repository.updateServerStatus(serverId, ServerStatus.ERROR)
                 return
             }
@@ -292,11 +292,11 @@ class ServerService : Service() {
         val foundBefore = EmbeddedProcessManager.findExistingJar(
             workDir, EmbeddedProcessManager.guessJarName(loader?.name)
         )
-        // РќР°СЏРІРЅС–СЃС‚СЊ С„Р°Р№Р»Сѓ в‰  С†С–Р»С–СЃРЅС–СЃС‚СЊ: РѕР±С–СЂРІР°РЅРёР№ jar С‡РёСЃС‚РёРјРѕ С‡РµСЂРµР· provision Р·Р°РЅРѕРІРѕ.
+        // File presence is not integrity: a truncated jar is wiped via re-provision.
         val hasJarBefore = foundBefore != null &&
             MinecraftServerManager.isValidServerJar(File(workDir, foundBefore))
         if (!hasJarBefore) {
-            log(serverId, "Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ ${loader ?: "PAPER"} $version (~50-100 MB)...")
+            log(serverId, "Downloading ${loader ?: "PAPER"} $version (~50-100 MB)...")
             val ok = try {
                 manager.provisionIfNeeded(
                     workDir.absolutePath, version, loader,
@@ -311,18 +311,18 @@ class ServerService : Service() {
                     workDir, EmbeddedProcessManager.guessJarName(loader?.name)
                 ) == null
                 if (stillMissing) {
-                    log(serverId, "ERROR: РЅРµ РІРґР°Р»РѕСЃСЏ Р·Р°РІР°РЅС‚Р°Р¶РёС‚Рё jar. Р’С–РґРєСЂРёР№ Console/Files С‰РѕР± РїРѕР±Р°С‡РёС‚Рё РїСЂРёС‡РёРЅСѓ (HTTP-РєРѕРґ) РІРёС‰Рµ. РЇРєС‰Рѕ С–РЅС‚РµСЂРЅРµС‚ С” - СЃРїСЂРѕР±СѓР№ VANILLA/PURPUR/FABRIC.")
+                    log(serverId, "ERROR: failed to download jar. Open Console/Files for the cause (HTTP code) above. With internet on - try VANILLA/PURPUR/FABRIC.")
                     repository.updateServerStatus(serverId, ServerStatus.ERROR)
                     return
                 }
             }
         }
 
-        // Java Р· РІР±СѓРґРѕРІР°РЅРѕРіРѕ СЃРµСЂРµРґРѕРІРёС‰Р° (Р±РµР· Termux!)
-        log(serverId, "РџРѕС€СѓРє РІР±СѓРґРѕРІР°РЅРѕС— Java...")
+        // Java from the bundled runtime (no Termux!)
+        log(serverId, "Looking for bundled Java...")
         val javaPath = EmbeddedBootstrap.ensureJava(this@ServerService, version) { msg -> log(serverId, msg) }
         if (javaPath == null) {
-            log(serverId, "ERROR: Java РЅРµРґРѕСЃС‚СѓРїРЅР°. Р”РёРІРёСЃСЊ РїСЂРёС‡РёРЅСѓ РІРёС‰Рµ (HTTP-РєРѕРґ). Р”РµС‚Р°Р»С– РІ Console.")
+            log(serverId, "ERROR: Java unavailable. See the cause above (HTTP code). Details in Console.")
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
@@ -330,18 +330,18 @@ class ServerService : Service() {
         val preferred = EmbeddedProcessManager.guessJarName(loader?.name)
         val jar = EmbeddedProcessManager.findExistingJar(workDir, preferred)
         if (jar == null) {
-            log(serverId, "ERROR: jar РЅРµ Р·РЅР°Р№РґРµРЅРѕ РІ ${workDir.absolutePath}")
+            log(serverId, "ERROR: jar not found in ${workDir.absolutePath}")
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
 
-        // W^X: РїСЂСЏРјРёР№ exec Р· РїР°РїРєРё РґРѕРґР°С‚РєСѓ Р·Р°Р±РѕСЂРѕРЅРµРЅРёР№ РїРѕР»С–С‚РёРєРѕСЋ Android РґР»СЏ
-        // targetSdk 29+ (error=13). РћСЃРЅРѕРІРЅРёР№ С€Р»СЏС… вЂ” in-process JVM СЏРє Сѓ MojoLauncher
-        // (dlopen libjvm.so + JNI_CreateJavaVM, Р±РµР· exec РІР·Р°РіР°Р»С–).
-        // Legacy exec С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ Р»РёС€РµРЅРѕ СЏРє fallback РґР»СЏ retryable-РїРѕРјРёР»РѕРє.
+        // W^X: direct exec from the app dir is banned by Android policy for
+        // targetSdk 29+ (error=13). Main path is in-process JVM like in MojoLauncher
+        // (dlopen libjvm.so + JNI_CreateJavaVM, no exec at all).
+        // Legacy exec via system linker stays only as fallback for retryable failures.
         val jarFile = File(workDir, jar)
         val inProcessResult = try {
-            log(serverId, "РЎС‚Р°СЂС‚ in-process JVM (Mojo-РїС–РґС…С–Рґ, Р±РµР· exec)...")
+            log(serverId, "Starting in-process JVM (Mojo approach, no exec)...")
             InProcessServer.start(
                 this@ServerService, serverId, jarFile, workDir,
                 server.config.maxMemory, server.config.minMemory,
@@ -352,13 +352,13 @@ class ServerService : Service() {
             )
         } catch (e: Exception) {
             Log.e("ServerService", "in-process start failed, fallback to exec", e)
-            log(serverId, "In-process СЃС‚Р°СЂС‚ РЅРµ РІРґР°РІСЃСЏ (${e.message}), РїСЂРѕР±СѓСЋ legacy exec...")
+            log(serverId, "In-process start failed (${e.message}), trying legacy exec...")
             InProcessServer.StartResult.FAILED_RETRYABLE
         }
         if (inProcessResult == InProcessServer.StartResult.ALREADY_RUNNING) {
-            // No-op: Р¶РёРІРёР№ СЃРµСЂРІРµСЂ РІР¶Рµ С” (Paperclip main РїРѕРІРµСЂРЅСѓРІСЃСЏ, Р°Р»Рµ С„Р°РєС‚Рё
-            // Р¶РёРІС–). РЎС‚Р°С‚СѓСЃ Р»РёС€Р°С”С‚СЊСЃСЏ RUNNING, РґСЂСѓРіРёР№ Paper РЅРµ СЃС‚Р°СЂС‚СѓС”РјРѕ.
-            log(serverId, "РЎРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓС‰РµРЅРёР№ вЂ” РїРѕРІС‚РѕСЂРЅРёР№ СЃС‚Р°СЂС‚ РїСЂРѕРїСѓС‰РµРЅРѕ")
+            // No-op: live server already there (Paperclip main returned, but facts
+            // alive). Status stays RUNNING, second Paper is not started.
+            log(serverId, "Server already running - duplicate start skipped")
             try {
                 val cur = repository.getServer(serverId).first()
                 if (cur?.status != ServerStatus.RUNNING) {
@@ -371,20 +371,20 @@ class ServerService : Service() {
         if (inProcessResult == InProcessServer.StartResult.STARTED) {
             repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
             repository.updateServerStatus(serverId, ServerStatus.RUNNING)
-            log(serverId, "РЎРµСЂРІРµСЂ Р·Р°РїСѓС‰РµРЅРѕ (in-process JVM) jar=$jar")
+            log(serverId, "Server started (in-process JVM) jar=$jar")
             startLivenessPoll(serverId)
-            // РЁРІРёРґРєРёР№ РєСЂР°С… (РЅРµСЃСѓРјС–СЃРЅР° Java, РєСЂРёРІРёР№ СЃРІС–С‚, РїРѕРІС‚РѕСЂРЅРёР№ Р±С–РЅРґ РїРѕСЂС‚Сѓ):
-            // РЅРµ РІРёСЃС–С‚Рё РІ RUNNING вЂ” РїСЂРёС‡РёРЅР° РІР¶Рµ РІ Р»РѕРіСѓ РІРёС‰Рµ, С„С–РєСЃСѓС”РјРѕ ERROR.
-            // Paperclip-РІС–РєРЅРѕ РІСЂР°С…РѕРІР°РЅРѕ: isRunning() С‚РµРїРµСЂ С„Р°РєС‚Рё-Р·Р°Р»РµР¶РЅРёР№
-            // (РїРѕСЂС‚ + Done-РјР°СЂРєРµСЂ), С‚РѕР¶ Р¶РёРІРёР№ СЃРµСЂРІРµСЂ СЃСЋРґРё РЅРµ РїРѕС‚СЂР°РїРёС‚СЊ.
-            // Р—Р°С‚СЂРёРјРєСѓ Р·Р±С–Р»СЊС€РµРЅРѕ РґРѕ 15СЃ вЂ” РїРѕРІС–Р»СЊРЅС– С‚РµР»РµС„РѕРЅРё РґРѕРІРіРѕ РІР°РЅС‚Р°Р¶Р°С‚СЊ СЃРІС–С‚.
+            // Fast crash (bad Java, broken world, repeated port bind):
+            // do not hang in RUNNING - cause is already in the log above, pin ERROR.
+            // Paperclip window accounted: isRunning() is now facts-based
+            // (port + Done marker), so a live server never lands here.
+            // Delay raised to 15s - slow phones load the world long.
             serviceScope.launch {
                 delay(15000)
                 try {
                     val s = repository.getServer(serverId).first()
                     if (s?.status == ServerStatus.RUNNING && !EmbeddedProcessManager.isRunning(serverId)) {
-                        // РџРѕРґРІС–Р№РЅР° РїРµСЂРµРІС–СЂРєР° С„Р°РєС‚С–РІ РїРµСЂРµРґ ERROR: РїРѕСЂС‚ Р°Р±Рѕ Done
-                        // РѕР·РЅР°С‡Р°СЋС‚СЊ "Р¶РёРІРёР№, РїСЂРѕСЃС‚Рѕ РїРѕРІС–Р»СЊРЅРёР№ СЃС‚Р°СЂС‚".
+                        // Double-check facts before ERROR: port or Done
+                        // mean "alive, just a slow start".
                         var looksAlive = false
                         try {
                             if (!NetworkUtils.isPortAvailable(server.port)) {
@@ -407,9 +407,9 @@ class ServerService : Service() {
                                             tot += r
                                         }
                                         val tail = String(buf, 0, tot)
-                                        // Р‘Р°Рі A: С‚С–Р»СЊРєРё РЎР’Р†Р–РР™ Done (РїС–СЃР»СЏ РѕСЃС‚Р°РЅРЅСЊРѕРіРѕ
-                                        // Closing/stop/СЃРјРµСЂС‚С–), С–РЅР°РєС€Рµ stale Done
-                                        // РїРѕРїРµСЂРµРґРЅСЊРѕРіРѕ Р±СѓС‚Р° РјР°СЃРєСѓС” РєСЂР°С… СЏРє "Р¶РёРІРёР№".
+                                        // Bug A: only a FRESH Done (after the last
+                                        // Closing/stop/death), otherwise a stale Done
+                                        // of the previous boot masks a crash as "alive".
                                         val donePos = tail.lastIndexOf("Done (")
                                         fun lastOf(vararg ms: String): Int {
                                             var b = -1
@@ -423,10 +423,10 @@ class ServerService : Service() {
                                             "Stopping the server", "Stopping server",
                                             "Saving worlds", "All dimensions are saved",
                                             "Closing Server", "Server stopped",
-                                            "[Р·СѓРїРёРЅРµРЅРѕ РєРѕСЂРёСЃС‚СѓРІР°С‡РµРј]",
-                                            "[РѕС‡С–РєСѓРІР°РЅРЅСЏ СЃРµСЂРІРµСЂР° Р·Р°РІРµСЂС€РµРЅРѕ"
+                                            "[stopped by user]",
+                                            "[server wait finished"
                                         )
-                                        val deathPos = tail.lastIndexOf("[РїСЂРѕС†РµСЃ Р·Р°РІРµСЂС€РµРЅРѕ")
+                                        val deathPos = tail.lastIndexOf("[process exited")
                                         if (donePos >= 0 && donePos > stopPos && donePos > deathPos &&
                                             tail.indexOf("For help, type", donePos) > stopPos
                                         ) {
@@ -447,9 +447,9 @@ class ServerService : Service() {
                             } catch (_: Exception) {}
                         }
                         if (!looksAlive) {
-                            // STOP->START FIX 2026-09-07: С‡РµСЃРЅР° РІС–РґРјРѕРІР° -11 (СЃС‚Р°СЂРёР№
-                            // РїРѕС‚С–Рє С‰Рµ РІРёС…РѕРґРёРІ, РЅРѕРІРёР№ Paper РЅРµ СЃС‚Р°СЂС‚СѓРІР°РІ) вЂ” С†Рµ РЅРµ
-                            // РєСЂР°С…: STOPPED + РїСЂРѕСЃРёРјРѕ СЂРµС‚СЂР°Р№, Р° РЅРµ ERROR.
+                            // STOP->START FIX 2026-09-07: honest refusal -11 (old
+                            // thread still exiting, new Paper never started) is not
+                            // a crash: STOPPED + ask for retry, not ERROR.
                             var sawBusyPrev = false
                             try {
                                 val lf = File(workDir, "server.log")
@@ -464,19 +464,19 @@ class ServerService : Service() {
                                             if (r <= 0) break
                                             t += r
                                         }
-                                        if (String(b, 0, t).contains("РєРѕРґ -11")) sawBusyPrev = true
+                                        if (String(b, 0, t).contains("code -11")) sawBusyPrev = true
                                     }
                                 }
                             } catch (_: Exception) {}
                             if (sawBusyPrev) {
-                                log(serverId, "РџРѕРїРµСЂРµРґРЅС–Р№ РїРѕС‚С–Рє С‰Рµ Р·Р°РІРµСЂС€СѓРІР°РІСЃСЏ вЂ” С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·.")
+                                log(serverId, "Previous thread still finishing - press Start again.")
                                 repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                             } else {
-                                log(serverId, "РЎРµСЂРІРµСЂ Р·Р°РІРµСЂС€РёРІСЃСЏ РѕРґСЂР°Р·Сѓ РїС–СЃР»СЏ СЃС‚Р°СЂС‚Сѓ вЂ” РґРёРІРёСЃСЊ РїСЂРёС‡РёРЅСѓ РІРёС‰Рµ (С‡Р°СЃС‚Рѕ: Р·Р°Р№РЅСЏС‚РёР№ РїРѕСЂС‚ Р°Р±Рѕ РЅРµСЃСѓРјС–СЃРЅР° Java).")
+                                log(serverId, "Server died right after start - see the cause above (often: busy port or bad Java).")
                                 repository.updateServerStatus(serverId, ServerStatus.ERROR)
                             }
                         } else {
-                            log(serverId, "РЎРµСЂРІРµСЂ С‰Рµ СЃС‚Р°СЂС‚СѓС” (РїРѕРІС–Р»СЊРЅРёР№ РїСЂРёСЃС‚СЂС–Р№) вЂ” С‡РµРєР°СЋ РґР°Р»С–...")
+                            log(serverId, "Server still starting (slow device) - waiting...")
                         }
                     }
                 } catch (_: Exception) {}
@@ -484,23 +484,23 @@ class ServerService : Service() {
             return
         }
         if (inProcessResult == InProcessServer.StartResult.FAILED_DEFINITIVE) {
-            // Р‘РёС‚РёР№ jar / СЃС‚Р°СЂР° Java / Р·Р°Р№РЅСЏС‚Р° JVM вЂ” legacy exec РЅРµ РІРёРїСЂР°РІРёС‚СЊ.
+        // Broken jar / old Java / busy JVM - legacy exec cannot fix.
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
 
-        log(serverId, "Fallback: legacy exec С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ...")
+        log(serverId, "Fallback: legacy exec via system linker...")
         val launch = com.pockethost.app.embedded.EmbeddedJava.probeJava(javaPath) { msg -> log(serverId, msg) }
         if (!launch.works) {
-            log(serverId, "ERROR: Java РЅРµ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ РЅС– РЅР°РїСЂСЏРјСѓ, РЅС– С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ (РґРµС‚Р°Р»С– РІРёС‰Рµ).")
-            log(serverId, "РџСЂРёС‡РёРЅР° вЂ” Р·Р°Р±РѕСЂРѕРЅР° exec Р· РїР°РїРєРё РґРѕРґР°С‚РєСѓ (Android 10+, targetSdk 29+). Р’Р°СЂС–Р°РЅС‚Рё: СЂСѓС‡РЅРёР№ JRE Р· СЃРёСЃС‚РµРјРЅРёРј java Р°Р±Рѕ Р·Р±С–СЂРєР° Р· targetSdk 28.")
+            log(serverId, "ERROR: Java launches neither directly nor via system linker (details above).")
+            log(serverId, "Cause - exec ban from the app dir (Android 10+, targetSdk 29+). Options: manual JRE with system java, or a targetSdk 28 build.")
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
         if (launch.useLinker) {
-            log(serverId, "Java: ${launch.version} (С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ вЂ” РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє Р·Р°Р±РѕСЂРѕРЅРµРЅРёР№ РїРѕР»С–С‚РёРєРѕСЋ Android)")
+            log(serverId, "Java: ${launch.version} (via system linker - direct launch banned by Android policy)")
         } else {
-            log(serverId, "Java: ${launch.version} (РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє)")
+            log(serverId, "Java: ${launch.version} (direct launch)")
         }
 
         val cmd = EmbeddedProcessManager.buildMinecraftCommand(
@@ -508,30 +508,30 @@ class ServerService : Service() {
             server.config.javaArgs, launch.prefix
         )
         val startEnv = mutableMapOf("MC_PORT" to server.port.toString())
-        // РћС‚РѕС‡РµРЅРЅСЏ, Р· СЏРєРёРј СЃРїСЂР°С†СЋРІР°РІ probe (LD_LIBRARY_PATH/JAVA_HOME РґР»СЏ Р»С–РЅРєРµСЂР°).
+        // Environment the probe worked with (LD_LIBRARY_PATH/JAVA_HOME for linker).
         startEnv.putAll(launch.env)
-        log(serverId, "РЎС‚Р°СЂС‚: java -Xmx${server.config.maxMemory}M -jar $jar nogui")
+        log(serverId, "Start: java -Xmx${server.config.maxMemory}M -jar $jar nogui")
 
         val ok = EmbeddedProcessManager.start(
             this@ServerService, serverId, cmd, workDir,
             startEnv
         )
         if (!ok) {
-            log(serverId, "ERROR: РЅРµ РІРґР°Р»РѕСЃСЏ Р·Р°РїСѓСЃС‚РёС‚Рё РїСЂРѕС†РµСЃ")
+            log(serverId, "ERROR: failed to start process")
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
         repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
         repository.updateServerStatus(serverId, ServerStatus.RUNNING)
-        log(serverId, "РЎРµСЂРІРµСЂ Р·Р°РїСѓС‰РµРЅРѕ (РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р») jar=$jar")
+        log(serverId, "Server started (built-in terminal) jar=$jar")
         startLivenessPoll(serverId)
     }
 
     /**
-     * РЎС‚РІРѕСЂСЋС” server.properties СЏРєС‰Рѕ РЅРµРјР°, С–РЅР°РєС€Рµ С‚РѕС‡РєРѕРІРѕ РѕРЅРѕРІР»СЋС” РєР»СЋС‡С–,
-     * СЏРєРёРјРё РєРµСЂСѓС” UI (online-mode, view-distance, server-port).
-     * Р РµС€С‚Сѓ С„Р°Р№Р»Р° (motd РіСЂР°РІС†СЏ, СЃРёРґ СЃРІС–С‚Сѓ С‚РѕС‰Рѕ) РЅРµ С‡С–РїР°С”.
-     * Р›РѕРіС–РєР° РІРёРЅРµСЃРµРЅР° РІ [com.pockethost.app.util.ServerProperties].
+     * Creates server.properties when missing, otherwise pinpoint-updates keys
+     * controlled by UI (online-mode, view-distance, server-port).
+     * Leaves the rest of the file (player motd, world seed etc) alone.
+     * Logic moved to [com.pockethost.app.util.ServerProperties].
      */
     private fun patchServerProperties(
         workDir: File,
@@ -588,11 +588,11 @@ class ServerService : Service() {
 
     private fun stopServer(serverId: String) {
         serviceScope.launch {
-            // Р’РІС–С‡Р»РёРІРёР№ stop С‡РµСЂРµР· stdin + РѕС‡С–РєСѓРІР°РЅРЅСЏ РџРћР—Рђ Р»РѕРєРѕРј С‰РѕР± РЅРµ Р±Р»РѕРєСѓРІР°С‚Рё start().
-            // In-process СЃРµСЂРІРµСЂСѓ С‚СЂРµР±Р° Р±С–Р»СЊС€Рµ С‡Р°СЃСѓ (Р·Р±РµСЂРµР¶РµРЅРЅСЏ СЃРІС–С‚Сѓ + System.exit
-            // РїР°СЃС‚РєР° + Paperclip-РїР°СЂРєСѓРІР°РЅРЅСЏ), С‚РѕРјСѓ С‡РµРєР°С”РјРѕ РґРѕ 60СЃ.
-            // "stop" С€Р»РµРјРѕ Р·Р° С„Р°РєС‚РѕРј Р¶РёРІРѕРіРѕ JVM (isRunning С„Р°РєС‚Рё-Р·Р°Р»РµР¶РЅРёР№),
-            // С–РЅР°РєС€Рµ РєРѕРЅСЃРѕР»СЊ РІС–РґРјРѕРІР»СЏР»Р° РІ Paperclip-РІС–РєРЅС–.
+            // Polite stop via stdin + waiting OUTSIDE the lock to avoid blocking start().
+            // In-process server needs more time (world save + System.exit
+            // trap + Paperclip parking), so wait up to 60s.
+            // "stop" goes on the fact of a live JVM (isRunning is facts-based),
+            // otherwise the console refused in the Paperclip window.
             val wasRunning = EmbeddedProcessManager.isRunning(serverId)
             if (wasRunning) {
                 try {
@@ -600,20 +600,26 @@ class ServerService : Service() {
                         "ServerService",
                         "stopServer: sending stop to $serverId facts=${InProcessServer.describeFacts()}"
                     )
-                    // FAIL 17:44: phase1 РњРђР„ СЃС‚Р°РІРёС‚Рё stopRequested РѕРґСЂР°Р·Сѓ.
-                    // sendInput("stop") СЃР°Рј С„Р»Р°РіР° РЅРµ СЃС‚Р°РІРёРІ -> 60СЃ stopReq=false,
-                    // РіС–Р»РєР° stopRequested+portFree РјРµСЂС‚РІР°, fast-path С‚СЂРёРјР°РІ alive=true.
+                    // FAIL 17:44: phase1 MUST set stopRequested at once.
+                    // sendInput("stop") alone never sets the flag -> 60s with stopReq=false,
+                    // the stopRequested+portFree branch dead, fast-path held alive=true.
                     try {
                         InProcessServer.requestStop(serverId)
                     } catch (_: Exception) {}
-                    EmbeddedProcessManager.sendInput(serverId, "stop")
+                    val stopCmd = try {
+                        val s = repository.getServer(serverId).first()
+                        if (s?.type == ServerType.UBUNTU_SERVER) "exit" else "stop"
+                    } catch (_: Exception) {
+                        "stop"
+                    }
+                    EmbeddedProcessManager.sendInput(serverId, stopCmd)
                     var waited = 0
                     while (waited < 60000 && EmbeddedProcessManager.isRunning(serverId)) {
                         delay(1000)
                         waited += 1000
-                        // Р”С–Р°РіРЅРѕСЃС‚РёРєР° РєРѕР¶РЅС– 5СЃ (Р‘Р°Рі B + FAIL 17:44): С„Р°РєС‚Рё Р·
-                        // donePos/stopPos С‰РѕР± Observer Р±Р°С‡РёРІ Closing РїС–СЃР»СЏ Done,
-                        // Р° РЅРµ С‚С–Р»СЊРєРё "alive=true".
+                        // Diagnostics every 5s (Bug B + FAIL 17:44): facts from
+                        // donePos/stopPos so Observer sees Closing after Done,
+                        // not just "alive=true".
                         if (waited % 5000 == 0) {
                             try {
                                 Log.i(
@@ -624,7 +630,7 @@ class ServerService : Service() {
                         }
                     }
                     if (EmbeddedProcessManager.isRunning(serverId)) {
-                        log(serverId, "РЎРµСЂРІРµСЂ РЅРµ РІС–РґРїРѕРІС–РІ РЅР° stop Р·Р° 60СЃ вЂ” С‡РµРєР°СЋ РґР°Р»С– Сѓ С„РѕРЅС– (СЃРІС–С‚ РјРѕР¶Рµ Р·Р±РµСЂС–РіР°С‚РёСЃСЊ)")
+                        log(serverId, "Server did not answer stop in 60s - waiting in background (world may be saving)")
                         try {
                             Log.w("ServerService", "stopServer timeout $serverId still alive after 60s")
                         } catch (_: Exception) {}
@@ -639,22 +645,22 @@ class ServerService : Service() {
                 try {
                     Log.d("ServerService", "stopServer embedded $serverId")
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
-                        // РЎСЋРґРё РїРѕС‚СЂР°РїР»СЏС”РјРѕ С– РїС–СЃР»СЏ РІРІС–С‡Р»РёРІРѕРіРѕ СЃС‚РѕРїР° РІ phase1
-                        // (РїРѕСЂС‚ РІС–Р»СЊРЅРёР№ + Closing): С†Рµ СѓСЃРїС–С…, Р° РЅРµ "РЅРµ Р·Р°РїСѓС‰РµРЅРёР№".
+                        // Here we land after a polite stop in phase1 too
+                        // (free port + Closing): success, not "not running".
                         if (wasRunning) {
-                            log(serverId, "РЎРµСЂРІРµСЂ Р·СѓРїРёРЅРµРЅРѕ")
+                            log(serverId, "Server stopped")
                         } else {
-                            log(serverId, "РЎРµСЂРІРµСЂ РЅРµ Р·Р°РїСѓС‰РµРЅРёР№")
+                            log(serverId, "Server not running")
                         }
                         repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                         return@withLock
                     }
                     repository.updateServerStatus(serverId, ServerStatus.STOPPING)
-                    log(serverId, "Р—СѓРїРёРЅРєР° СЃРµСЂРІРµСЂР°...")
+                    log(serverId, "Server stopping...")
                     EmbeddedProcessManager.stop(serverId)
                     repository.updateTermuxExecutionId(serverId, null)
                     repository.updateServerStatus(serverId, ServerStatus.STOPPED)
-                    log(serverId, "РЎРµСЂРІРµСЂ Р·СѓРїРёРЅРµРЅРѕ")
+                    log(serverId, "Server stopped")
                 } catch (e: Exception) {
                     Log.e("ServerService", "stop error", e)
                     log(serverId, "Error stopping: ${e.message}")
@@ -666,7 +672,7 @@ class ServerService : Service() {
     private fun log(serverId: String, message: String) {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val line = "[$timestamp] $message\n"
-        // РїРёС€РµРјРѕ РѕРґСЂР°Р·Сѓ Сѓ С„Р°Р№Р» СЃРїСЂР°РІР¶РЅСЊРѕС— СЂРѕР±РѕС‡РѕС— РїР°РїРєРё (Р±РµР· SAF!)
+        // write straight into the file of the real work folder (no SAF!)
         try {
             val dir = workDirCache[serverId]
                 ?: EmbeddedPaths.lookupServerDir(this@ServerService, serverId)
@@ -697,12 +703,12 @@ class ServerService : Service() {
     }
 
     private fun startLivenessPoll(serverId: String) {
-        // STOP->START FIX 2026-09-07: СЃС‚Р°СЂРёР№ poll РІР±РёРІР°РІ СЃРІС–Р¶РёР№ СЃС‚Р°СЂС‚.
-        // Р”РІР° Р·Р°С…РёСЃС‚Рё: (Р°) stale-poll guard Р·Р° seq вЂ” poll РїРѕРїРµСЂРµРґРЅСЊРѕРіРѕ Р±СѓС‚Р°
-        // РјРѕРІС‡РєРё РІРёС…РѕРґРёС‚СЊ РєРѕР»Рё seq Р·РјС–РЅРёРІСЃСЏ (РЅРѕРІРёР№ Р±СѓС‚ РјРѕРЅС–С‚РѕСЂРёС‚СЊ СЃРІС–Р№ poll);
-        // (Р±) grace 30СЃ вЂ” СЃРІС–Р¶РёР№ Paper РїРёС€Рµ РјР°СЂРєРµСЂРё/Р±РёРЅРґРёС‚СЊ РїРѕСЂС‚ РґРѕ ~30СЃ, Р° РІ
-        // РїРµСЂС€С– СЃРµРєСѓРЅРґРё С„Р°РєС‚С–РІ С‰Рµ РЅРµРјР° (РЅРµРјР° Done/РїРѕСЂС‚Сѓ) вЂ” РЅРµ РІР±РёРІР°С‚Рё.
-        // Р‘РµР· С†СЊРѕРіРѕ: С‚РёС€Р° РЅРѕРІРѕРіРѕ СЃС‚Р°СЂС‚Сѓ 10СЃ -> "РџСЂРѕС†РµСЃ Р·Р°РІРµСЂС€РµРЅРѕ" -> STOPPED.
+        // STOP->START FIX 2026-09-07: old poll killed a fresh start.
+        // Two guards: (a) stale-poll guard by seq - the previous boot poll
+        // silently exits when seq changes (new boot monitors its own poll);
+        // (b) 30s grace - fresh Paper writes markers/binds the port up to ~30s, while
+        // in the first seconds facts do not exist yet (no Done/port) - do not kill.
+        // Without this: silence 10s into a new start -> "Process finished" -> STOPPED.
         val mySeq = try { InProcessServer.currentSeq() } catch (_: Exception) { -1L }
         serviceScope.launch {
             var emptyCount = 0
@@ -720,7 +726,7 @@ class ServerService : Service() {
                         if (ticks <= 6) continue
                         emptyCount++
                         if (emptyCount >= 2) {
-                            log(serverId, "РџСЂРѕС†РµСЃ Р·Р°РІРµСЂС€РµРЅРѕ")
+                            log(serverId, "Process finished")
                             repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                             break
                         }
@@ -737,7 +743,7 @@ class ServerService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, PocketHostApplication.NOTIFICATION_CHANNEL_ID)
             .setContentTitle("PocketHost")
-            .setContentText("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РїСЂР°С†СЋС”")
+            .setContentText("Built-in terminal running")
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -745,8 +751,8 @@ class ServerService : Service() {
     }
 
     override fun onDestroy() {
-        // H6: stopAll Р”Рћ cancel вЂ” Р·СѓРїРёРЅРєР° РїСЂРѕС†РµСЃС–РІ РјР°С” РІСЃС‚РёРіРЅСѓС‚Рё РґРѕРїРёСЃР°С‚Рё Р»РѕРіРё/
-        // РІС–РґРїСЂР°РІРёС‚Рё stop РґРѕ СЃРєР°СЃСѓРІР°РЅРЅСЏ scope (С–РЅР°РєС€Рµ С„РѕРЅРѕРІС– launch РІР±РёРІР°СЋС‚СЊСЃСЏ СЂР°РЅС–С€Рµ).
+        // H6: stopAll BEFORE cancel - process shutdown must finish writing logs/
+        // sending stop before scope cancellation (otherwise background launches die early).
         try { EmbeddedProcessManager.stopAll() } catch (_: Exception) {}
         try { serviceScope.cancel() } catch (_: Exception) {}
         super.onDestroy()

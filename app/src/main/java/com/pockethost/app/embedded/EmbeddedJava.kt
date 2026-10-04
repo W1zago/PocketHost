@@ -6,13 +6,13 @@ import android.util.Log
 import java.io.File
 
 /**
- * РџРѕС€СѓРє Java РІСЃРµСЂРµРґРёРЅС– РґРѕРґР°С‚РєСѓ. Р–РѕРґРЅРёС… Р·РѕРІРЅС–С€РЅС–С… Р·Р°Р»РµР¶РЅРѕСЃС‚РµР№.
+ * Finds Java inside the app. No external dependencies.
  *
- * РџРѕСЂСЏРґРѕРє:
- * 1. filesDir/tools/jre/bin/java (РІР±СѓРґРѕРІР°РЅРёР№ JRE, Р·Р°РІР°РЅС‚Р°Р¶СѓС”С‚СЊСЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ)
+ * Order:
+ * 1. filesDir/tools/jre/bin/java (bundled JRE, auto-downloaded)
  * 2. filesDir/jre/bin/java (legacy)
- * 3. СЃРёСЃС‚РµРјРЅРёР№ java РІ PATH (РґРµСЏРєС– РїСЂРѕС€РёРІРєРё РјР°СЋС‚СЊ)
- * 4. "java" Р· PATH (СЃРїСЂРѕР±Р° Р·Р°РїСѓСЃС‚РёС‚Рё, СЏРєС‰Рѕ СЂР°РїС‚РѕРј С”)
+ * 3. system java in PATH (some firmwares ship one)
+ * 4. "java" from PATH (try to launch if present at all)
  */
 object EmbeddedJava {
 
@@ -21,10 +21,10 @@ object EmbeddedJava {
     fun bundledJreDir(context: Context): File = File(EmbeddedPaths.toolsDir(context), "jre")
 
     /**
-     * Р”С–Рј JRE 21 (РґР»СЏ Minecraft 1.20.5+). РђРІС‚РѕР·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ СЃС‚Р°Р±С–Р»СЊРЅРѕРіРѕ JRE21
-     * РЅРµРјР° (Pojav-СЂРµР»С–Р· Р°СЂС…С–РІРѕРІР°РЅРѕ, JRE21 Р»РёС€Рµ CI-Р°СЂС‚РµС„Р°РєС‚Рё), С‚РѕРјСѓ СЃСЋРґРё
-     * РєРѕСЂРёСЃС‚СѓРІР°С‡ РєР»Р°РґРµ JRE21 РІСЂСѓС‡РЅСѓ С‡РµСЂРµР· Files: tools/jre21/bin/java.
-     * In-process С– prepare РІРёР±РёСЂР°СЋС‚СЊ Р№РѕРіРѕ Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ Р·Р° РІРµСЂСЃС–С”СЋ РіСЂРё.
+     * JRE 21 home (for Minecraft 1.20.5+). No stable JRE21 auto-install
+     * (Pojav release archived, JRE21 only as CI artifacts), so the user
+     * drops JRE21 manually via Files into tools/jre21/bin/java.
+     * In-process and prepare pick it automatically by game version.
      */
     fun bundledJre21Dir(context: Context): File = File(EmbeddedPaths.toolsDir(context), "jre21")
 
@@ -32,7 +32,7 @@ object EmbeddedJava {
 
     fun bundledJava21Binary(context: Context): File = File(bundledJre21Dir(context), "bin/java")
 
-    /** Р”С–Рј JRE Р·Р° С€Р»СЏС…РѕРј РґРѕ bin/java (вЂ¦/jre21/bin/java -> вЂ¦/jre21). null СЏРєС‰Рѕ РЅРµ СЃС…РѕР¶Рµ РЅР° JRE. */
+    /** JRE home from a bin/java path (.../jre21/bin/java -> .../jre21). Null when not JRE-like. */
     fun runtimeHomeFor(javaPath: String?): File? {
         return try {
             if (javaPath.isNullOrEmpty()) return null
@@ -49,28 +49,28 @@ object EmbeddedJava {
             if (!f.exists()) return null
             try { f.setExecutable(true) } catch (_: Exception) {}
             if (f.canExecute()) return f.absolutePath
-            // Р¤Р°Р№Р» С” Р°Р»Рµ exec Р·Р°Р±РѕСЂРѕРЅРµРЅРѕ W^X: РґР»СЏ in-process РІСЃРµ РѕРґРЅРѕ РїСЂРёРґР°С‚РЅРёР№
-            // (libjvm С‡РёС‚Р°С”С‚СЊСЃСЏ С‡РµСЂРµР· dlopen, exec РЅРµ РїРѕС‚СЂС–Р±РµРЅ).
+            // File exists but exec is W^X-denied: still fine for in-process
+            // (libjvm is read via dlopen, exec is not needed).
             if (f.isFile) return f.absolutePath
             null
         } catch (_: Exception) { null }
     }
 
     fun findJava(context: Context): String? {
-        // 1. РІР±СѓРґРѕРІР°РЅРёР№ JRE (СЃРїРѕС‡Р°С‚РєСѓ 21 С‰РѕР± РЅРѕРІРёР№ СЂР°РЅС‚Р°Р№Рј РјР°РІ РїСЂС–РѕСЂРёС‚РµС‚,
-        // СЏРєС‰Рѕ РєРѕСЂРёСЃС‚СѓРІР°С‡ РїРѕРєР»Р°РІ РѕР±РёРґРІР° РІСЂСѓС‡РЅСѓ)
+        // 1. bundled JRE (jre21 first so the new runtime has priority,
+        // if the user dropped both manually)
         try {
             bundledCandidate(bundledJava21Binary(context))?.let { return it }
             val bundled = bundledJavaBinary(context)
             if (bundled.exists() && bundled.canExecute()) return bundled.absolutePath
-            // РјРѕР¶Рµ Р±СѓС‚Рё РЅРµ РІРёСЃС‚Р°РІР»РµРЅРёР№ +x РїС–СЃР»СЏ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ
+            // may lack +x after extraction
             if (bundled.exists()) {
                 try { bundled.setExecutable(true) } catch (_: Exception) {}
                 if (bundled.canExecute()) return bundled.absolutePath
-                // W^X: exec Р·Р°Р±РѕСЂРѕРЅРµРЅРѕ, Р°Р»Рµ in-process (dlopen) РІСЃРµ РѕРґРЅРѕ СЃРїСЂР°С†СЋС”
+                // W^X: exec denied, but in-process (dlopen) still works
                 return bundled.absolutePath
             }
-            // legacy РјС–СЃС†Рµ
+            // legacy location
             val legacy = File(context.filesDir, "jre/bin/java")
             if (legacy.exists()) {
                 try { legacy.setExecutable(true) } catch (_: Exception) {}
@@ -80,18 +80,18 @@ object EmbeddedJava {
             Log.w(TAG, "bundled check failed", e)
         }
 
-        // 2. СЃРёСЃС‚РµРјРЅРёР№ java С‡РµСЂРµР· which
+        // 2. system java via which
         try {
             val proc = ProcessBuilder("sh", "-c", "command -v java").start()
             val out = proc.inputStream.bufferedReader().readText().trim()
             proc.waitFor()
             if (out.isNotEmpty() && out.contains("java")) {
-                // РїРµСЂРµРІС–СЂСЏС”РјРѕ С‰Рѕ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ
+                // verify it actually launches
                 return out.lineSequence().first().trim()
             }
         } catch (_: Exception) {}
 
-        // 3. РІС–РґРѕРјС– СЃРёСЃС‚РµРјРЅС– С€Р»СЏС…Рё (СЂС–РґРєРѕ, Р°Р»Рµ Р±РµР·РєРѕС€С‚РѕРІРЅРѕ РїРµСЂРµРІС–СЂРёС‚Рё)
+        // 3. known system paths (rare, but free to check)
         val systemCandidates = listOf(
             "/system/bin/java",
             "/system/xbin/java",
@@ -108,12 +108,12 @@ object EmbeddedJava {
     fun isJavaAvailable(context: Context): Boolean = findJava(context) != null
 
     /**
-     * Java РїС–Рґ РєРѕРЅРєСЂРµС‚РЅСѓ РІРµСЂСЃС–СЋ Minecraft.
-     * 1.20.5+ (need 21): СЃРїРѕС‡Р°С‚РєСѓ tools/jre21, РїРѕС‚С–Рј Р·РІРёС‡Р°Р№РЅРёР№ РїРѕС€СѓРє
-     * (JRE17 РїРѕРІРµСЂРЅРµС‚СЊСЃСЏ СЏРє fallback вЂ” prepare С‡РµСЃРЅРѕ РІС–РґРјРѕРІРёС‚СЊ Р· Definitive
-     * С– РїС–РґРєР°Р·РєРѕСЋ РїСЂРѕ СЂСѓС‡РЅРёР№ С–РјРїРѕСЂС‚ JRE21, Р·Р°РјС–СЃС‚СЊ РјРѕРІС‡Р°Р·РЅРѕРіРѕ -8).
-     * <=1.20.4: tools/jre21 С‚РµР¶ РїС–РґС–Р№РґРµ (Java 21 Р·Р°РїСѓСЃРєР°С” СЃС‚Р°СЂС– РІРµСЂСЃС–С—),
-     * Р°Р»Рµ РїСЂС–РѕСЂРёС‚РµС‚ Сѓ JRE17 С‰РѕР± РЅРµ Р»Р°РјР°С‚Рё РїРµСЂРµРІС–СЂРµРЅРµ.
+     * Java for a specific Minecraft version.
+     * 1.20.5+ (need 21): tools/jre21 first, then the normal lookup
+     * (JRE17 is returned as fallback - prepare honestly refuses with Definitive
+     * and hints at manual JRE21 import instead of a silent -8).
+     * <=1.20.4: tools/jre21 also fits (Java 21 runs older versions),
+     * but JRE17 keeps priority to avoid breaking verified setups.
      */
     fun findJavaForVersion(context: Context, minecraftVersion: String?): String? {
         val need = try { minJavaForMinecraft(minecraftVersion) } catch (_: Exception) { 17 }
@@ -126,34 +126,34 @@ object EmbeddedJava {
     }
 
     /**
-     * РЎРїРѕСЃС–Р± Р·Р°РїСѓСЃРєСѓ java.
+     * How java is launched.
      *
-     * РџРµСЂРµРґС–СЃС‚РѕСЂС–СЏ: РЅР° Android 10+ Р· targetSdk 29+ СЏРґСЂРѕ Р·Р°Р±РѕСЂРѕРЅСЏС” execve()
-     * С„Р°Р№Р»С–РІ Р· РїР°РїРєРё РґРѕРґР°С‚РєСѓ (W^X, b/112357170) вЂ” РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє РґР°С”
-     * "error=13, Permission denied", С– Р¶РѕРґРµРЅ chmod С†СЊРѕРіРѕ РЅРµ Р»С–РєСѓС”.
-     * РћР±С…С–Рґ (РїР°С‚РµСЂРЅ termux-exec): Р·Р°РїСѓСЃРєР°С‚Рё С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ вЂ”
-     * СЏРґСЂРѕ Р±Р°С‡РёС‚СЊ exec СЃРёСЃС‚РµРјРЅРѕРіРѕ С„Р°Р№Р»Р° (РґРѕР·РІРѕР»РµРЅРѕ), Р° mmap Р±С–РЅР°СЂРЅРёРєР°
-     * РґРѕР·РІРѕР»РµРЅРёР№ С‚Р°Рє СЃР°РјРѕ СЏРє dlopen().
+     * Background: on Android 10+ with targetSdk 29+ the kernel denies execve()
+     * of files from the app dir (W^X, b/112357170) - direct launch fails with
+     * "error=13, Permission denied", and no chmod fixes it.
+     * Workaround (termux-exec pattern): launch via the system linker -
+     * the kernel sees an exec of a system file (allowed), and mmap of the binary
+     * is allowed just like dlopen().
      */
     data class JavaLaunch(
         val javaPath: String,
-        /** РџСЂРµС„С–РєСЃ РєРѕРјР°РЅРґРё, РЅР°РїСЂРёРєР»Р°Рґ ["/system/bin/linker64"]. РџРѕСЂРѕР¶РЅС–Р№ = РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє. */
+        /** Command prefix, e.g. ["/system/bin/linker64"]. Empty = direct launch. */
         val prefix: List<String> = emptyList(),
         val version: String? = null,
-        /** Р”РѕРґР°С‚РєРѕРІРµ РѕС‚РѕС‡РµРЅРЅСЏ (LD_LIBRARY_PATH/JAVA_HOME РґР»СЏ СЂРµР¶РёРјСѓ Р»С–РЅРєРµСЂР°). */
+        /** Extra environment (LD_LIBRARY_PATH/JAVA_HOME for linker mode). */
         val env: Map<String, String> = emptyMap()
     ) {
         val useLinker: Boolean get() = prefix.isNotEmpty()
         val works: Boolean get() = version != null
     }
 
-    /** РЎС…РѕР¶Рµ РЅР° СЃРїСЂР°РІР¶РЅС–Р№ РІРёРІС–Рґ `java -version`, Р° РЅРµ РЅР° РїРѕРјРёР»РєСѓ Р»С–РЅРєРµСЂР°. */
+    /** Looks like a real `java -version` output, not a linker error. */
     private val VERSION_RE = Regex("(?i)\\b(openjdk|java)(\\s+version|\\s+runtime)?\\b[^\\n]*\"?\\d")
 
     private fun looksLikeJavaVersion(line: String?): Boolean =
         line != null && VERSION_RE.containsMatchIn(line)
 
-    /** РЎРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ РїС–Рґ ABI РїСЂРёСЃС‚СЂРѕСЋ (РґР»СЏ РѕР±С…РѕРґСѓ exec-Р·Р°Р±РѕСЂРѕРЅРё). */
+    /** System linker for this ABI (for the exec-ban workaround). */
     fun systemLinker(): String? {
         val abi64 = abi() == "arm64-v8a" || abi() == "x86_64"
         val ordered = if (abi64) {
@@ -169,7 +169,7 @@ object EmbeddedJava {
         }
     }
 
-    /** РџРµСЂС€РёР№ РЅРµРїРѕСЂРѕР¶РЅС–Р№ СЂСЏРґРѕРє РІРёРІРѕРґСѓ РєРѕРјР°РЅРґРё Р°Р±Рѕ null (РЅРµ СЃС‚Р°СЂС‚СѓРІР°Р»Р° / timeout / РїРѕСЂРѕР¶РЅСЊРѕ). */
+    /** First non-empty output line, or null (never started / timeout / empty). */
     private fun runAndFirstLine(
         cmd: List<String>,
         env: Map<String, String> = emptyMap(),
@@ -194,78 +194,78 @@ object EmbeddedJava {
     }
 
     /**
-     * РџРµСЂРµРІС–СЂСЏС” СЏРє СЂРµР°Р»СЊРЅРѕ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ java С– РїС–РґР±РёСЂР°С” СЂРѕР±РѕС‡Сѓ С„РѕСЂРјСѓ РєРѕРјР°РЅРґРё.
-     * P1: РЅР°РїСЂСЏРјСѓ. P2: Р»С–РЅРєРµСЂ + env (С„РѕСЂРјР° СЏРє Сѓ СЃРµСЂРІРµСЂР°, Р°Р»Рµ Р‘Р•Р— -Xmx: РїСЂР°РїРѕСЂРµС†СЊ РєСѓРїРё
-     * РЅС–РєРѕР»Рё РЅРµ РјР°С” СЃС‚РѕСЏС‚Рё РЅР° РјС–СЃС†С– executable вЂ” С–РЅР°РєС€Рµ linker РїР°РґР°С” Р·
-     * `expected absolute path: "-Xmx64M"`). P3: С‚Рµ СЃР°РјРµ Р±РµР· env.
-     * РЈ Р»РѕРі РїРёС€Рµ РєРѕР¶РµРЅ РєСЂРѕРє: РїСЂРёСЃС‚СЂС–Р№ СЃР°Рј РїРѕРєР°Р¶Рµ С‰Рѕ Р№РѕРјСѓ РїС–РґС…РѕРґРёС‚СЊ.
+     * Probes how java actually launches and picks the working command shape.
+     * P1: direct. P2: linker + env (server shape but WITHOUT -Xmx: the heap flag must
+     * never sit where the executable goes - otherwise the linker fails with
+     * `expected absolute path: "-Xmx64M"`). P3: same without env.
+     * Every step is logged: the device itself shows what suits it.
      *
-     * P0 FORK-fix: argv[0] РјР°С” Р±СѓС‚Рё Р°Р±СЃРѕР»СЋС‚РЅРёРј С€Р»СЏС…РѕРј РґРѕ java (РІС–РґРЅРѕСЃРЅРёР№ "java"
-     * Р· PATH РґР°С” `expected absolute path: "-Xmx64M"` вЂ” linker РїСЂРѕРїСѓСЃРєР°С” РЅРµР°Р±СЃРѕР»СЋС‚РЅРёР№
-     * argv[1] С– С‡С–РїР»СЏС”С‚СЊСЃСЏ РґРѕ РЅР°СЃС‚СѓРїРЅРѕРіРѕ). РўРѕРјСѓ РЅРµР°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РѕРґСЂР°Р·Сѓ РІС–РґС…РёР»СЏС”РјРѕ.
-     * РўР°РєРѕР¶ РїРµСЂРµРІС–СЂСЏС”РјРѕ libjli.so РїРµСЂРµРґ exec (С–РЅР°РєС€Рµ `CANNOT LINK EXECUTABLE ...
+     * P0 FORK-fix: argv[0] must be the absolute java path (relative "java"
+     * from PATH yields `expected absolute path: "-Xmx64M"` - the linker skips a non-absolute
+     * argv[1] and grabs the next one). Also checks libjli.so before exec (otherwise
+     * `CANNOT LINK EXECUTABLE ... library "libjli.so" not found`).
      * library "libjli.so" not found`).
      */
     fun probeJava(javaPath: String, log: (String) -> Unit = {}): JavaLaunch {
-        // argv[0] РјСѓСЃРёС‚СЊ Р±СѓС‚Рё Р°Р±СЃРѕР»СЋС‚РЅРёРј вЂ” С–РЅР°РєС€Рµ linker РІС–Р·СЊРјРµ -Xmx Р·Р° executable.
+        // argv[0] must be absolute - otherwise the linker takes -Xmx for the executable.
         if (!File(javaPath).isAbsolute) {
-            log("Java exec: С€Р»СЏС… РЅРµ Р°Р±СЃРѕР»СЋС‚РЅРёР№ ($javaPath) вЂ” exec С‡РµСЂРµР· Р»С–РЅРєРµСЂ РЅРµРјРѕР¶Р»РёРІРёР№, РїРѕС‚СЂС–Р±РµРЅ Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС…")
+            log("Java exec: non-absolute path ($javaPath) - exec via linker impossible, absolute path required")
             return JavaLaunch(javaPath)
         }
         if (!hasLibJli(javaPath)) {
-            log("Java exec: WARN libjli.so РЅРµ Р·РЅР°Р№РґРµРЅРѕ РїРѕСЂСѓС‡ Р· $javaPath вЂ” linker РґР°СЃС‚СЊ CANNOT LINK EXECUTABLE")
-            // РќРµ РІС–РґРјРѕРІР»СЏС”РјРѕ РѕРґСЂР°Р·Сѓ: in-process (dlopen) РјРѕР¶Рµ СЃРїСЂР°С†СЋРІР°С‚Рё, Р° probe РЅРёР¶С‡Рµ РїРѕРєР°Р¶Рµ.
+            log("Java exec: WARN libjli.so not found near $javaPath - linker will fail CANNOT LINK EXECUTABLE")
+        // Do not refuse yet: in-process (dlopen) may still work, probe below will show.
         }
         val directOut = runAndFirstLine(listOf(javaPath, "-version"))
         val directVer = directOut?.takeIf { looksLikeJavaVersion(it) }
         if (directVer != null) {
-            log("Java exec: РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє РћРљ")
+            log("Java exec: direct launch OK")
             return JavaLaunch(javaPath, emptyList(), directVer)
         }
-        if (directOut != null) log("Java exec: РїСЂСЏРјР° СЃРїСЂРѕР±Р°: $directOut")
-        else log("Java exec: РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє РЅРµРјРѕР¶Р»РёРІРёР№ (error=13 вЂ” W^X exec-Р·Р°Р±РѕСЂРѕРЅР°)")
+        if (directOut != null) log("Java exec: direct attempt: $directOut")
+        else log("Java exec: direct launch impossible (error=13 - W^X exec ban)")
         val linker = systemLinker()
         if (linker == null) {
-            log("Java exec: СЃРёСЃС‚РµРјРЅРѕРіРѕ Р»С–РЅРєРµСЂР° РЅРµ Р·РЅР°Р№РґРµРЅРѕ")
+            log("Java exec: system linker not found")
             return JavaLaunch(javaPath)
         }
         val env = linkerEnv(javaPath)
-        // P2: С„РѕСЂРјР° `linker <abs java> -version` + env. Р‘Р•Р— -Xmx: РІС–РЅ РЅС–РєРѕР»Рё РЅРµ РјР°С”
-        // СЃС‚РѕСЏС‚Рё С‚Р°Рј РґРµ linker С‡РµРєР°С” executable (С–РЅР°РєС€Рµ `expected absolute path: "-Xmx64M"`).
-        // ProcessBuilder РЅРµ РІРјС–С” РїС–РґРјС–РЅСЏС‚Рё argv[0] РѕРєСЂРµРјРѕ РІС–Рґ executable (СЏРє execve),
-        // С‚РѕРјСѓ С”РґРёРЅРёР№ РєРѕСЂРµРєС‚РЅРёР№ РІРёРєР»РёРє вЂ” linker РїРµСЂС€РёРј, java Р°Р±СЃРѕР»СЋС‚РЅРёРј РґСЂСѓРіРёРј.
+        // P2: shape `linker <abs java> -version` + env. WITHOUT -Xmx: it must never
+        // stand where the linker expects the executable (otherwise `expected absolute path: "-Xmx64M"`).
+        // ProcessBuilder cannot substitute argv[0] separately from the executable (like execve),
+        // so the only correct call is linker first, absolute java second.
         val shape = listOf(linker, javaPath, "-version")
         val vEnvRaw = runAndFirstLine(shape, env)
         val vEnv = vEnvRaw?.takeIf { looksLikeJavaVersion(it) }
         if (vEnv != null) {
-            log("Java exec: Р»С–РЅРєРµСЂ + env РћРљ")
+            log("Java exec: linker + env OK")
             return JavaLaunch(javaPath, listOf(linker), vEnv, env)
         }
-        log("Java exec: Р»С–РЅРєРµСЂ + env: ${vEnvRaw ?: "РЅРµРјР° РІРёРІРѕРґСѓ"}")
-        // P3: С‚Р° СЃР°РјР° С„РѕСЂРјР° Р±РµР· РЅР°С€РѕРіРѕ env.
+        log("Java exec: linker + env: ${vEnvRaw ?: "no output"}")
+        // P3: same shape without our env.
         val vPlainRaw = runAndFirstLine(shape)
         val vPlain = vPlainRaw?.takeIf { looksLikeJavaVersion(it) }
         if (vPlain != null) {
-            log("Java exec: Р»С–РЅРєРµСЂ РћРљ, Р°Р»Рµ Р»РёС€Рµ Р‘Р•Р— РЅР°С€РѕРіРѕ env вЂ” Р·Р°РїСѓСЃРєР°СЋ Р±РµР· РЅСЊРѕРіРѕ")
+            log("Java exec: linker OK but only WITHOUT our env - launching without it")
             return JavaLaunch(javaPath, listOf(linker), vPlain)
         }
-        log("Java exec: Р»С–РЅРєРµСЂ Р±РµР· env: ${vPlainRaw ?: "РЅРµРјР° РІРёРІРѕРґСѓ"}")
+        log("Java exec: linker without env: ${vPlainRaw ?: "no output"}")
         return JavaLaunch(javaPath)
     }
 
     /**
-     * РћС‚РѕС‡РµРЅРЅСЏ РґР»СЏ Р·Р°РїСѓСЃРєСѓ С‡РµСЂРµР· Р»С–РЅРєРµСЂ: С‰РѕР± libjli/libjvm Р·РЅР°С…РѕРґРёР»РёСЃСЊ
-     * Р·Р° LD_LIBRARY_PATH РЅРµР·Р°Р»РµР¶РЅРѕ РІС–Рґ С‚РѕРіРѕ, С‰Рѕ Р±Р°С‡РёС‚СЊ Р»Р°СѓРЅС‡РµСЂ РІ argv[0].
-     * P0: РјР°С” РІРєР»СЋС‡Р°С‚Рё jre/lib/server + jre/lib (+ jre/lib/jli РґРµ Р»РµР¶РёС‚СЊ libjli.so),
-     * С–РЅР°РєС€Рµ linker РїР°РґР°С” `library "libjli.so" not found`. JAVA_HOME вЂ” РѕР±РѕРІ'СЏР·РєРѕРІРѕ.
+     * Environment for linker launch: so libjli/libjvm resolve via LD_LIBRARY_PATH
+     * regardless of what the launcher sees in argv[0].
+     * P0: must include jre/lib/server + jre/lib (+ jre/lib/jli where libjli.so lives),
+     * otherwise the linker fails `library "libjli.so" not found`. JAVA_HOME is mandatory.
      */
     fun linkerEnv(javaPath: String): Map<String, String> {
         return try {
             val bin = File(javaPath).parentFile ?: return emptyMap()
             if (bin.name != "bin") return emptyMap()
             val home = bin.parentFile ?: return emptyMap()
-            // РџРѕСЂСЏРґРѕРє СЏРє Сѓ PocketJvm.ldLibraryPathFor, Р°Р»Рµ Р· lib/server РїРµСЂС€РёРј
-            // (С‚Р°Рј РґРµ libjvm.so) + lib + lib/jli (С‚Р°Рј РґРµ libjli.so РЅР° Pojav-JRE).
+            // Order as in PocketJvm.ldLibraryPathFor, but lib/server first
+            // (where libjvm.so lives) + lib + lib/jli (where libjli.so lives on Pojav-JRE).
             val dirs = listOf(
                 File(home, "lib/server"),
                 File(home, "lib"),
@@ -280,8 +280,8 @@ object EmbeddedJava {
     }
 
     /**
-     * P0: С‡Рё С” libjli.so РїРѕСЂСѓС‡ Р· java (РїРµСЂРµРІС–СЂРєР° РїРµСЂРµРґ exec С‡РµСЂРµР· Р»С–РЅРєРµСЂ).
-     * РЁСѓРєР°С”РјРѕ РІ lib/jli/libjli.so, lib/libjli.so, lib/server/libjli.so.
+     * P0: is libjli.so next to java (check before exec via linker).
+     * Looks in lib/jli/libjli.so, lib/libjli.so, lib/server/libjli.so.
      */
     fun hasLibJli(javaPath: String): Boolean {
         return try {
@@ -296,7 +296,7 @@ object EmbeddedJava {
         } catch (_: Exception) { false }
     }
 
-    /** P0: Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РґРѕ libjli.so Р°Р±Рѕ null (РґР»СЏ РґС–Р°РіРЅРѕСЃС‚РёРєРё РІ Р»РѕР·С–). */
+    /** P0: absolute path to libjli.so or null (for log diagnostics). */
     fun findLibJli(javaPath: String): File? {
         return try {
             val bin = File(javaPath).parentFile ?: return null
@@ -311,26 +311,26 @@ object EmbeddedJava {
     }
 
     fun javaVersion(javaPath: String): String? {
-        // РџСЂСЏРјРёР№ Р·Р°РїСѓСЃРє; СЏРєС‰Рѕ РІРїРёСЂР°С”РјРѕСЃСЊ Сѓ W^X exec-Р·Р°Р±РѕСЂРѕРЅСѓ вЂ” С‡РµСЂРµР· Р»С–РЅРєРµСЂ.
+        // Direct launch; on W^X exec ban - via linker.
         return probeJava(javaPath).version
     }
 
     fun abi(): String = Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
 
     /**
-     * Р РѕР±РѕС‡РёР№ Bionic-JRE РїС–Рґ Android (РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє Р±РµР· proot).
-     * Р”Р¶РµСЂРµР»Рѕ: PojavLauncherTeam/android-openjdk-build-multiarch, СЂРµР»С–Р· jre17-ec28559
-     * (СЃС‚Р°Р±С–Р»СЊРЅРёР№, ~37MB, СЃРѕС‚РЅС– С‚РёСЃСЏС‡ Р·Р°РІР°РЅС‚Р°Р¶РµРЅСЊ).
-     * РЎС‚Р°СЂРёР№ URL PocketHost-JRE/jre-android РЅРµ С–СЃРЅСѓС” (404) вЂ” С‚РѕРјСѓ JRE РЅС–РєРѕР»Рё РЅРµ РєР°С‡Р°РІСЃСЏ.
+     * Working Bionic-JRE for Android (direct launch without proot).
+     * Source: PojavLauncherTeam/android-openjdk-build-multiarch, release jre17-ec28559
+     * (stable, ~37MB, hundreds of thousands of downloads).
+     * Old PocketHost-JRE/jre-android URL is gone (404) - so the JRE never downloaded.
      *
-     * РџРѕРІРµСЂС‚Р°С” РўР†Р›Р¬РљР РїС–Рґ СЃРІРѕС” ABI: С‡СѓР¶РёР№ Р°СЂС…С–С‚РµРєС‚СѓСЂРЅРёР№ JRE РІСЃРµ РѕРґРЅРѕ РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЊСЃСЏ,
-     * Р° РЅР° РїРѕРІС–Р»СЊРЅС–Р№ РјРµСЂРµР¶С– РєРѕР¶РЅР° Р·Р°Р№РІР° СЃРїСЂРѕР±Р° С†Рµ ~37MB С– С…РІРёР»РёРЅРё РѕС‡С–РєСѓРІР°РЅРЅСЏ.
+     * Returns ONLY for its own ABI: a foreign-arch JRE will not launch anyway,
+     * and on a slow network every extra attempt costs ~37MB and minutes of waiting.
      */
     fun jreDownloadUrls(): List<String> = listOf(jreDownloadUrl())
 
     /**
-     * Р„РґРёРЅРµ РґР¶РµСЂРµР»Рѕ URL РґР»СЏ JRE. Glibc-Р·Р±С–СЂРєРё РїСЂР°С†СЋСЋС‚СЊ Р»РёС€Рµ РІСЃРµСЂРµРґРёРЅС–
-     * proot-ubuntu, С‚РѕРјСѓ РґР»СЏ РїСЂСЏРјРѕРіРѕ Р·Р°РїСѓСЃРєСѓ РїРѕС‚СЂС–Р±РµРЅ Bionic-JRE (Pojav).
+     * Single URL source for the JRE. Glibc builds work only inside
+     * proot-ubuntu, so direct launch needs Bionic-JRE (Pojav).
      */
     fun jreDownloadUrl(): String = when (abi()) {
         "arm64-v8a" -> "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre17-ec28559/jre17-arm64-20210825-release.tar.xz"
@@ -341,8 +341,8 @@ object EmbeddedJava {
     }
 
     /**
-     * Minecraft 1.20.5+ (РІРєР»СЋС‡РЅРѕ 1.21.x) РІРёРјР°РіР°С” Java 21.
-     * Р’Р±СѓРґРѕРІР°РЅРёР№ JRE17 Р·Р°РїСѓСЃС‚РёС‚СЊ Р»РёС€Рµ <=1.20.4.
+     * Minecraft 1.20.5+ (including 1.21.x) requires Java 21.
+     * Bundled JRE17 runs only <=1.20.4.
      */
     fun minJavaForMinecraft(version: String?): Int {
         if (version == null) return 17
@@ -359,7 +359,7 @@ object EmbeddedJava {
         } catch (_: Exception) { 17 }
     }
 
-    /** РџР°СЂСЃРёС‚СЊ major-РІРµСЂСЃС–СЋ Р· `java -version` ("openjdk version \"17.0.10\""). Р§РµСЂРµР· Р»С–РЅРєРµСЂ Р·Р° РїРѕС‚СЂРµР±Рё. */
+    /** Parses the major version from `java -version` ("openjdk version "17.0.10""). Via linker when needed. */
     fun javaMajorVersion(javaPath: String): Int? {
         val out = runAndFirstLine(listOf(javaPath, "-version"))
             ?: systemLinker()?.let { runAndFirstLine(listOf(it, javaPath, "-version")) }
@@ -367,12 +367,12 @@ object EmbeddedJava {
         return Regex("\"(\\d+)").find(out)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 
-    /** Р§Рё РїС–РґС‚СЂРёРјСѓС”С‚СЊСЃСЏ Р°РІС‚РѕР·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE РЅР° С†СЊРѕРјСѓ ABI. */
+    /** Whether JRE auto-install is supported on this ABI. */
     fun isJreAutoInstallSupported(): Boolean = abi() in setOf("arm64-v8a", "armeabi-v7a", "armeabi", "x86_64", "x86", "i686")
 
     fun installHint(): String = buildString {
-        appendLine("Java РЅРµ Р·РЅР°Р№РґРµРЅР° Сѓ РІР±СѓРґРѕРІР°РЅРѕРјСѓ СЃРµСЂРµРґРѕРІРёС‰С–.")
-        appendLine("PocketHost Р·Р°СЂР°Р· Р·Р°РІР°РЅС‚Р°Р¶РёС‚СЊ РІР±СѓРґРѕРІР°РЅРёР№ JRE Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ (~40 MB, Pojav Bionic).")
-        appendLine("РќС–С‡РѕРіРѕ РІСЃС‚Р°РЅРѕРІР»СЋРІР°С‚Рё РѕРєСЂРµРјРѕ (Termux) РЅРµ РїРѕС‚СЂС–Р±РЅРѕ.")
+        appendLine("Java not found in the bundled runtime.")
+        appendLine("PocketHost will now download the bundled JRE automatically (~40 MB, Pojav Bionic).")
+        appendLine("Nothing to install separately (Termux) is needed.")
     }
 }

@@ -16,7 +16,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // In-process JVM launcher (РїРѕСЂС‚ Mojo jre_launcher): Р·Р±С–СЂРєР° libpockethost_jvm.so
+        // English-only: strip all other locales (incl. library values-uk),
+        // so no Ukrainian strings can leak in from dependencies.
+        resourceConfigurations += "en"
+
+        // In-process JVM launcher (порт Mojo jre_launcher): збірка libpockethost_jvm.so
         externalNativeBuild {
             cmake {
                 cFlags += "-std=c11 -Wall"
