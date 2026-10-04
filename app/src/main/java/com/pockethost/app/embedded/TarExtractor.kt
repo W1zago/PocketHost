@@ -2,6 +2,7 @@ package com.pockethost.app.embedded
 
 import android.util.Log
 import org.tukaani.xz.XZInputStream
+import java.util.zip.GZIPInputStream
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -25,7 +26,12 @@ object TarExtractor {
     private const val TAG = "TarExtractor"
     private const val BLOCK = 512
 
-    fun extractXzTar(archive: File, destDir: File, log: (String) -> Unit = {}): Boolean {
+    fun extractXzTar(
+        archive: File,
+        destDir: File,
+        log: (String) -> Unit = {},
+        stripComponents: Int = 0
+    ): Boolean {
         return try {
             if (!archive.exists() || archive.length() < 1024) {
                 log("РђСЂС…С–РІ РІС–РґСЃСѓС‚РЅС–Р№ Р°Р±Рѕ РєСЂРёС…С–С‚РЅРёР№ (${archive.length()} B)")
@@ -35,7 +41,7 @@ object TarExtractor {
             FileInputStream(archive).use { fis ->
                 BufferedInputStream(fis, 128 * 1024).use { bis ->
                     XZInputStream(bis).use { xz ->
-                        extractTar(xz, destDir, log)
+                        extractTar(xz, destDir, log, stripComponents, requireBinJava = true)
                     }
                 }
             }
@@ -71,7 +77,61 @@ object TarExtractor {
         } catch (_: Exception) { false }
     }
 
-    private fun extractTar(input: InputStream, destDir: File, log: (String) -> Unit) {
+    fun extractGzTar(
+        archive: File,
+        destDir: File,
+        log: (String) -> Unit = {},
+        stripComponents: Int = 0
+    ): Boolean {
+        return try {
+            if (!archive.exists() || archive.length() < 1024) {
+                log("archive missing or truncated")
+                return false
+            }
+            destDir.mkdirs()
+            FileInputStream(archive).use { fis ->
+                BufferedInputStream(fis, 128 * 1024).use { bis ->
+                    GZIPInputStream(bis).use { gz ->
+                        extractTar(gz, destDir, log, stripComponents, requireBinJava = false)
+                    }
+                }
+            }
+            true
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OOM while extracting " + archive.name, e)
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "extract failed for " + archive.name, e)
+            log("embedded extractor: ${e.message}")
+            false
+        }
+    }
+
+    /** Quick check: does the file look like .gz (magic bytes 1F 8B). */
+    fun looksLikeGz(file: File): Boolean {
+        return try {
+            if (!file.isFile || file.length() < 1024) return false
+            FileInputStream(file).use { fis ->
+                val magic = ByteArray(2)
+                var off = 0
+                while (off < magic.size) {
+                    val n = fis.read(magic, off, magic.size - off)
+                    if (n == -1) return false
+                    if (n == 0) continue
+                    off += n
+                }
+                magic[0] == 0x1F.toByte() && magic[1] == 0x8B.toByte()
+            }
+        } catch (_: Exception) { false }
+    }
+
+    private fun extractTar(
+        input: InputStream,
+        destDir: File,
+        log: (String) -> Unit,
+        stripComponents: Int = 0,
+        requireBinJava: Boolean = false
+    ) {
         val destCanon = try { destDir.canonicalPath } catch (_: Exception) { destDir.absolutePath }
         val header = ByteArray(BLOCK)
         var pendingLongName: String? = null
@@ -120,7 +180,7 @@ object TarExtractor {
             paxPath = null
             paxSize = null
 
-            val target = safeTarget(destDir, destCanon, entryName)
+            val target = safeTarget(destDir, destCanon, entryName, stripComponents)
             if (target == null) {
                 skipFully(input, entrySize)
                 skipPadding(input, entrySize)
@@ -148,7 +208,7 @@ object TarExtractor {
                 '1' -> {
                     // РҐР°СЂРґР»С–РЅРє: РєРѕРїС–СЋС”РјРѕ РІРјС–СЃС‚ (РїСЂРѕСЃС‚С–С€Рµ С– РїСЂР°С†СЋС” РІСЃСЋРґРё).
                     try {
-                        val src = safeTarget(destDir, destCanon, entryLink)
+                        val src = safeTarget(destDir, destCanon, entryLink, stripComponents)
                         if (src != null && src.isFile) {
                             target.parentFile?.mkdirs()
                             copyFile(src, target)
@@ -181,9 +241,11 @@ object TarExtractor {
         log("Р РѕР·РїР°РєРѕРІР°РЅРѕ Р·Р°РїРёСЃС–РІ: $entries, С„Р°Р№Р»С–РІ: $files")
         if (entries == 0) throw IllegalStateException("РІ Р°СЂС…С–РІС– РЅРµРјР°С” Р·Р°РїРёСЃС–РІ")
         // РЎР°РЅС–С‚Р°СЂРЅР° РїРµСЂРµРІС–СЂРєР° JRE: bin/java РїСЂСЏРјРѕ Р°Р±Рѕ РЅР° СЂС–РІРµРЅСЊ РіР»РёР±С€Рµ (РЅРѕСЂРјР°Р»С–Р·СѓС” РІРёРєР»РёРєР°С‡).
-        val direct = File(destDir, "bin/java").exists()
-        val nested = !direct && (destDir.listFiles()?.any { it.isDirectory && File(it, "bin/java").exists() } == true)
-        if (!direct && !nested) throw IllegalStateException("bin/java РЅРµ Р·РЅР°Р№РґРµРЅРѕ РїС–СЃР»СЏ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ")
+        if (requireBinJava) {
+            val direct = File(destDir, "bin/java").exists()
+            val nested = !direct && (destDir.listFiles()?.any { it.isDirectory && File(it, "bin/java").exists() } == true)
+            if (!direct && !nested) throw IllegalStateException("bin/java РЅРµ Р·РЅР°Р№РґРµРЅРѕ РїС–СЃР»СЏ СЂРѕР·РїР°РєСѓРІР°РЅРЅСЏ")
+        }
     }
 
     // ---------- tar low-level ----------
@@ -325,9 +387,21 @@ object TarExtractor {
     }
 
     /** Р—Р°С…РёСЃС‚ РІС–Рґ zip-slip: С‚С–Р»СЊРєРё РІСЃРµСЂРµРґРёРЅС– destDir. null = РІС–РґС…РёР»РёС‚Рё Р·Р°РїРёСЃ. */
-    private fun safeTarget(destDir: File, destCanon: String, name: String): File? {
+    private fun safeTarget(
+        destDir: File,
+        destCanon: String,
+        name: String,
+        stripComponents: Int = 0
+    ): File? {
         return try {
             var n = name.trim().trimEnd('/')
+            if (stripComponents > 0) {
+                val parts0 = n.split('/').filter { it.isNotEmpty() }
+                // NOTE: a leading "." counts as a component (GNU tar semantics), so it is
+                // intentionally NOT filtered: './data/.../usr/bin/proot' with strip=6 gives 'bin/proot'.
+                if (parts0.size <= stripComponents) return null
+                n = parts0.drop(stripComponents).joinToString("/")
+            }
             while (n.startsWith("./")) n = n.removePrefix("./")
             if (n.isEmpty()) return null
             if (n.startsWith("/") || n.startsWith("\\")) return null

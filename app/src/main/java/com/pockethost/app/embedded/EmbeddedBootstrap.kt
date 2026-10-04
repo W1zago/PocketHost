@@ -219,29 +219,209 @@ object EmbeddedBootstrap {
      * РќР° MVP: СЏРєС‰Рѕ rootfs РЅРµРјР° - СЃРµСЂРІРµСЂ РІСЃРµ РѕРґРЅРѕ СЃС‚Р°СЂС‚СѓС” СЏРє РІР±СѓРґРѕРІР°РЅРёР№ shell (sh -i),
      * Р° РїРѕРІРЅРёР№ Ubuntu РґРѕРІР°РЅС‚Р°Р¶СѓС”С‚СЊСЃСЏ Р·Р° РїРѕС‚СЂРµР±РѕСЋ РѕРєСЂРµРјРѕСЋ РєРЅРѕРїРєРѕСЋ.
      */
+    /**
+     * Ubuntu rootfs for UBUNTU_SERVER. Returns true when the full Ubuntu
+     * (proot + 22.04 rootfs) is ready. Otherwise false: the server still
+     * starts as the built-in shell (sh -i), and the full Ubuntu is fetched
+     * on demand via installUbuntuFull() (auto on Start or by UI button).
+     */
     suspend fun ensureUbuntu(context: Context, log: (String) -> Unit = {}): Boolean =
         withContext(Dispatchers.IO) {
-            val rootfs = EmbeddedPaths.ubuntuRootfsDir(context)
-            val marker = File(rootfs, ".installed")
-            if (marker.exists()) return@withContext true
-            // РџРѕРєРё РЅРµ С‚СЏРіРЅРµРјРѕ 200MB+ rootfs Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ - Р»РёС€Рµ С–РЅС„РѕСЂРјСѓС”РјРѕ.
-            // РџРѕРІРЅРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ СЂРµР°Р»С–Р·СѓС”С‚СЊСЃСЏ РІ installUbuntuFull().
-            log("Р’Р±СѓРґРѕРІР°РЅРёР№ shell РіРѕС‚РѕРІРёР№. РџРѕРІРЅРёР№ Ubuntu rootfs РјРѕР¶РЅР° РґРѕРІР°РЅС‚Р°Р¶РёС‚Рё РІ РЅР°Р»Р°С€С‚СѓРІР°РЅРЅСЏС… СЃРµСЂРІРµСЂР°.")
+            if (EmbeddedUbuntu.isInstalled(context)) return@withContext true
+            log("Full Ubuntu is not installed. Built-in shell works; Ubuntu 22.04 (~30MB) can be fetched on Start or from server settings.")
             false
         }
 
+    /**
+     * Downloads the full Ubuntu 22.04: 3 Termux .debs (proot + libtalloc +
+     * libandroid-shmem) plus the official ubuntu-base rootfs tarball.
+     * Resume via Range; archives are deleted only after SUCCESSFUL
+     * extraction, so a retry continues without re-downloading.
+     * Returns true when EmbeddedUbuntu.isInstalled() afterwards.
+     */
     suspend fun installUbuntuFull(context: Context, log: (String) -> Unit): Boolean =
         withContext(Dispatchers.IO) {
-            // Р—Р°РіР»СѓС€РєР° Р· С‡РµСЃРЅРёРј РїСЂРѕРіСЂРµСЃРѕРј: Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ Ubuntu 22.04 rootfs (~120MB)
-            // TODO: РїС–РґРєР»СЋС‡РёС‚Рё СЂРµР°Р»СЊРЅРёР№ URL rootfs + proot-Р±С–РЅР°СЂРЅРёРє РїС–Рґ abi РїСЂРёСЃС‚СЂРѕСЋ
-            log("Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ Ubuntu rootfs... (С„СѓРЅРєС†С–СЏ РІ СЂРѕР·СЂРѕР±С†С–, РїРѕРєРё РґРѕСЃС‚СѓРїРЅРёР№ РІР±СѓРґРѕРІР°РЅРёР№ shell)")
+            try {
+                if (EmbeddedUbuntu.isInstalled(context)) {
+                    log("Ubuntu ${EmbeddedUbuntu.UBUNTU_VERSION} is already installed.")
+                    return@withContext true
+                }
+                if (!EmbeddedUbuntu.isSupported()) {
+                    log(EmbeddedUbuntu.supportHint())
+                    return@withContext false
+                }
+                // Space: unpacked rootfs ~150MB + 27MB archive + headroom.
+                try {
+                    val free = android.os.StatFs(context.filesDir.absolutePath).availableBytes
+                    if (free < 300L * 1024 * 1024) {
+                        log("ERROR: low space (${free / 1024 / 1024}MB free, ~300MB needed for Ubuntu).")
+                        return@withContext false
+                    }
+                } catch (_: Exception) {
+                }
+
+                val toolsDir = EmbeddedPaths.toolsDir(context)
+                val debs = EmbeddedUbuntu.prootDebs()
+                    ?: return@withContext false.also { log(EmbeddedUbuntu.supportHint()) }
+                var idx = 0
+                for ((fileName, url) in debs) {
+                    idx++
+                    val tmp = File(toolsDir, fileName)
+                    if (tmp.exists() && !looksLikeDeb(tmp)) {
+                        log("Cached $fileName is damaged, re-downloading...")
+                        try {
+                            tmp.delete()
+                        } catch (_: Exception) {
+                        }
+                    }
+                    if (!(tmp.exists() && looksLikeDeb(tmp) && tmp.length() > 4 * 1024)) {
+                        log("Downloading proot ($idx/${debs.size}): $fileName...")
+                        log("URL: $url")
+                        var err: String? = null
+                        var attempt = 0
+                        while (attempt < MAX_UBUNTU_ATTEMPTS) {
+                            attempt++
+                            err = downloadFileDetailed(url, tmp, minBytes = 4 * 1024) { pct ->
+                                if (pct % 25 == 0) log("proot $idx/${debs.size}: $pct%")
+                            }
+                            if (err == null) break
+                            if (!isRetryableDownloadError(err)) break
+                            if (attempt < MAX_UBUNTU_ATTEMPTS) {
+                                log("Attempt $attempt/$MAX_UBUNTU_ATTEMPTS interrupted ($err). Retrying...")
+                                try {
+                                    delay(3000)
+                                } catch (_: Exception) {
+                                }
+                            }
+                        }
+                        if (err != null) {
+                            log("Failed to download $fileName ($err). Press Start again, download will resume.")
+                            return@withContext false
+                        }
+                    } else {
+                        log("proot ($idx/${debs.size}): $fileName already downloaded, extracting...")
+                    }
+                    val prefix = EmbeddedUbuntu.prootPrefix(context)
+                    if (!DebExtractor.extractDataTar(tmp, prefix, 6, log)) {
+                        log("Failed to extract $fileName. See details above.")
+                        return@withContext false
+                    }
+                    try {
+                        tmp.delete()
+                    } catch (_: Exception) {
+                    }
+                }
+                try {
+                    EmbeddedUbuntu.prootBin(context).setExecutable(true)
+                } catch (_: Exception) {
+                }
+
+                val rootfsUrl = EmbeddedUbuntu.rootfsUrl()
+                    ?: return@withContext false.also { log(EmbeddedUbuntu.supportHint()) }
+                val rootfsTmp = File(toolsDir, "ubuntu-rootfs.tar.gz")
+                if (rootfsTmp.exists() && !TarExtractor.looksLikeGz(rootfsTmp)) {
+                    log("Cached rootfs archive is damaged, re-downloading...")
+                    try {
+                        rootfsTmp.delete()
+                    } catch (_: Exception) {
+                    }
+                }
+                if (!(rootfsTmp.exists() && rootfsTmp.length() > 10L * 1024 * 1024)) {
+                    log("Downloading Ubuntu ${EmbeddedUbuntu.UBUNTU_VERSION} rootfs (~27MB)...")
+                    log("URL: $rootfsUrl")
+                    var err: String? = null
+                    var attempt = 0
+                    while (attempt < MAX_UBUNTU_ATTEMPTS) {
+                        attempt++
+                        err = downloadFileDetailed(rootfsUrl, rootfsTmp) { pct ->
+                            if (pct % 10 == 0) log("Downloading Ubuntu: $pct%")
+                        }
+                        if (err == null) break
+                        if (!isRetryableDownloadError(err)) break
+                        if (attempt < MAX_UBUNTU_ATTEMPTS) {
+                            val keptMb = try {
+                                rootfsTmp.length() / 1024 / 1024
+                            } catch (_: Exception) {
+                                0L
+                            }
+                            log("Attempt $attempt/$MAX_UBUNTU_ATTEMPTS interrupted ($err). Kept $keptMb MB, retrying...")
+                            try {
+                                delay(3000)
+                            } catch (_: Exception) {
+                            }
+                        }
+                    }
+                    if (err != null) {
+                        log("Failed to download rootfs ($err). Press Start again, download will resume.")
+                        return@withContext false
+                    }
+                } else {
+                    log("Rootfs archive already downloaded, extracting...")
+                }
+                log("Extracting Ubuntu rootfs (~150MB, a few minutes)...")
+                val ubuntuRoot = EmbeddedUbuntu.rootfsDir(context)
+                try {
+                    if (ubuntuRoot.exists() && !EmbeddedUbuntu.isInstalled(context)) {
+                        ubuntuRoot.deleteRecursively()
+                    }
+                    ubuntuRoot.mkdirs()
+                } catch (_: Exception) {
+                }
+                if (!TarExtractor.extractGzTar(rootfsTmp, ubuntuRoot, log)) {
+                    log("Failed to extract rootfs. Archive kept, retry will skip downloading.")
+                    return@withContext false
+                }
+                try {
+                    rootfsTmp.delete()
+                } catch (_: Exception) {
+                }
+                EmbeddedUbuntu.applyGuestFixups(context, log)
+                try {
+                    File(ubuntuRoot, "usr/bin/bash").setExecutable(true)
+                    EmbeddedUbuntu.prootBin(context).setExecutable(true)
+                } catch (_: Exception) {
+                }
+                if (EmbeddedUbuntu.isInstalled(context)) {
+                    log("Ubuntu ${EmbeddedUbuntu.UBUNTU_VERSION} installed.")
+                    true
+                } else {
+                    log("Install finished but verification failed. See details above.")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Ubuntu install failed", e)
+                log("Ubuntu install error: ${e.message}")
+                false
+            }
+        }
+
+    /** Quick ar-magic check (`!<arch>`) for .deb files. */
+    private fun looksLikeDeb(file: File): Boolean {
+        return try {
+            if (!file.isFile || file.length() < 1024) return false
+            java.io.FileInputStream(file).use { fis ->
+                val magic = ByteArray(8)
+                var off = 0
+                while (off < magic.size) {
+                    val n = fis.read(magic, off, magic.size - off)
+                    if (n == -1) return false
+                    if (n == 0) continue
+                    off += n
+                }
+                String(magic, Charsets.US_ASCII).startsWith("!<arch>")
+            }
+        } catch (_: Exception) {
             false
         }
+    }
 
     // ---------- io helpers ----------
 
     /** РЎРєС–Р»СЊРєРё СЂР°Р·С–РІ РїРѕРІС‚РѕСЂСЋРІР°С‚Рё РѕР±С–СЂРІР°РЅРµ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE (Р· РґРѕРєР°С‡РєРѕСЋ) Р·Р° РѕРґРёРЅ Start. */
     private const val MAX_JRE_ATTEMPTS = 3
+
+    /** How many times to retry an interrupted Ubuntu download (with resume) per Start. */
+    private const val MAX_UBUNTU_ATTEMPTS = 3
 
     /**
      * Р§Рё РјР°С” СЃРµРЅСЃ РїРѕРІС‚РѕСЂСЋРІР°С‚Рё РїРѕРјРёР»РєСѓ Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ.
@@ -259,7 +439,12 @@ object EmbeddedBootstrap {
      * GitHub-СЂРµР»С–Р·Рё РІС–РґРґР°СЋС‚СЊ 302 РЅР° objects.githubusercontent.com вЂ” СЂРµРґРёСЂРµРєС‚Рё РѕР±СЂРѕР±Р»СЏС”РјРѕ РІСЂСѓС‡РЅСѓ.
      * РџС–РґС‚СЂРёРјСѓС” РґРѕРєР°С‡РєСѓ (Range): РѕР±С–СЂРІР°РЅРёР№ С„Р°Р№Р» РїСЂРѕРґРѕРІР¶СѓС”С‚СЊСЃСЏ, Р° РЅРµ РєР°С‡Р°С”С‚СЊСЃСЏ Р· РЅСѓР»СЏ.
      */
-    private fun downloadFileDetailed(url: String, dest: File, onProgress: (Int) -> Unit = {}): String? {
+    private fun downloadFileDetailed(
+        url: String,
+        dest: File,
+        minBytes: Long = 1024 * 1024,
+        onProgress: (Int) -> Unit = {}
+    ): String? {
         try {
             dest.parentFile?.mkdirs()
             var current = url
@@ -298,7 +483,7 @@ object EmbeddedBootstrap {
                 if (code == 416) {
                     // Р”С–Р°РїР°Р·РѕРЅ РЅРµР·Р°РґРѕРІС–Р»СЊРЅРёР№: Р»РѕРєР°Р»СЊРЅРёР№ С„Р°Р№Р» >= РІС–РґРґР°Р»РµРЅРѕРіРѕ. РџСЂРёР№РјР°С”РјРѕ СЏРєС‰Рѕ РЅРµ РєСЂРёС…С‚Р°.
                     conn.disconnect()
-                    if (dest.exists() && dest.length() >= 1024 * 1024) return null
+                    if (dest.exists() && dest.length() >= minBytes) return null
                     try { dest.delete() } catch (_: Exception) {}
                     if (rangeRestarted) return "HTTP 416, Р»РѕРєР°Р»СЊРЅРёР№ С„Р°Р№Р» Р±РёС‚РёР№ вЂ” РІРёРґР°Р»РµРЅРѕ, СЃРїСЂРѕР±СѓР№ С‰Рµ СЂР°Р·"
                     rangeRestarted = true
@@ -355,7 +540,7 @@ object EmbeddedBootstrap {
                     // РўРёС…РёР№ РѕР±СЂРёРІ РїРѕС‚РѕРєСѓ (Р±РµР· РІРёРЅСЏС‚РєСѓ): С„Р°Р№Р» РќР• С‡С–РїР°С”РјРѕ вЂ” РЅР°СЃС‚СѓРїРЅРёР№ Start РґРѕРєР°С‡Р°С”.
                     return "Р·Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ РѕР±С–СЂРІР°Р»РѕСЃСЊ (${finalLen / 1024 / 1024} Р· ${expectedTotal / 1024 / 1024} MB) вЂ” РЅР°С‚РёСЃРЅРё Start С‰Рµ СЂР°Р·, РґРѕРєР°С‡РєР° РїСЂРѕРґРѕРІР¶РёС‚СЊ"
                 }
-                if (!dest.exists() || finalLen < 1024 * 1024) {
+                if (!dest.exists() || finalLen < minBytes) {
                     val kb = finalLen / 1024
                     try { dest.delete() } catch (_: Exception) {}
                     return "С„Р°Р№Р» РѕР±С–СЂРІР°РЅРёР№ ($kb KB)"

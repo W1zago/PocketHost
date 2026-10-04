@@ -537,12 +537,18 @@ class CreateServerActivity : AppCompatActivity() {
 
     private fun updateCreateButtonState() {
         val nameValid = binding.etServerName.text?.toString()?.trim()?.isNotEmpty() == true
-        val portValid = binding.etPort.text?.toString()?.trim()?.toIntOrNull()?.let { it in 1..65535 } == true
+        // Ubuntu shell/proot binds no port, so the field is hidden and skipped.
+        val portValid = selectedServerType == ServerType.UBUNTU_SERVER ||
+            binding.etPort.text?.toString()?.trim()?.toIntOrNull()?.let { it in 1..65535 } == true
         binding.btnCreate.isEnabled = nameValid && portValid
     }
 
     private fun updateMinecraftSettingsVisibility() {
-        binding.minecraftSettings.visibility = if (selectedServerType == ServerType.MINECRAFT) View.VISIBLE else View.GONE
+        val isMinecraft = selectedServerType == ServerType.MINECRAFT
+        binding.minecraftSettings.visibility = if (isMinecraft) View.VISIBLE else View.GONE
+        // No listener port for Ubuntu: hide the whole row, keep stored default 22.
+        binding.portRow.visibility = if (isMinecraft) View.VISIBLE else View.GONE
+        binding.tvPortStatus.visibility = if (isMinecraft) View.VISIBLE else View.GONE
     }
 
     private fun updateDefaultValues() {
@@ -553,7 +559,7 @@ class CreateServerActivity : AppCompatActivity() {
             }
             ServerType.UBUNTU_SERVER -> {
                 if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("22")
-                binding.etStartCommand.setText("sh -i (РІР±СѓРґРѕРІР°РЅРёР№)")
+                binding.etStartCommand.setText("proot Ubuntu 22.04 (auto)")
             }
         }
         updateCreateButtonState()
@@ -565,6 +571,13 @@ class CreateServerActivity : AppCompatActivity() {
 
     private fun createServer() {
         val name = binding.etServerName.text.toString().trim()
+        if (selectedServerType == ServerType.UBUNTU_SERVER) {
+            if (name.isEmpty()) {
+                Snackbar.make(binding.root, "Enter server name", Snackbar.LENGTH_SHORT).show(); return
+            }
+            proceedCreateGeneric(name, 22)
+            return
+        }
         val portStr = binding.etPort.text.toString().trim()
         if (name.isEmpty()) {
             Snackbar.make(binding.root, "Р’РІРµРґС–С‚СЊ РЅР°Р·РІСѓ СЃРµСЂРІРµСЂР°", Snackbar.LENGTH_SHORT).show(); return

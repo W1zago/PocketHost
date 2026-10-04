@@ -602,6 +602,54 @@
 
                 </LinearLayout>
 
+                <!-- Ubuntu settings -->
+                <LinearLayout
+                    android:id="@+id/ubuntuSettingsCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_section_card"
+                    android:padding="16dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Ubuntu 22.04 (proot)"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface" />
+
+                    <TextView
+                        android:id="@+id/tvUbuntuStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Checking…"
+                        android:textSize="12sp"
+                        android:textColor="@color/on_surface_variant"
+                        android:fontFamily="monospace" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnInstallUbuntu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Download Ubuntu (~30MB)"
+                        android:textSize="13sp"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Full user-space Ubuntu with apt. Without it the server runs the built-in shell. Start also downloads automatically."
+                        android:textSize="11sp"
+                        android:textColor="@color/on_surface_variant" />
+
+                </LinearLayout>
+
                 <!-- Actions -->
                 <LinearLayout
                     android:layout_width="match_parent"

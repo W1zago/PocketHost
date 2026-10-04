@@ -131,7 +131,9 @@ object EmbeddedProcessManager {
                 // ([linker, <abs java>, ...]), LD_LIBRARY_PATH+JAVA_HOME РѕР±РѕРІ'СЏР·РєРѕРІС–,
                 // С–РЅР°РєС€Рµ `library "libjli.so" not found`. РЇРєС‰Рѕ РІРёРєР»РёРєР°С‡ РЅРµ РїРµСЂРµРґР°РІ вЂ”
                 // РґРѕР±СѓРґРѕРІСѓС”РјРѕ Р· linkerEnv Р·Р° java-С€Р»СЏС…РѕРј (command[1]).
-                if (command.isNotEmpty() && command[0].contains("linker")) {
+                if (command.isNotEmpty() && command[0].contains("linker") &&
+                    (command.getOrNull(1)?.contains("java") == true)
+                ) {
                     val javaPath = command.getOrNull(1) ?: ""
                     if (javaPath.isEmpty() || !File(javaPath).isAbsolute) {
                         val msg = "Р’С–РґРјРѕРІР°: argv[1] РјР°С” Р±СѓС‚Рё Р°Р±СЃРѕР»СЋС‚РЅРёРј С€Р»СЏС…РѕРј РґРѕ java (РѕС‚СЂРёРјР°РЅРѕ '$javaPath'), " +
@@ -254,6 +256,19 @@ object EmbeddedProcessManager {
      */
     fun startInteractiveShell(context: Context, serverId: String, workDir: File): Boolean {
         return start(context, serverId, listOf("sh", "-i"), workDir)
+    }
+
+    /**
+     * Full Ubuntu 22.04 via Termux proot (linker exec, no root).
+     * The server workDir is bind-mounted at /root/server (see
+     * EmbeddedUbuntu.buildLaunch). Returns false when proot/rootfs is
+     * missing so the caller can fall back to the built-in shell.
+     */
+    fun startUbuntuViaProot(context: Context, serverId: String, workDir: File): Boolean {
+        val launch = EmbeddedUbuntu.buildLaunch(context, workDir) { msg ->
+            appendLogToDir(workDir, msg + "\n")
+        } ?: return false
+        return start(context, serverId, launch.argv, workDir, launch.env)
     }
 
     fun sendInput(serverId: String, data: String): Boolean {

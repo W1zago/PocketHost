@@ -547,18 +547,42 @@ class ServerService : Service() {
 
     private suspend fun startUbuntu(serverId: String, workDir: File) {
         val ip = getDeviceIp()
-        EmbeddedBootstrap.ensureUbuntu(this@ServerService) { msg -> log(serverId, msg) }
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С–РЅС‚РµСЂР°РєС‚РёРІРЅРёР№ shell - РІРІС–Рґ/РІРёРІС–Рґ С‡РµСЂРµР· ConsoleActivity Р±РµР· Р¶РѕРґРЅРёС… РґРѕР·РІРѕР»С–РІ
-        val ok = EmbeddedProcessManager.startInteractiveShell(this@ServerService, serverId, workDir)
+        // Full Ubuntu when available; otherwise auto-install now (same UX
+        // as the JRE: download on Start with progress in the log). The
+        // built-in shell stays as fallback so Start never dead-ends.
+        val ubuntuReady = EmbeddedBootstrap.ensureUbuntu(this@ServerService) { msg -> log(serverId, msg) }
+        if (!ubuntuReady) {
+            if (!com.pockethost.app.embedded.EmbeddedUbuntu.isSupported()) {
+                log(serverId, com.pockethost.app.embedded.EmbeddedUbuntu.supportHint())
+            } else {
+                log(serverId, "Ubuntu is not installed, downloading now (~30MB)...")
+                val installed = EmbeddedBootstrap.installUbuntuFull(this@ServerService) { msg -> log(serverId, msg) }
+                if (!installed) {
+                    log(serverId, "Ubuntu download did not finish. Starting built-in shell instead; press Start again once install completes.")
+                }
+            }
+        }
+        val useProot = com.pockethost.app.embedded.EmbeddedUbuntu.isInstalled(this@ServerService)
+        val ok = if (useProot) {
+            log(serverId, "Starting Ubuntu 22.04 via proot...")
+            EmbeddedProcessManager.startUbuntuViaProot(this@ServerService, serverId, workDir)
+        } else {
+            EmbeddedProcessManager.startInteractiveShell(this@ServerService, serverId, workDir)
+        }
         if (!ok) {
-            log(serverId, "ERROR: РЅРµ РІРґР°Р»РѕСЃСЏ Р·Р°РїСѓСЃС‚РёС‚Рё shell")
+            log(serverId, "ERROR: failed to start shell")
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
         repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
         repository.updateServerStatus(serverId, ServerStatus.RUNNING)
-        log(serverId, "\nР’Р±СѓРґРѕРІР°РЅРёР№ Linux-shell Р·Р°РїСѓС‰РµРЅРѕ. IP: $ip\n")
-        log(serverId, "Р’РІРѕРґСЊ РєРѕРјР°РЅРґРё РІ РєРѕРЅСЃРѕР»С– РЅРёР¶С‡Рµ (sh -i). РџРѕРІРЅРёР№ Ubuntu rootfs - РІ РЅР°СЃС‚СѓРїРЅРёС… РѕРЅРѕРІР»РµРЅРЅСЏС….\n")
+        if (useProot) {
+            log(serverId, "\nUbuntu 22.04 started (proot, user-space, no root). IP: $ip\n")
+            log(serverId, "Try in console: apt update && apt install -y python3 nodejs. /root/server mirrors the server folder.\n")
+        } else {
+            log(serverId, "\nBuilt-in Linux shell started. IP: $ip\n")
+            log(serverId, "Type commands in the console below (sh -i). Full Ubuntu rootfs is available in server settings.\n")
+        }
         startLivenessPoll(serverId)
     }
 

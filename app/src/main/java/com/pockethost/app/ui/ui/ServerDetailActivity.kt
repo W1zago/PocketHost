@@ -20,7 +20,9 @@ import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
 import com.pockethost.app.databinding.ActivityServerDetailBinding
+import com.pockethost.app.embedded.EmbeddedBootstrap
 import com.pockethost.app.embedded.EmbeddedPaths
+import com.pockethost.app.embedded.EmbeddedUbuntu
 import com.pockethost.app.embedded.EmbeddedProcessManager
 import com.pockethost.app.service.ServerService
 import com.pockethost.app.util.ServerProperties
@@ -89,6 +91,7 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnDelete.setOnClickListener { deleteServer() }
         binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
+        binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
         // Section tabs: real navigation (scroll within screen or open screen).
         binding.tabOverview.setOnClickListener { binding.scrollView.smoothScrollTo(0, 0) }
         binding.tabConsole.setOnClickListener { openConsole() }
@@ -346,6 +349,7 @@ class ServerDetailActivity : AppCompatActivity() {
             if (server.type == ServerType.MINECRAFT) {
                 minecraftSettingsCard.visibility = View.VISIBLE
                 tabConfig.visibility = View.VISIBLE
+                ubuntuSettingsCard.visibility = View.GONE
                 suppressSettingsSave = true
                 try {
                     switchPirate.isChecked = !server.config.effectiveOnlineMode
@@ -363,6 +367,8 @@ class ServerDetailActivity : AppCompatActivity() {
             } else {
                 minecraftSettingsCard.visibility = View.GONE
                 tabConfig.visibility = View.GONE
+                ubuntuSettingsCard.visibility = View.VISIBLE
+                refreshUbuntuCard()
             }
         }
     }
@@ -490,6 +496,74 @@ class ServerDetailActivity : AppCompatActivity() {
                 repository.deleteServer(id)
                 finish()
             }
+        }
+    }
+
+    private fun refreshUbuntuCard() {
+        lifecycleScope.launch {
+            val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    if (EmbeddedUbuntu.isInstalled(this@ServerDetailActivity)) {
+                        "installed"
+                    } else if (!EmbeddedUbuntu.isSupported()) {
+                        "unsupported"
+                    } else {
+                        "missing"
+                    }
+                } catch (_: Exception) {
+                    "missing"
+                }
+            }
+            try {
+                when (status) {
+                    "installed" -> {
+                        binding.tvUbuntuStatus.text =
+                            "Ubuntu ${EmbeddedUbuntu.UBUNTU_VERSION} installed (proot, apt works)."
+                        binding.btnInstallUbuntu.text = "Reinstall Ubuntu"
+                        binding.btnInstallUbuntu.isEnabled = true
+                    }
+                    "unsupported" -> {
+                        binding.tvUbuntuStatus.text = EmbeddedUbuntu.supportHint()
+                        binding.btnInstallUbuntu.isEnabled = false
+                    }
+                    else -> {
+                        binding.tvUbuntuStatus.text =
+                            "Not installed (~30MB download, ~150MB on disk). Start downloads it automatically."
+                        binding.btnInstallUbuntu.text = "Download Ubuntu (~30MB)"
+                        binding.btnInstallUbuntu.isEnabled = true
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun installUbuntu() {
+        binding.btnInstallUbuntu.isEnabled = false
+        binding.btnInstallUbuntu.text = "Downloading..."
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    EmbeddedBootstrap.installUbuntuFull(this@ServerDetailActivity) { msg ->
+                        try {
+                            runOnUiThread { binding.tvUbuntuStatus.text = msg.takeLast(300) }
+                        } catch (_: Exception) {
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "installUbuntu failed", e)
+                    false
+                }
+            }
+            try {
+                android.widget.Toast.makeText(
+                    this@ServerDetailActivity,
+                    if (ok) "Ubuntu installed" else "Ubuntu install did not finish, see status",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {
+            }
+            refreshUbuntuCard()
         }
     }
 
