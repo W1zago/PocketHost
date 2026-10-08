@@ -81,6 +81,51 @@ object EmbeddedUbuntu {
 
     fun prootLibDir(context: Context): File = File(prootPrefix(context), "lib")
 
+    /** proot trampoline for guest ELF exec.
+     *
+     * The Termux .deb also ships a copy under tools/proot/libexec, but that
+     * copy lives in filesDir where execve() is denied (W^X, EACCES on
+     * Android 10+ with targetSdk 29+). The packaged jniLibs copy is mapped
+     * from nativeLibraryDir (exec allowed, same as dlopen) - use it first,
+     * keep the filesDir copy only as legacy fallback.
+     * Packaged names: libproot_loader.so / libproot_loader32.so
+     * (see app/src/main/jniLibs/<abi>/). */
+    fun prootLoader(context: Context): File {
+        try {
+            val native = File(context.applicationInfo.nativeLibraryDir, "libproot_loader.so")
+            if (native.isFile) return native
+        } catch (_: Exception) {}
+        return File(prootPrefix(context), "libexec/proot/loader")
+    }
+
+    fun prootLoader32(context: Context): File {
+        try {
+            val native32 = File(context.applicationInfo.nativeLibraryDir, "libproot_loader32.so")
+            if (native32.isFile) return native32
+            // 32-bit ABIs ship a single loader (armeabi-v7a has only
+            // libproot_loader.so): it IS the 32-bit trampoline there.
+            val abi = EmbeddedJava.abi()
+            if (abi == "armeabi-v7a" || abi == "armeabi" || abi == "x86") {
+                val native = File(context.applicationInfo.nativeLibraryDir, "libproot_loader.so")
+                if (native.isFile) return native
+            }
+        } catch (_: Exception) {}
+        return File(prootPrefix(context), "libexec/proot/loader32")
+    }
+
+    /** True when at least one loader resolves to a real file (native or legacy). */
+    fun loaderDiag(context: Context): String {
+        return try {
+            val l = prootLoader(context)
+            val l32 = prootLoader32(context)
+            val nativeDir = try { context.applicationInfo.nativeLibraryDir } catch (_: Exception) { "?" }
+            "nativeDir=$nativeDir loader=${l.absolutePath}(${l.isFile},exec=${l.canExecute()}) " +
+                "loader32=${l32.absolutePath}(${l32.isFile},exec=${l32.canExecute()})"
+        } catch (e: Exception) {
+            "loaderDiag failed: ${e.message}"
+        }
+    }
+
     fun rootfsDir(context: Context): File = EmbeddedPaths.ubuntuRootfsDir(context)
 
     fun installedMarker(context: Context): File = File(rootfsDir(context), ".installed")
@@ -92,8 +137,12 @@ object EmbeddedUbuntu {
             if (!installedMarker(context).exists()) return false
             if (versionFile(context).takeIf { it.isFile }?.readText()?.trim() != UBUNTU_VERSION) return false
             if (!prootBin(context).isFile) return false
+            if (!prootLoader(context).isFile) return false
             // usr/bin/bash directly (bin/ is a symlink to usr/bin in ubuntu-base).
             if (!File(rootfsDir(context), "usr/bin/bash").isFile) return false
+            // env is the actual exec target (via `env -u ... bash`); without it
+            // proot dies with a bare ENOENT, so treat as not installed.
+            if (!File(rootfsDir(context), "usr/bin/env").isFile) return false
             true
         } catch (_: Exception) {
             false
@@ -144,6 +193,115 @@ object EmbeddedUbuntu {
             return null
         }
         workDir.mkdirs()
+        // Pre-flight: the exact files proot exec needs. On failure log WHICH
+        // one is missing - "execve: No such file" gives no details otherwise.
+        val envBin = File(rootfs, "usr/bin/env")
+        val bash = File(rootfs, "bin/bash")
+        val bashUsr = File(rootfs, "usr/bin/bash")
+        val loader = File(rootfs, "usr/lib/ld-linux-aarch64.so.1")
+        val libLink = File(rootfs, "lib")
+        val trampoline = prootLoader(context)
+        val trampoline32 = prootLoader32(context)
+        // Re-assert +x on every launch for the filesDir copies only: missing
+        // exec bit and the SELinux exec ban look identical (EACCES), this
+        // tells them apart. Native .so copies in nativeLibraryDir are
+        // already mapped executable - chmod there is a no-op, never required.
+        try {
+            proot.setExecutable(true)
+            val prefixPath = prootPrefix(context).absolutePath
+            if (trampoline.absolutePath.startsWith(prefixPath)) {
+                trampoline.setExecutable(true)
+            }
+            if (trampoline32.absolutePath.startsWith(prefixPath)) {
+                trampoline32.setExecutable(true)
+            }
+        } catch (_: Exception) {
+        }
+        // Guest exec/read bits: proot mmap's the guest ELFs (env, bash, the
+        // glibc loader) through the trampoline, so an unreadable guest file
+        // surfaces as a bare `execve("/usr/bin/env"): Permission denied`.
+        // Best-effort chmod - tar modes are usually already right.
+        try {
+            envBin.setExecutable(true)
+            bashUsr.setExecutable(true)
+        } catch (_: Exception) {
+        }
+        log(
+            "proot pre-flight: env(file=${envBin.isFile},size=${envBin.length()}," +
+                "read=${envBin.canRead()},exec=${envBin.canExecute()}) " +
+                "bash=${bash.isFile}(exec=${bash.canExecute()}) " +
+                "loader=${loader.isFile} liblink=${java.nio.file.Files.isSymbolicLink(libLink.toPath())} " +
+                "trampoline=${trampoline.isFile}(${trampoline.canExecute()}) " +
+                "trampoline32=${trampoline32.isFile} prootExec=${proot.canExecute()}"
+        )
+        log("proot loader resolve: ${loaderDiag(context)}")
+        if (!envBin.isFile) {
+            log("ERROR: usr/bin/env missing in rootfs (${envBin.absolutePath}) - rootfs truncated, reinstall Ubuntu from server settings.")
+            return null
+        }
+        if (!envBin.canRead()) {
+            log("ERROR: usr/bin/env not readable (${envBin.absolutePath}) - reinstall Ubuntu from server settings.")
+            return null
+        }
+        // The filesDir trampoline copy (tools/proot/libexec/...) can NEVER
+        // exec on Android 10+ with targetSdk 29+: File.canExecute() reads
+        // only mode bits, the kernel/SELinux W^X ban still denies it, and
+        // proot then dies with `execve("/usr/bin/env"): Permission denied`.
+        // Only the packaged jniLibs copy mapped from nativeLibraryDir
+        // (libproot_loader.so) is executable there. Launching with the
+        // filesDir copy is a guaranteed 1-second death - refuse honestly
+        // instead, with the native dir listing so the cause is visible.
+        val prefixPath = prootPrefix(context).absolutePath
+        if (trampoline.absolutePath.startsWith(prefixPath)) {
+            val nativeDir = try {
+                context.applicationInfo.nativeLibraryDir
+            } catch (_: Exception) {
+                "?"
+            }
+            val nativeLs = try {
+                File(nativeDir).listFiles()?.map { it.name }?.sorted()?.joinToString(",") ?: "<empty>"
+            } catch (e: Exception) {
+                "<unlistable: ${e.message}>"
+            }
+            log("ERROR: no packaged loader in nativeLibraryDir ($nativeDir has: $nativeLs) - " +
+                "filesDir copy ${trampoline.absolutePath} cannot exec on Android 10+ (W^X). " +
+                "Update/reinstall the app so jniLibs/libproot_loader.so is packaged, then retry.")
+            return null
+        }
+        if (!bash.isFile || !loader.isFile) {
+            log("rootfs incomplete (bash or loader missing) - reinstall required")
+            return null
+        }
+        // Termux-built proot has /data/data/com.termux/files/usr/tmp and the
+        // loader prefix compiled in. Neither appears in our argv/env below:
+        // both defaults are overridden by PROOT_TMPDIR / PROOT_LOADER(_32),
+        // which the proot process verifiably receives (see the "proot env:"
+        // line after launch - EmbeddedProcessManager applies launch.env to
+        // the ProcessBuilder environment 1:1).
+        // The dir MUST exist before exec: proot aborts when it cannot
+        // create its socket there. Never fall back to the com.termux path.
+        val prootTmp = File(context.cacheDir, "proot-tmp")
+        try {
+            prootTmp.mkdirs()
+            // Best-effort writability probe so a read-only cache surfaces here,
+            // not as a bare proot execve failure.
+            if (!prootTmp.isDirectory) {
+                log("ERROR: cannot create PROOT_TMPDIR ${prootTmp.absolutePath}")
+                return null
+            }
+            val probe = File(prootTmp, ".write_test")
+            try {
+                probe.createNewFile()
+                probe.delete()
+            } catch (e: Exception) {
+                log("ERROR: PROOT_TMPDIR not writable ${prootTmp.absolutePath}: ${e.message}")
+                return null
+            }
+        } catch (e: Exception) {
+            log("ERROR: PROOT_TMPDIR setup failed: ${e.message}")
+            return null
+        }
+        log("PROOT_TMPDIR=${prootTmp.absolutePath} (exists=${prootTmp.isDirectory})")
         val argv = mutableListOf(
             linker,
             proot.absolutePath,
@@ -154,10 +312,16 @@ object EmbeddedUbuntu {
             "-b", "/sys",
             "-b", "/dev",
             "-b", "${workDir.absolutePath}:/root/server",
-            "-w", "/root/server",
-            "/usr/bin/env", "-u", "LD_LIBRARY_PATH",
-            "/bin/bash", "--login"
+            "-w", "/root/server"
         )
+        if (envBin.isFile) {
+            argv.addAll(listOf("/usr/bin/env", "-u", "LD_LIBRARY_PATH", "/bin/bash", "--login"))
+        } else {
+            // Partial rootfs without coreutils env: run bash directly so the
+            // shell still starts (LD_LIBRARY_PATH leak is harmless for bash).
+            log("WARNING: usr/bin/env missing, launching bash directly")
+            argv.addAll(listOf("/bin/bash", "--login"))
+        }
         val env = mutableMapOf(
             // Outer linker needs this to resolve libtalloc/libandroid-shmem
             // for the proot binary itself. Unset again inside (see env -u).
@@ -165,9 +329,26 @@ object EmbeddedUbuntu {
             // Seccomp acceleration breaks on many new kernels; ptrace-only
             // is slower but correct (same as proot-distro default there).
             "PROOT_NO_SECCOMP" to "1",
+            "PROOT_TMPDIR" to prootTmp.absolutePath,
+            // Termux proot has /data/data/com.termux/... compiled in and looks
+            // for its loader trampoline there; override to our own prefix,
+            // otherwise every guest exec dies with a bare ENOENT.
+            "PROOT_LOADER" to prootLoader(context).absolutePath,
+            "PROOT_LOADER_32" to prootLoader32(context).absolutePath,
             "TERM" to "xterm-256color",
             "HOME" to "/root",
-            "TMPDIR" to "/tmp"
+            "TMPDIR" to "/tmp",
+            // Guest PATH: ProcessBuilder inherits the Android PATH
+            // (/product/bin:/apex/...:/system/bin) when launch.env lacks it,
+            // so bare `uname`/`ls`/`cat` die with "command not found".
+            // Ubuntu login default (same as /etc/login.defs ENV_PATH).
+            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        )
+        log(
+            "proot env: PROOT_TMPDIR=${env["PROOT_TMPDIR"]} " +
+                "PROOT_LOADER=${env["PROOT_LOADER"]} " +
+                "PROOT_LOADER_32=${env["PROOT_LOADER_32"]} " +
+                "PROOT_NO_SECCOMP=1 LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}"
         )
         return ProotLaunch(argv, env)
     }
@@ -200,6 +381,25 @@ object EmbeddedUbuntu {
             // Guest-visible server dir + marker.
             try {
                 File(rootfs, "root/server").mkdirs()
+            } catch (_: Exception) {
+            }
+            // Exec/read bits for the exact files proot execs on every boot.
+            // Tar modes are usually right already; without +r here the first
+            // launch dies with `execve("/usr/bin/env"): Permission denied`.
+            try {
+                for (p in listOf("usr/bin/env", "usr/bin/bash", "bin/bash")) {
+                    try {
+                        val f = File(rootfs, p)
+                        if (f.isFile) {
+                            f.setReadable(true, false)
+                            f.setExecutable(true, false)
+                        } else {
+                            log("guest fixup: MISSING $p (rootfs truncated?)")
+                        }
+                    } catch (e: Exception) {
+                        log("guest fixup chmod $p: ${e.message}")
+                    }
+                }
             } catch (_: Exception) {
             }
             try {

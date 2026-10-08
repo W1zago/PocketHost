@@ -242,4 +242,19 @@
         app:iconTint="@color/secondary"
         android:textColor="@color/on_surface" />
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnRemote"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="76dp"
+        android:text="PC Console"
+        android:textSize="12sp"
+        app:backgroundTint="@color/surface_high"
+        app:icon="@android:drawable/ic_menu_send"
+        app:iconTint="@color/secondary"
+        android:textColor="@color/on_surface" />
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

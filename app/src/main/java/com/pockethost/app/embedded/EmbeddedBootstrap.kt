@@ -313,6 +313,8 @@ object EmbeddedBootstrap {
                 }
                 try {
                     EmbeddedUbuntu.prootBin(context).setExecutable(true)
+                    EmbeddedUbuntu.prootLoader(context).setExecutable(true)
+                    EmbeddedUbuntu.prootLoader32(context).setExecutable(true)
                 } catch (_: Exception) {
                 }
 
@@ -378,6 +380,11 @@ object EmbeddedBootstrap {
                 EmbeddedUbuntu.applyGuestFixups(context, log)
                 try {
                     File(ubuntuRoot, "usr/bin/bash").setExecutable(true)
+                    // The actual proot exec target (`env -u ... bash`):
+                    // without +r/+x here the first boot dies with
+                    // `execve("/usr/bin/env"): Permission denied`.
+                    File(ubuntuRoot, "usr/bin/env").setReadable(true, false)
+                    File(ubuntuRoot, "usr/bin/env").setExecutable(true, false)
                     EmbeddedUbuntu.prootBin(context).setExecutable(true)
                 } catch (_: Exception) {
                 }

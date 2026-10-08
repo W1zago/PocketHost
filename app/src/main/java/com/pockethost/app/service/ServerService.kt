@@ -574,6 +574,52 @@ class ServerService : Service() {
             repository.updateServerStatus(serverId, ServerStatus.ERROR)
             return
         }
+        // Fresh baseline AFTER the launch lines above: our own pre-flight
+        // ("proot pre-flight...", "PROOT_TMPDIR=...", "$ <cmd>") also grows
+        // server.log, so a baseline taken before launch makes
+        // waitForLiveOutput true on our own output - the false Running.
+        // Only bytes the live process prints past this point count.
+        val freshBaseline = EmbeddedProcessManager.logLength(workDir)
+        // Honest RUNNING: ProcessBuilder.start() succeeding means nothing -
+        // proot dies in <1s on EACCES/ENOENT. Wait for a live handle plus
+        // the first bytes in server.log (shell prompt/banner). Only then
+        // continue; a fast death becomes ERROR with the cause above.
+        val live = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                EmbeddedProcessManager.waitForLiveOutput(
+                    serverId, workDir, freshBaseline, 15_000L
+                ) { msg -> log(serverId, msg) }
+            }
+        } catch (_: Exception) { EmbeddedProcessManager.isRunning(serverId) }
+        if (!live || !EmbeddedProcessManager.isRunning(serverId)) {
+            log(serverId, "ERROR: shell died right after start - see proot pre-flight / [process exited] above.")
+            log(serverId, "Typical causes: loader EACCES (fixed via nativeLibraryDir), missing usr/bin/env, broken rootfs - reinstall Ubuntu from server settings.")
+            try { EmbeddedProcessManager.stop(serverId) } catch (_: Exception) {}
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
+        // Proof of a LIVE shell, not just a lingering handle: a unique echo
+        // token must round-trip through stdin -> shell -> server.log while
+        // the process stays alive. The old fire-and-forget
+        // `echo POCKETHOST_ALIVE` never verified the answer, and a constant
+        // token could match a stale previous boot - both lied as Running.
+        val token = "POCKETHOST_ALIVE_" + System.currentTimeMillis()
+        try {
+            EmbeddedProcessManager.sendInput(serverId, "echo $token")
+        } catch (_: Exception) {}
+        val answered = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                EmbeddedProcessManager.waitForMarker(
+                    serverId, workDir, token, 15_000L
+                ) { msg -> log(serverId, msg) }
+            }
+        } catch (_: Exception) { false }
+        if (!answered || !EmbeddedProcessManager.isRunning(serverId)) {
+            log(serverId, "ERROR: shell started but did not answer (no $token in server.log) - stdin is not wired or the shell died. See [process exited] above.")
+            try { EmbeddedProcessManager.stop(serverId) } catch (_: Exception) {}
+            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+            return
+        }
         repository.updateTermuxExecutionId(serverId, (System.currentTimeMillis() % Int.MAX_VALUE).toInt())
         repository.updateServerStatus(serverId, ServerStatus.RUNNING)
         if (useProot) {

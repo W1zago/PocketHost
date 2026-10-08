@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The PC bridge (jvm-host) is plain HTTP on the LAN, e.g.
+  http://192.168.0.200:8765/api/ping. targetSdk 34 blocks cleartext
+  by default (API 28+), which made RemoteConsoleActivity fail with
+  "no pong" while Chrome on the same phone could open the URL
+  (WebView/HttpURLConnection enforce the manifest policy, Chrome does not).
+
+  Base-config permits cleartext (this is what governs IP literals -
+  domain-config entries only match hostnames, never 192.168.x.x),
+  belt-and-suspenders with android:usesCleartextTraffic="true".
+  LAN-only tool, same trust level as adb - no auth, no internet exposure.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

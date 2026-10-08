@@ -277,6 +277,11 @@ class MainActivity : AppCompatActivity() {
                 true
             }
         } catch (_: Exception) {}
+        try {
+            binding.btnRemote.setOnClickListener {
+                startActivity(Intent(this, RemoteConsoleActivity::class.java))
+            }
+        } catch (_: Exception) {}
     }
 
     private fun showCreateServerDialog() {

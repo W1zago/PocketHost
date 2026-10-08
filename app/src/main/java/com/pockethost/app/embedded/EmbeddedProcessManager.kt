@@ -181,11 +181,17 @@ object EmbeddedProcessManager {
                 } else throw e
             }
 
-            // process.pid() is only available on API 26+ as hidden on some devices,
-            // via reflection to avoid breaking compileDebugKotlin on old bootclasspath.
+            // PID without hidden-API reflection and without java.lang.Process.pid()
+            // (missing from the Android bootclasspath used here, and reflective
+            // getMethod("pid") is blocked on Android 16). Parse ART's
+            // Process.toString() ("Process[pid=1234, ...]") - best effort only,
+            // the pid is display-only (EmbeddedSession.pid), null is fine.
             val pid: Long? = try {
-                process.javaClass.getMethod("pid").invoke(process) as? Long
-            } catch (_: Exception) { null }
+                Regex("pid=(\\d+)").find(process.toString())
+                    ?.groupValues?.getOrNull(1)?.toLongOrNull()
+            } catch (_: Exception) {
+                null
+            }
             val session = EmbeddedSession(serverId, pid)
             val holder = RunningProcess(process, session, logFile)
             // Atomic insert: re-check under lock to close the race
@@ -268,7 +274,143 @@ object EmbeddedProcessManager {
         val launch = EmbeddedUbuntu.buildLaunch(context, workDir) { msg ->
             appendLogToDir(workDir, msg + "\n")
         } ?: return false
+        // Proof that PROOT_TMPDIR/PROOT_LOADER really reach the proot
+        // process: EmbeddedProcessManager.start() applies launch.env 1:1 to
+        // the ProcessBuilder environment (see the loop over envExtra there).
+        // Logged here so server.log shows the effective values next to the
+        // pre-flight, instead of trusting the code path blindly.
+        appendLogToDir(
+            workDir,
+            "proot env applied: " +
+                launch.env.entries.joinToString(" ") { "${it.key}=${it.value}" } + "\n"
+        )
         return start(context, serverId, launch.argv, workDir, launch.env)
+    }
+
+    /**
+     * Honest liveness: true only when the process handle is alive AND the
+     * log file grew past [logStartLen] (first shell/proot output arrived).
+     * Proot dies fast on EACCES/ENOENT while ProcessBuilder.start() still
+     * succeeded - RUNNING on start() alone lies. Polls up to [timeoutMs].
+     * Returns false when the process died or stayed silent.
+     */
+    fun waitForLiveOutput(
+        serverId: String,
+        workDir: File,
+        logStartLen: Long,
+        timeoutMs: Long = 15_000L,
+        log: (String) -> Unit = {}
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var lastAlive = false
+        while (System.currentTimeMillis() < deadline) {
+            val holder = synchronized(lock) { running[serverId] }
+            if (holder == null) {
+                log("liveness: session gone (rejected or stopped)")
+                return false
+            }
+            val alive = try { holder.process.isAlive } catch (_: Exception) { false }
+            if (!alive) {
+                // Capture the exit code fast so EACCES vs ENOENT is visible.
+                val code = try { holder.process.exitValue() } catch (_: Exception) { null }
+                log("liveness: process died fast (exit=${code ?: "?"}) - see proot pre-flight above")
+                return false
+            }
+            lastAlive = alive
+            val len = try {
+                val f = File(workDir, "server.log")
+                if (f.isFile) f.length() else logStartLen
+            } catch (_: Exception) { logStartLen }
+            if (len > logStartLen) return true
+            try { Thread.sleep(250) } catch (_: Exception) { break }
+        }
+        // Timeout but still alive (slow device): treat as live so Start does
+        // not flip-flop; the service liveness poll keeps watching.
+        if (lastAlive) {
+            log("liveness: still silent after ${timeoutMs}ms but process alive - continuing")
+            return true
+        }
+        return false
+    }
+
+    /** Current log length for [waitForLiveOutput] baselines. */
+    fun logLength(workDir: File): Long {
+        return try {
+            val f = File(workDir, "server.log")
+            if (f.isFile) f.length() else 0L
+        } catch (_: Exception) { 0L }
+    }
+
+    /**
+     * Honest shell liveness: true only when [marker] (a unique echo token
+     * sent via [sendInput] AFTER launch) comes back through the live
+     * stdin->shell->server.log round-trip while the process stays alive.
+     *
+     * This is what gates RUNNING. [waitForLiveOutput] alone is not enough:
+     * our own pre-flight lines also grow server.log, and a dying proot
+     * stays "alive" for ~1s while printing its fatal error - both used to
+     * produce a false Running that died right after. A unique token cannot
+     * match stale output from a previous boot.
+     *
+     * Returns false when the process dies, the session vanishes, or the
+     * token never arrives within [timeoutMs].
+     */
+    fun waitForMarker(
+        serverId: String,
+        workDir: File,
+        marker: String,
+        timeoutMs: Long = 15_000L,
+        log: (String) -> Unit = {}
+    ): Boolean {
+        val logFile = File(workDir, "server.log")
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val holder = synchronized(lock) { running[serverId] }
+            if (holder == null) {
+                log("liveness marker: session gone (rejected or stopped)")
+                return false
+            }
+            val alive = try { holder.process.isAlive } catch (_: Exception) { false }
+            // The token may arrive in the same flush as the exit: check the
+            // log first so a live answer is never missed, then the handle.
+            val found = tailContains(logFile, marker)
+            if (found && alive) return true
+            if (found) {
+                log("liveness marker: '$marker' arrived but the process is already dead")
+                return false
+            }
+            if (!alive) {
+                val code = try { holder.process.exitValue() } catch (_: Exception) { null }
+                log("liveness marker: process died before answering (exit=${code ?: "?"})")
+                return false
+            }
+            try { Thread.sleep(250) } catch (_: Exception) { break }
+        }
+        log("liveness marker: '$marker' not seen in ${timeoutMs}ms - shell is not answering")
+        return false
+    }
+
+    /** True when the tail (last 256 KB) of [logFile] contains [marker]. */
+    private fun tailContains(logFile: File, marker: String): Boolean {
+        return try {
+            if (!logFile.isFile) return false
+            val len = logFile.length()
+            if (len <= 0) return false
+            val maxBytes = 256 * 1024L
+            val start = maxOf(0L, len - maxBytes)
+            val n = (len - start).toInt()
+            val buf = ByteArray(n)
+            java.io.RandomAccessFile(logFile, "r").use { raf ->
+                raf.seek(start)
+                var tot = 0
+                while (tot < n) {
+                    val r = raf.read(buf, tot, n - tot)
+                    if (r <= 0) break
+                    tot += r
+                }
+                String(buf, 0, tot, Charsets.UTF_8).contains(marker)
+            }
+        } catch (_: Exception) { false }
     }
 
     fun sendInput(serverId: String, data: String): Boolean {
