@@ -637,7 +637,13 @@ class ServerService : Service() {
             serviceScope.launch {
                 try {
                     if (com.pockethost.app.embedded.EmbeddedUbuntu.needsEssentialPackages(this@ServerService)) {
-                        EmbeddedBootstrap.ensureEssentialPackages(this@ServerService, workDir) { msg -> log(serverId, msg) }
+                        val provisioned = EmbeddedBootstrap.ensureEssentialPackages(this@ServerService, workDir) { msg -> log(serverId, msg) }
+                        if (provisioned) {
+                            // No systemd under proot, so sshd never autostarts:
+                            // one password + one foreground daemon, port 22 is
+                            // unreachable as fake-root (use 2222).
+                            log(serverId, "SSH ready: run `passwd` once, then `/usr/sbin/sshd -p 2222`, and connect from the same Wi-Fi with `ssh root@$ip -p 2222`.")
+                        }
                     }
                 } catch (_: Exception) {}
             }

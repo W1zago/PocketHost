@@ -337,6 +337,7 @@ class UbuntuServer(
             if (code == 0) {
                 installer.markEssentialPackagesInstalled()
                 log("Essential packages installed (${UbuntuSpec.ESSENTIAL_PACKAGES.size} pkgs).")
+                log("SSH ready: run `passwd` once, then `/usr/sbin/sshd -p 2222` (no systemd under proot, port 22 is unreachable as fake-root).")
                 true
             } else {
                 log("Essential packages: apt exited with code $code - will retry on next start. See output above.")

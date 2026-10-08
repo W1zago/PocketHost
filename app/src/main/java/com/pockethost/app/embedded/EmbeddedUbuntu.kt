@@ -36,7 +36,7 @@ object EmbeddedUbuntu {
     private const val SHMEM_VERSION = "0.7"
 
     /** Bump to re-run the first-start provision on existing installs. */
-    const val ESSENTIAL_PACKAGES_VERSION = "1"
+    const val ESSENTIAL_PACKAGES_VERSION = "2"
 
     /**
      * "Maximum" first-start set (user choice): base tools + shells +
@@ -56,6 +56,7 @@ object EmbeddedUbuntu {
         "python3",
         "python3-pip",
         "openssh-client",
+        "openssh-server",
         "nodejs",
         "npm"
     )
@@ -181,7 +182,11 @@ object EmbeddedUbuntu {
     fun essentialAptCommand(): String {
         val pkgs = ESSENTIAL_PACKAGES.joinToString(" ")
         return "export DEBIAN_FRONTEND=noninteractive && " +
-            "apt-get update && apt-get install -y $pkgs && apt-get clean"
+            "apt-get update && apt-get install -y $pkgs && apt-get clean && " +
+            // sshd needs its privilege-separation dir + host keys; the
+            // openssh-server postinst cannot start services under proot
+            // (no systemd), so create both explicitly.
+            "mkdir -p /run/sshd && ssh-keygen -A"
     }
 
     fun isInstalled(context: Context): Boolean {
@@ -506,6 +511,16 @@ object EmbeddedUbuntu {
             // Guest-visible server dir + marker.
             try {
                 File(rootfs, "root/server").mkdirs()
+            } catch (_: Exception) {
+            }
+            // sshd runtime: privilege-separation dir must exist before the
+            // first `/usr/sbin/sshd`, and /root/.ssh for authorized_keys.
+            // (Fixups run at install time, before openssh-server is even
+            // provisioned; the provision command re-creates /run/sshd +
+            // host keys inside the guest as well.)
+            try {
+                File(rootfs, "run/sshd").mkdirs()
+                File(rootfs, "root/.ssh").mkdirs()
             } catch (_: Exception) {
             }
             // Exec/read bits for the exact files proot execs on every boot.

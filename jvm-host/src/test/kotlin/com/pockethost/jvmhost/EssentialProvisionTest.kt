@@ -64,6 +64,20 @@ class EssentialProvisionTest {
     }
 
     @Test
+    fun guestFixupsCreateSshdDirs() {
+        val base = tempBase()
+        try {
+            val installer = UbuntuInstaller(base) {}
+            installer.applyGuestFixups()
+            val root = installer.rootfsDir()
+            assertTrue(File(root, "run/sshd").isDirectory)
+            assertTrue(File(root, "root/.ssh").isDirectory)
+        } finally {
+            base.deleteRecursively()
+        }
+    }
+
+    @Test
     fun runOneShotPlumbingWorksOnHostShell() {
         // Exercises the exact runOneShot machinery ensureEssentialPackages
         // uses (launch, log pump, exit code) - on the host-shell backend.

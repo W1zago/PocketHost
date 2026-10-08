@@ -254,6 +254,13 @@ class UbuntuInstaller(
                 File(rootfs, "root/server").mkdirs()
             } catch (_: Exception) {
             }
+            // sshd runtime (same as Android): privilege-separation dir must
+            // exist before the first `/usr/sbin/sshd`, plus /root/.ssh.
+            try {
+                File(rootfs, "run/sshd").mkdirs()
+                File(rootfs, "root/.ssh").mkdirs()
+            } catch (_: Exception) {
+            }
             try {
                 versionFile().writeText(UbuntuSpec.UBUNTU_VERSION)
                 installedMarker().writeText(System.currentTimeMillis().toString())

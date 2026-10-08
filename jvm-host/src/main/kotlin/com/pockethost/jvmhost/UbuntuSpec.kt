@@ -19,7 +19,7 @@ object UbuntuSpec {
     const val WSL_DISTRO = "Ubuntu-22.04"
 
     /** Bump to re-run the first-start provision on existing installs (same as Android). */
-    const val ESSENTIAL_PACKAGES_VERSION = "1"
+    const val ESSENTIAL_PACKAGES_VERSION = "2"
 
     /**
      * "Maximum" first-start set, mirrored from the Android port
@@ -38,6 +38,7 @@ object UbuntuSpec {
         "python3",
         "python3-pip",
         "openssh-client",
+        "openssh-server",
         "nodejs",
         "npm"
     )
@@ -46,7 +47,8 @@ object UbuntuSpec {
     fun essentialAptCommand(): String {
         val pkgs = ESSENTIAL_PACKAGES.joinToString(" ")
         return "export DEBIAN_FRONTEND=noninteractive && " +
-            "apt-get update && apt-get install -y $pkgs && apt-get clean"
+            "apt-get update && apt-get install -y $pkgs && apt-get clean && " +
+            "mkdir -p /run/sshd && ssh-keygen -A"
     }
 
     /** Free space required for the max essential set (download + install + headroom). */

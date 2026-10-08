@@ -41,13 +41,15 @@ class UbuntuSpecTest {
         val expected = listOf(
             "ca-certificates", "curl", "wget", "git", "nano", "vim",
             "iputils-ping", "htop", "python3", "python3-pip",
-            "openssh-client", "nodejs", "npm"
+            "openssh-client", "openssh-server", "nodejs", "npm"
         )
         assertEquals(expected, UbuntuSpec.ESSENTIAL_PACKAGES)
         assertTrue(UbuntuSpec.ESSENTIAL_PACKAGES_VERSION.isNotBlank())
         val cmd = UbuntuSpec.essentialAptCommand()
         assertTrue(cmd.contains("DEBIAN_FRONTEND=noninteractive"))
         assertTrue(cmd.contains("apt-get update"))
+        assertTrue(cmd.contains("mkdir -p /run/sshd"))
+        assertTrue(cmd.contains("ssh-keygen -A"))
         for (pkg in expected) assertTrue(cmd.contains(pkg))
     }
 }
