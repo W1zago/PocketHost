@@ -402,6 +402,90 @@ object EmbeddedBootstrap {
             }
         }
 
+    /**
+     * Background first-start provision of [EmbeddedUbuntu.ESSENTIAL_PACKAGES].
+     * Runs apt in its own one-shot proot process (separate PROOT_TMPDIR so it
+     * never shares a socket dir with the live interactive shell) and streams
+     * guest output raw into the server log. Returns true when the marker was
+     * written; false keeps the marker absent so the next Start retries.
+     */
+    suspend fun ensureEssentialPackages(
+        context: Context,
+        workDir: File,
+        log: (String) -> Unit
+    ): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!EmbeddedUbuntu.isInstalled(context)) return@withContext false
+                if (!EmbeddedUbuntu.needsEssentialPackages(context)) return@withContext true
+                try {
+                    val free = android.os.StatFs(context.filesDir.absolutePath).availableBytes
+                    if (free < ESSENTIAL_PACKAGES_MIN_FREE_BYTES) {
+                        log("Essential packages skipped: low space (${free / 1024 / 1024}MB free, ~800MB needed). Free space and restart the server to retry.")
+                        return@withContext false
+                    }
+                } catch (_: Exception) {
+                }
+                val tmpDir = File(context.cacheDir, "proot-tmp-apt")
+                val launch = EmbeddedUbuntu.buildOneShot(
+                    context, workDir, EmbeddedUbuntu.essentialAptCommand(), tmpDir
+                ) { msg -> log(msg) } ?: return@withContext false
+                log("First start: installing essential packages in background (${EmbeddedUbuntu.ESSENTIAL_PACKAGES.joinToString(" ")}) (~300-400MB, several minutes - do not run apt manually meanwhile)...")
+                val pb = ProcessBuilder(launch.argv)
+                    .directory(workDir)
+                    .redirectErrorStream(true)
+                try {
+                    val env = pb.environment()
+                    for ((k, v) in launch.env) env[k] = v
+                } catch (_: Exception) {}
+                val process = try {
+                    pb.start()
+                } catch (e: Exception) {
+                    log("Essential packages: launch failed (${e.message}) - will retry on next Start.")
+                    return@withContext false
+                }
+                val pump = Thread({
+                    try {
+                        process.inputStream.bufferedReader().use { reader ->
+                            val buf = CharArray(8192)
+                            while (true) {
+                                val n = try { reader.read(buf) } catch (_: Exception) { -1 }
+                                if (n <= 0) break
+                                try {
+                                    EmbeddedProcessManager.appendLogToDir(workDir, String(buf, 0, n))
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }, "essential-apt-pump").apply { isDaemon = true; start() }
+                val finished = try {
+                    process.waitFor(ESSENTIAL_PACKAGES_TIMEOUT_MIN, java.util.concurrent.TimeUnit.MINUTES)
+                } catch (_: Exception) {
+                    false
+                }
+                if (!finished) {
+                    try { process.destroyForcibly() } catch (_: Exception) {}
+                    log("Essential packages: timed out after $ESSENTIAL_PACKAGES_TIMEOUT_MIN min - will retry on next Start.")
+                    return@withContext false
+                }
+                try { pump.join(10_000) } catch (_: Exception) {}
+                val code = try { process.exitValue() } catch (_: Exception) { -1 }
+                if (code == 0) {
+                    EmbeddedUbuntu.markEssentialPackagesInstalled(context)
+                    log("Essential packages installed (${EmbeddedUbuntu.ESSENTIAL_PACKAGES.size} pkgs).")
+                    true
+                } else {
+                    log("Essential packages: apt exited with code $code - will retry on next Start. See output above.")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "essential packages failed", e)
+                try { log("Essential packages error: ${e.message} - will retry on next Start.") } catch (_: Exception) {}
+                false
+            }
+        }
+
     /** Quick ar-magic check (`!<arch>`) for .deb files. */
     private fun looksLikeDeb(file: File): Boolean {
         return try {
@@ -429,6 +513,12 @@ object EmbeddedBootstrap {
 
     /** How many times to retry an interrupted Ubuntu download (with resume) per Start. */
     private const val MAX_UBUNTU_ATTEMPTS = 3
+
+    /** Free space required for the max essential set (download + install + headroom). */
+    private const val ESSENTIAL_PACKAGES_MIN_FREE_BYTES = 800L * 1024 * 1024
+
+    /** apt update + install of the max set on a phone can take a while. */
+    private const val ESSENTIAL_PACKAGES_TIMEOUT_MIN = 30L
 
     /**
      * Whether a download error is worth retrying.

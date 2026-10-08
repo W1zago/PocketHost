@@ -35,6 +35,31 @@ object EmbeddedUbuntu {
     private const val LIBTALLOC_VERSION = "2.5.0"
     private const val SHMEM_VERSION = "0.7"
 
+    /** Bump to re-run the first-start provision on existing installs. */
+    const val ESSENTIAL_PACKAGES_VERSION = "1"
+
+    /**
+     * "Maximum" first-start set (user choice): base tools + shells +
+     * runtimes. Heavy part is nodejs/npm + python3 (~300-400MB with deps,
+     * several minutes on a phone) - installed in background AFTER the
+     * console is already live, never blocking Start.
+     */
+    val ESSENTIAL_PACKAGES = listOf(
+        "ca-certificates",
+        "curl",
+        "wget",
+        "git",
+        "nano",
+        "vim",
+        "iputils-ping",
+        "htop",
+        "python3",
+        "python3-pip",
+        "openssh-client",
+        "nodejs",
+        "npm"
+    )
+
     /** Termux arch + Ubuntu-base arch for this device, or null when unsupported. */
     data class ArchSpec(val termuxArch: String, val ubuntuArch: String)
 
@@ -131,6 +156,33 @@ object EmbeddedUbuntu {
     fun installedMarker(context: Context): File = File(rootfsDir(context), ".installed")
 
     fun versionFile(context: Context): File = File(rootfsDir(context), ".version")
+
+    /** First-start provision marker: content is [ESSENTIAL_PACKAGES_VERSION]. */
+    fun packagesMarker(context: Context): File = File(rootfsDir(context), ".packages-installed")
+
+    /** True when the guest is installed but the essential set was not provisioned yet. */
+    fun needsEssentialPackages(context: Context): Boolean {
+        return try {
+            if (!isInstalled(context)) return false
+            packagesMarker(context).takeIf { it.isFile }?.readText()?.trim() != ESSENTIAL_PACKAGES_VERSION
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    fun markEssentialPackagesInstalled(context: Context) {
+        try {
+            packagesMarker(context).writeText(ESSENTIAL_PACKAGES_VERSION)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Non-interactive guest shell command for the first-start provision. */
+    fun essentialAptCommand(): String {
+        val pkgs = ESSENTIAL_PACKAGES.joinToString(" ")
+        return "export DEBIAN_FRONTEND=noninteractive && " +
+            "apt-get update && apt-get install -y $pkgs && apt-get clean"
+    }
 
     fun isInstalled(context: Context): Boolean {
         return try {
@@ -349,6 +401,79 @@ object EmbeddedUbuntu {
                 "PROOT_LOADER=${env["PROOT_LOADER"]} " +
                 "PROOT_LOADER_32=${env["PROOT_LOADER_32"]} " +
                 "PROOT_NO_SECCOMP=1 LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}"
+        )
+        return ProotLaunch(argv, env)
+    }
+
+    /**
+     * One-shot variant of [buildLaunch]: runs a single guest command
+     * (`bash --login -c <commandLine>`) instead of an interactive shell.
+     * Used by the background first-start provision so apt runs in its own
+     * proot process while the interactive console stays usable.
+     * The caller passes a separate [tmpDir] (not the live shell PROOT_TMPDIR)
+     * so two concurrent proot instances never share one socket dir.
+     */
+    fun buildOneShot(
+        context: Context,
+        workDir: File,
+        commandLine: String,
+        tmpDir: File,
+        log: (String) -> Unit = {}
+    ): ProotLaunch? {
+        val proot = prootBin(context)
+        if (!proot.isFile) {
+            log("proot missing (${proot.absolutePath})")
+            return null
+        }
+        try {
+            proot.setExecutable(true)
+        } catch (_: Exception) {
+        }
+        val rootfs = rootfsDir(context)
+        if (!File(rootfs, "usr/bin/bash").isFile) {
+            log("Ubuntu rootfs missing (${rootfs.absolutePath})")
+            return null
+        }
+        val linker = EmbeddedJava.systemLinker()
+        if (linker == null) {
+            log("system linker not found, cannot exec from app dir")
+            return null
+        }
+        if (!File(linker).canExecute()) {
+            log("system linker not executable: $linker")
+            return null
+        }
+        workDir.mkdirs()
+        try {
+            tmpDir.mkdirs()
+        } catch (e: Exception) {
+            log("ERROR: PROOT_TMPDIR setup failed: ${e.message}")
+            return null
+        }
+        val argv = mutableListOf(
+            linker,
+            proot.absolutePath,
+            "--link2symlink",
+            "-0",
+            "-r", rootfs.absolutePath,
+            "-b", "/proc",
+            "-b", "/sys",
+            "-b", "/dev",
+            "-b", "${workDir.absolutePath}:/root/server",
+            "-w", "/root/server",
+            "/usr/bin/env", "-u", "LD_LIBRARY_PATH",
+            "/bin/bash", "--login", "-c", commandLine
+        )
+        val env = mutableMapOf(
+            "LD_LIBRARY_PATH" to prootLibDir(context).absolutePath,
+            "PROOT_NO_SECCOMP" to "1",
+            "PROOT_TMPDIR" to tmpDir.absolutePath,
+            "PROOT_LOADER" to prootLoader(context).absolutePath,
+            "PROOT_LOADER_32" to prootLoader32(context).absolutePath,
+            "TERM" to "xterm-256color",
+            "HOME" to "/root",
+            "TMPDIR" to "/tmp",
+            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         )
         return ProotLaunch(argv, env)
     }

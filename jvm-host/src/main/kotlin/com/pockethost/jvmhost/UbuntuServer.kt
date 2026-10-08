@@ -294,7 +294,58 @@ class UbuntuServer(
             log("ERROR: failed to launch the shell process.")
             return false
         }
-        return verifyLiveShell(dir, host)
+        val live = verifyLiveShell(dir, host)
+        // First-start provision (mirrors Android: maximum set, background,
+        // console stays usable). Marker-gated so anything but success retries
+        // on the next start. Only the proot guest needs it: the WSL Store
+        // image is already fuller and `apt` there is a manual user step.
+        if (live && lastBackend == Backend.PROOT_GUEST) {
+            try {
+                if (installer.needsEssentialPackages()) {
+                    log("First start: installing essential packages in background (${UbuntuSpec.ESSENTIAL_PACKAGES.joinToString(" ")}) - do not run apt manually meanwhile...")
+                    Thread({
+                        try {
+                            ensureEssentialPackages()
+                        } catch (e: Exception) {
+                            try { log("Essential packages error: ${e.message}") } catch (_: Exception) {}
+                        }
+                    }, "ubuntu-essential").apply { isDaemon = true; start() }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return live
+    }
+
+    /**
+     * Background first-start provision of [UbuntuSpec.ESSENTIAL_PACKAGES]
+     * on the Linux/proot backend. Runs apt as a one-shot guest command
+     * (output goes to `server.log`); returns true only when the marker was
+     * written. False (low space, apt error, timeout) retries next start.
+     */
+    fun ensureEssentialPackages(timeoutMs: Long = ESSENTIAL_PACKAGES_TIMEOUT_MS): Boolean {
+        if (lastBackend != null && lastBackend != Backend.PROOT_GUEST) return false
+        if (!installer.isInstalled()) return false
+        if (!installer.needsEssentialPackages()) return true
+        return try {
+            val free = HostInfo.freeBytes(installer.baseDir)
+            if (free >= 0 && free < UbuntuSpec.ESSENTIAL_PACKAGES_MIN_FREE_BYTES) {
+                log("Essential packages skipped: low space (${free / 1024 / 1024}MB free, ~800MB needed). Free space and restart to retry.")
+                return false
+            }
+            val code = runOneShot(UbuntuSpec.essentialAptCommand(), timeoutMs)
+            if (code == 0) {
+                installer.markEssentialPackagesInstalled()
+                log("Essential packages installed (${UbuntuSpec.ESSENTIAL_PACKAGES.size} pkgs).")
+                true
+            } else {
+                log("Essential packages: apt exited with code $code - will retry on next start. See output above.")
+                false
+            }
+        } catch (e: Exception) {
+            log("Essential packages error: ${e.message} - will retry on next start.")
+            false
+        }
     }
 
     /**
@@ -483,5 +534,8 @@ class UbuntuServer(
          * anyway (waitForMarker returns the moment the handle dies).
          */
         private const val MARKER_TIMEOUT_MS = 20_000L
+
+        /** apt update + install of the max set can take a while. */
+        const val ESSENTIAL_PACKAGES_TIMEOUT_MS = 30L * 60 * 1000
     }
 }

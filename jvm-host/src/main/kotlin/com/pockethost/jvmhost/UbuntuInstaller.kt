@@ -35,6 +35,26 @@ class UbuntuInstaller(
     fun installedMarker(): File = File(rootfsDir(), ".installed")
     fun versionFile(): File = File(rootfsDir(), ".version")
 
+    /** First-start provision marker: content is [UbuntuSpec.ESSENTIAL_PACKAGES_VERSION]. */
+    fun packagesMarker(): File = File(rootfsDir(), ".packages-installed")
+
+    /** True when the guest is installed but the essential set was not provisioned yet. */
+    fun needsEssentialPackages(): Boolean {
+        return try {
+            if (!isInstalled()) return false
+            packagesMarker().takeIf { it.isFile }?.readText()?.trim() != UbuntuSpec.ESSENTIAL_PACKAGES_VERSION
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    fun markEssentialPackagesInstalled() {
+        try {
+            packagesMarker().writeText(UbuntuSpec.ESSENTIAL_PACKAGES_VERSION)
+        } catch (_: Exception) {
+        }
+    }
+
     /** Full guest rootfs present and verified (Linux path). */
     fun isInstalled(): Boolean {
         return try {

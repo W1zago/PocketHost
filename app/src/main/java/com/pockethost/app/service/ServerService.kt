@@ -624,12 +624,24 @@ class ServerService : Service() {
         repository.updateServerStatus(serverId, ServerStatus.RUNNING)
         if (useProot) {
             log(serverId, "\nUbuntu 22.04 started (proot, user-space, no root). IP: $ip\n")
-            log(serverId, "Try in console: apt update && apt install -y python3 nodejs. /root/server mirrors the server folder.\n")
+            log(serverId, "Essential packages (python3, nodejs, git, curl...) install in background on first start. /root/server mirrors the server folder.\n")
         } else {
             log(serverId, "\nBuilt-in Linux shell started. IP: $ip\n")
             log(serverId, "Type commands in the console below (sh -i). Full Ubuntu rootfs is available in server settings.\n")
         }
         startLivenessPoll(serverId)
+        // First-start provision (user choice: maximum set, background, console
+        // stays usable). Marker-gated: success writes .packages-installed,
+        // anything else retries on the next Start. Never blocks RUNNING.
+        if (useProot) {
+            serviceScope.launch {
+                try {
+                    if (com.pockethost.app.embedded.EmbeddedUbuntu.needsEssentialPackages(this@ServerService)) {
+                        EmbeddedBootstrap.ensureEssentialPackages(this@ServerService, workDir) { msg -> log(serverId, msg) }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     private fun stopServer(serverId: String) {

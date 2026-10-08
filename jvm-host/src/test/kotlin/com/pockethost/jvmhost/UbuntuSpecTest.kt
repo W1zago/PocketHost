@@ -34,4 +34,20 @@ class UbuntuSpecTest {
         assertTrue(UbuntuSpec.rootfsUrl(CpuKind.AMD64)!!.contains(UbuntuSpec.UBUNTU_VERSION))
         assertTrue(UbuntuSpec.rootfsUrl(CpuKind.AMD64)!!.contains(UbuntuSpec.UBUNTU_CODENAME))
     }
+
+    @Test
+    fun essentialPackagesStayInSyncWithAndroid() {
+        // Mirrors EmbeddedUbuntu.ESSENTIAL_PACKAGES (maximum set).
+        val expected = listOf(
+            "ca-certificates", "curl", "wget", "git", "nano", "vim",
+            "iputils-ping", "htop", "python3", "python3-pip",
+            "openssh-client", "nodejs", "npm"
+        )
+        assertEquals(expected, UbuntuSpec.ESSENTIAL_PACKAGES)
+        assertTrue(UbuntuSpec.ESSENTIAL_PACKAGES_VERSION.isNotBlank())
+        val cmd = UbuntuSpec.essentialAptCommand()
+        assertTrue(cmd.contains("DEBIAN_FRONTEND=noninteractive"))
+        assertTrue(cmd.contains("apt-get update"))
+        for (pkg in expected) assertTrue(cmd.contains(pkg))
+    }
 }

@@ -644,7 +644,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="Full user-space Ubuntu with apt. Without it the server runs the built-in shell. Start also downloads automatically."
+                        android:text="Full user-space Ubuntu with apt. Without it the server runs the built-in shell. Start also downloads automatically. Essential packages (python3, nodejs, git...) install in background on first start."
                         android:textSize="11sp"
                         android:textColor="@color/on_surface_variant" />
 
