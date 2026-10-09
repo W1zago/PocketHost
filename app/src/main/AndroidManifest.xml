@@ -63,7 +63,7 @@
         <activity
             android:name=".ui.ConsoleActivity"
             android:parentActivityName=".ui.ServerDetailActivity"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustNothing" />
 
         <activity
             android:name=".ui.RemoteConsoleActivity"

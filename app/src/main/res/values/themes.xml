@@ -106,28 +106,17 @@
         <item name="android:fontFamily">@font/jetbrains_mono_family</item>
     </style>
 
-    <!-- Console level chips: per-level text colors, primary active pill. -->
-    <style name="PocketHost.Chip.Level" parent="Widget.Material3.Chip.Filter">
-        <item name="chipBackgroundColor">@color/chip_level_bg</item>
-        <item name="chipStrokeColor">@color/outline_variant</item>
-        <item name="chipStrokeWidth">1dp</item>
-        <item name="android:minHeight">32dp</item>
-        <item name="checkedIconVisible">false</item>
-        <item name="ensureMinTouchTargetSize">true</item>
-    </style>
-
-    <!-- Quick-command pill (design: container bg, 6dp, mono 11, touch 48). -->
-    <!-- (PocketHost.Button.Pill removed with the console quick pills.) -->
+    <!-- (PocketHost.Chip.Level removed with the console level chips.) -->
 
     <style name="ExtraKey">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_height">28dp</item>
         <item name="android:layout_weight">1</item>
         <item name="android:layout_margin">2dp</item>
         <item name="android:background">@drawable/bg_extra_key</item>
         <item name="android:gravity">center</item>
         <item name="android:textColor">@color/on_surface</item>
-        <item name="android:textSize">11sp</item>
+        <item name="android:textSize">9sp</item>
         <item name="android:fontFamily">@font/jetbrains_mono_family</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
@@ -138,4 +127,8 @@
         <item name="android:background">@drawable/bg_extra_key_active</item>
         <item name="android:textColor">@color/primary</item>
     </style>
+
+    <!-- Quick-command pill (design: container bg, 6dp, mono 11, touch 48). -->
+    <!-- (PocketHost.Button.Pill removed with the console quick pills.) -->
+
 </resources>

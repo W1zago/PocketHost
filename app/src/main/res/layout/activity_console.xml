@@ -47,24 +47,11 @@
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
-                    <TextView
-                        android:id="@+id/tvServerName"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="server"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:textColor="@color/on_surface"
-                        android:fontFamily="@font/jetbrains_mono_family"
-                        android:ellipsize="end"
-                        android:maxLines="1" />
-
                     <LinearLayout
                         android:id="@+id/statusBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="8dp"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
                         android:background="@drawable/bg_status_idle"
@@ -92,15 +79,28 @@
 
                     </LinearLayout>
 
+                    <TextView
+                        android:id="@+id/tvServerName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="server"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface"
+                        android:fontFamily="@font/jetbrains_mono_family"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
                 </LinearLayout>
 
             </LinearLayout>
 
             <ImageButton
                 android:id="@+id/btnCopy"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:padding="15dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="8dp"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="Copy log"
                 android:src="@drawable/ic_content_copy"
@@ -108,10 +108,10 @@
 
             <ImageButton
                 android:id="@+id/btnShare"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="4dp"
-                android:padding="15dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="12dp"
+                android:padding="8dp"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="Share log"
                 android:src="@drawable/ic_share"
@@ -119,10 +119,10 @@
 
             <ImageButton
                 android:id="@+id/btnClear"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="4dp"
-                android:padding="15dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="12dp"
+                android:padding="8dp"
                 android:background="@drawable/bg_icon_btn"
                 android:contentDescription="Clear console"
                 android:src="@drawable/ic_delete"
@@ -145,198 +145,59 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@color/outline_variant" />
-
-        <!-- Filter row: text query + follow pill (design: low section) -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/surface_low"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
-
-            <EditText
-                android:id="@+id/etLogFilter"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_search"
-                android:hint="Filter logs…"
-                android:textColor="@color/on_surface"
-                android:textColorHint="@color/outline"
-                android:textSize="12sp"
-                android:fontFamily="@font/jetbrains_mono_family"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:singleLine="true"
-                android:inputType="text" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnAutoScroll"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginStart="8dp"
-                android:text="Follow: ON"
-                android:textSize="11sp"
-                android:fontFamily="@font/jetbrains_mono_family"
-                android:textAllCaps="false"
-                app:backgroundTint="@color/follow_on_bg"
-                app:cornerRadius="999dp"
-                app:icon="@drawable/bg_dot_running"
-                app:iconSize="6dp"
-                app:iconTint="@color/primary"
-                app:strokeColor="@color/follow_on_border"
-                app:strokeWidth="1dp"
-                android:textColor="@color/primary"
-                style="@style/PocketHost.Button.Tonal" />
-
-        </LinearLayout>
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/outline_variant" />
-
-        <!-- Level chips with real counts -->
-        <HorizontalScrollView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:clipToPadding="false"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp">
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chipLevelGroup"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingEnd="8dp"
-                app:singleSelection="true"
-                app:selectionRequired="true"
-                app:chipSpacingHorizontal="8dp">
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipAll"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checked="true"
-                    android:text="ALL"
-                    android:tag="ALL"
-                    android:textColor="@color/chip_level_all_text"
-                    style="@style/PocketHost.Chip.Level" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipInfo"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="INFO"
-                    android:tag="INFO"
-                    android:textColor="@color/chip_level_info_text"
-                    style="@style/PocketHost.Chip.Level" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipWarn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="WARN"
-                    android:tag="WARN"
-                    android:textColor="@color/chip_level_warn_text"
-                    style="@style/PocketHost.Chip.Level" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipError"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="ERROR"
-                    android:tag="ERROR"
-                    android:textColor="@color/chip_level_error_text"
-                    app:chipStrokeColor="@color/chip_level_error_stroke"
-                    style="@style/PocketHost.Chip.Level" />
-
-            </com.google.android.material.chip.ChipGroup>
-
-        </HorizontalScrollView>
-
-        <FrameLayout
+        <ScrollView
+            android:id="@+id/scrollView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="4dp"
+            android:fillViewport="true"
+            android:overScrollMode="never"
+            android:background="@android:color/transparent"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp">
 
-            <ScrollView
-                android:id="@+id/scrollView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@drawable/bg_console_view"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="10dp"
-                android:paddingBottom="10dp">
-
-                <TextView
+                <!-- Editable terminal: typing happens here at the end of the log.
+                     Read-only history is guarded in code (edits outside the
+                     input tail are reverted); selection/copy still works. -->
+                <EditText
                     android:id="@+id/consoleOutput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_gravity="bottom"
+                    android:background="@android:color/transparent"
                     android:fontFamily="@font/jetbrains_mono_family"
                     android:textColor="@color/on_surface"
+                    android:textColorHint="@color/outline"
+                    android:hint="Tap here to type…"
                     android:textSize="12sp"
                     android:lineSpacingExtra="2dp"
-                    android:textIsSelectable="true"
+                    android:cursorVisible="true"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
                     android:longClickable="true"
                     android:contextClickable="true"
-                    android:selectAllOnFocus="false"
-                    android:bufferType="spannable" />
+                    android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
+                    android:imeOptions="actionSend" />
 
             </ScrollView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnJumpLive"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_gravity="bottom|end"
-                android:layout_marginEnd="8dp"
-                android:layout_marginBottom="8dp"
-                android:text="↓ Jump to Live"
-                android:textSize="11sp"
-                android:fontFamily="@font/jetbrains_mono_family"
-                android:textAllCaps="false"
-                android:visibility="gone"
-                android:backgroundTint="@color/surface_high"
-                app:cornerRadius="999dp"
-                app:icon="@drawable/ic_arrow_downward"
-                app:iconSize="14dp"
-                app:iconTint="@color/primary"
-                app:strokeColor="@color/follow_on_border"
-                app:strokeWidth="1dp"
-                android:textColor="@color/primary"
-                style="@style/PocketHost.Button.Tonal" />
-
-        </FrameLayout>
 
         <LinearLayout
             android:id="@+id/extraKeysPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp">
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
 
                 <TextView
                     android:id="@+id/keyEsc"
@@ -373,9 +234,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:layout_marginTop="4dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:layout_marginTop="2dp">
 
                 <TextView
                     android:id="@+id/keyTab"
@@ -409,95 +270,6 @@
             </LinearLayout>
 
         </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/inputRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/surface_low"
-            android:padding="8dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="&gt;"
-                android:textColor="@color/tertiary"
-                android:textStyle="bold"
-                android:fontFamily="@font/jetbrains_mono_family"
-                android:textSize="14sp"
-                android:paddingEnd="8dp"
-                android:paddingStart="8dp" />
-
-            <EditText
-                android:id="@+id/inputCommand"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:background="@drawable/bg_console_view"
-                android:hint="Enter command or STDIN…"
-                android:textColor="@color/on_surface"
-                android:textColorHint="@color/outline"
-                android:fontFamily="@font/jetbrains_mono_family"
-                android:textSize="12sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:inputType="textNoSuggestions|textVisiblePassword"
-                android:imeOptions="actionSend"
-                android:singleLine="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnHistory"
-                android:layout_width="48dp"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginStart="8dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                app:cornerRadius="8dp"
-                android:contentDescription="Recall previous command"
-                app:icon="@drawable/ic_history"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp"
-                app:iconTint="@color/on_surface"
-                style="@style/PocketHost.Button.Tonal" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSend"
-                android:layout_width="48dp"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:layout_marginStart="8dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                app:cornerRadius="8dp"
-                app:backgroundTint="@color/primary"
-                android:contentDescription="Send command"
-                app:icon="@drawable/ic_send"
-                app:iconGravity="textStart"
-                app:iconPadding="0dp"
-                app:iconTint="@color/on_primary"
-                android:textColor="@color/on_primary" />
-
-        </LinearLayout>
-
-        <!-- Footer: real process state + buffered line count -->
-        <TextView
-            android:id="@+id/tvFooterStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/surface_lowest"
-            android:text="server.log"
-            android:textSize="10sp"
-            android:textColor="@color/on_surface_variant"
-            android:fontFamily="@font/jetbrains_mono_family"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp" />
 
     </LinearLayout>
 

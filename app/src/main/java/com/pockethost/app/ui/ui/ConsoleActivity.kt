@@ -8,11 +8,11 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.Selection
 import android.text.Spannable
+import android.text.Spanned
+import android.text.SpannableStringBuilder
 import android.text.TextWatcher
 import android.util.Log
 import android.view.ContextMenu
-import android.view.KeyEvent
-import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
@@ -30,7 +30,6 @@ import com.pockethost.app.databinding.ActivityConsoleBinding
 import com.pockethost.app.embedded.EmbeddedPaths
 import com.pockethost.app.embedded.EmbeddedProcessManager
 import com.pockethost.core.model.ServerStatus
-import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -61,38 +60,42 @@ class ConsoleActivity : AppCompatActivity() {
 
     // Log buffer + filters (all real: derived from actual backend output).
     private val logBuffer: ArrayDeque<String> = ArrayDeque()
-    private var infoCount = 0
-    private var warnCount = 0
-    private var errorCount = 0
-    private var filterLevel: String = "ALL"
-    private var filterQuery: String = ""
     private var autoScroll = true
-    private var footerTick = 0
 
-    // Sent-command history (local recall, like terminal history).
-    private val sentHistory: ArrayDeque<String> = ArrayDeque()
-    private var historyPos = -1
+    // In-console typing: rendered holds the read-only log, currentInput the
+    // editable tail after inputBase. programmatic guards displayConsole().
+    // prompt is the shell prefix (user@host:~$) from real facts, re-shown
+    // before the input tail; promptColor is tertiary green.
+    private val rendered = SpannableStringBuilder()
+    private var currentInput = ""
+    private var inputBase = 0
+    private var programmatic = false
+    private var prompt = ""
+    private var promptColor = 0
+    // True while the finger is down on the log (drag/tap in progress).
+    private var touching = false
 
     companion object {
         private const val INITIAL_TAIL_SIZE = 16 * 1024L
         private const val MAX_BUFFER_LINES = 2000
         private val ANSI_REGEX = Regex("\u001B\\[[0-9;?]*[A-Za-z]")
-        private val ERROR_PATTERN = Regex("error|exception|failed|severe|fatal|caused by", RegexOption.IGNORE_CASE)
-        private val WARN_PATTERN = Regex("warn", RegexOption.IGNORE_CASE)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityConsoleBinding.inflate(layoutInflater)
         // Edge-to-edge: draw under system bars, pad the root with real insets.
+        // IME included: when the keyboard opens, content squeezes above it.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
             val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(sys.left, sys.top, sys.right, maxOf(sys.bottom, ime.bottom))
             insets
         }
         setContentView(binding.root)
 
+        promptColor = ContextCompat.getColor(this, R.color.tertiary)
         serverId = intent.getStringExtra("server_id")
 
         setupToolbar()
@@ -134,83 +137,44 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    /** Log search + level filter + follow toggle (all computed from real output). */
+    /** Pause-on-scroll: scrolling up pauses follow, scrolling back to the
+     * bottom resumes it (no floating button covering the log). */
     private fun setupFilters() {
-        binding.chipLevelGroup.setOnCheckedStateChangeListener { group, _ ->
-            val chip = group.findViewById<Chip>(group.checkedChipId)
-            filterLevel = chip?.tag?.toString() ?: "ALL"
-            renderFiltered()
-        }
-        binding.etLogFilter.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                filterQuery = s?.toString()?.trim()?.lowercase() ?: ""
-                renderFiltered()
-            }
-        })
-        binding.btnAutoScroll.setOnClickListener {
-            autoScroll = !autoScroll
-            updateFollowPill()
-            binding.btnJumpLive.visibility = if (autoScroll) View.GONE else View.VISIBLE
-            if (autoScroll) scrollToBottom()
-        }
-        binding.btnJumpLive.setOnClickListener {
-            autoScroll = true
-            updateFollowPill()
-            binding.btnJumpLive.visibility = View.GONE
-            scrollToBottom()
-        }
-        updateFollowPill()
+        // Hard guard: never rest past the real text end.
+        binding.scrollView.setOnScrollChangeListener { _, _, _, _, _ -> clampScroll() }
         // Manual scroll up pauses follow (standard console UX).
         binding.scrollView.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_MOVE && autoScroll) {
+            if (event.action == MotionEvent.ACTION_MOVE) {
                 binding.scrollView.post {
-                    val max = binding.consoleOutput.bottom - binding.scrollView.height
-                    if (binding.scrollView.scrollY < max - 120) {
-                        autoScroll = false
-                        updateFollowPill()
-                        binding.btnJumpLive.visibility = View.VISIBLE
-                    }
+                    autoScroll = binding.scrollView.scrollY >= contentMaxScroll() - 120
                 }
             }
             false
         }
     }
 
-    /** Follow pill states (design: primary translucent ON, outline OFF). */
-    private fun updateFollowPill() {
-        try {
-            val on = autoScroll
-            binding.btnAutoScroll.text = if (on) "Follow: ON" else "Follow: OFF"
-            binding.btnAutoScroll.setTextColor(
-                ContextCompat.getColor(this, if (on) R.color.primary else R.color.on_surface_variant)
-            )
-            binding.btnAutoScroll.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(
-                    ContextCompat.getColor(this, if (on) R.color.follow_on_bg else R.color.surface_high)
-                )
-            binding.btnAutoScroll.strokeColor =
-                android.content.res.ColorStateList.valueOf(
-                    ContextCompat.getColor(this, if (on) R.color.follow_on_border else R.color.outline_variant)
-                )
-            binding.btnAutoScroll.setIconResource(
-                if (on) R.drawable.bg_dot_running else R.drawable.bg_dot_idle
-            )
-            binding.btnAutoScroll.iconTint =
-                android.content.res.ColorStateList.valueOf(
-                    ContextCompat.getColor(this, if (on) R.color.primary else R.color.outline)
-                )
-        } catch (_: Exception) {}
-    }
-
     private fun scrollToBottom() {
         binding.consoleOutput.post {
-            binding.scrollView.smoothScrollTo(
-                0,
-                (binding.consoleOutput.bottom - binding.scrollView.height).coerceAtLeast(0)
-            )
+            binding.scrollView.smoothScrollTo(0, contentMaxScroll())
         }
+    }
+
+    /** Real text end: child bottom + paddings - viewport (never past it). */
+    private fun contentMaxScroll(): Int {
+        return try {
+            (binding.consoleOutput.bottom +
+                binding.scrollView.paddingTop +
+                binding.scrollView.paddingBottom -
+                binding.scrollView.height).coerceAtLeast(0)
+        } catch (_: Exception) { 0 }
+    }
+
+    /** Hard clamp: scroll can never go past the last line. */
+    private fun clampScroll() {
+        try {
+            val max = contentMaxScroll()
+            if (binding.scrollView.scrollY > max) binding.scrollView.scrollTo(0, max)
+        } catch (_: Exception) {}
     }
 
     override fun onCreateContextMenu(
@@ -268,11 +232,9 @@ class ConsoleActivity : AppCompatActivity() {
 
     private fun clearConsole() {
         logBuffer.clear()
-        infoCount = 0
-        warnCount = 0
-        errorCount = 0
-        binding.consoleOutput.text = ""
-        updateLevelCounts()
+        rendered.clear()
+        currentInput = ""
+        displayConsole()
         Toast.makeText(this, "Console cleared (log file kept)", Toast.LENGTH_SHORT).show()
     }
 
@@ -297,29 +259,190 @@ class ConsoleActivity : AppCompatActivity() {
     }
 
     private fun setupConsole() {
-        binding.btnSend.setOnClickListener {
-            val command = binding.inputCommand.text.toString()
-            if (command.isNotEmpty()) {
-                sendCommand(command)
-                binding.inputCommand.text?.clear()
-            } else {
-                writeToProcess("\n")
-            }
-        }
-        binding.btnHistory.setOnClickListener { recallHistory() }
-        binding.inputCommand.setOnEditorActionListener { _, actionId, event ->
-            if (actionId == EditorInfo.IME_ACTION_SEND ||
-                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
-                val command = binding.inputCommand.text.toString()
-                if (command.isNotEmpty()) {
-                    sendCommand(command)
-                    binding.inputCommand.text?.clear()
-                } else writeToProcess("\n")
-                return@setOnEditorActionListener true
+        // Touch policy: clean tap snaps the cursor to the input tail (posted,
+        // so it runs after EditText's own placement); press-and-hold + drag
+        // keeps framework text selection for copy; plain drag scrolls the log
+        // manually (works even if the parent never intercepts), with fling.
+        var downX = 0f
+        var downY = 0f
+        var downT = 0L
+        var lastY = 0f
+        var dragging = false
+        var tracker: android.view.VelocityTracker? = null
+        val vc = android.view.ViewConfiguration.get(this)
+        val slop = vc.scaledTouchSlop.toFloat()
+        binding.consoleOutput.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    touching = true
+                    downX = event.x
+                    downY = event.y
+                    downT = event.eventTime
+                    lastY = event.y
+                    dragging = false
+                    tracker?.recycle()
+                    tracker = android.view.VelocityTracker.obtain()
+                    tracker?.addMovement(event)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    tracker?.addMovement(event)
+                    try {
+                        val s0 = binding.consoleOutput.selectionStart
+                        val s1 = binding.consoleOutput.selectionEnd
+                        // Active selection (copy flow): don't interfere.
+                        if (s0 != s1) return@setOnTouchListener false
+                    } catch (_: Exception) {}
+                    val dist = kotlin.math.hypot(
+                        (event.x - downX).toDouble(), (event.y - downY).toDouble()
+                    )
+                    if (!dragging && dist > slop) {
+                        dragging = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (dragging) {
+                        val dy = event.y - lastY
+                        lastY = event.y
+                        // Mirrored scroll (user request): content moves opposite
+                        // the finger, like dragging a scrollbar thumb.
+                        binding.scrollView.scrollBy(0, dy.toInt())
+                        return@setOnTouchListener true
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    touching = false
+                    tracker?.addMovement(event)
+                    if (dragging) {
+                        dragging = false
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        try {
+                            tracker?.computeCurrentVelocity(1000, vc.scaledMaximumFlingVelocity.toFloat())
+                            val vy = tracker?.yVelocity ?: 0f
+                            if (kotlin.math.abs(vy) > vc.scaledMinimumFlingVelocity) {
+                                // Mirrored to match the drag above: keep flying
+                                // opposite the finger flick direction.
+                                binding.scrollView.fling(vy.toInt())
+                            }
+                        } catch (_: Exception) {}
+                        tracker?.recycle()
+                        tracker = null
+                        binding.scrollView.post {
+                            try {
+                                autoScroll = binding.scrollView.scrollY >= contentMaxScroll() - 120
+                            } catch (_: Exception) {}
+                        }
+                        return@setOnTouchListener true
+                    }
+                    tracker?.recycle()
+                    tracker = null
+                    val dt = event.eventTime - downT
+                    val dist = kotlin.math.hypot(
+                        (event.x - downX).toDouble(), (event.y - downY).toDouble()
+                    )
+                    if (dt < 300 && dist < 24) {
+                        binding.consoleOutput.post {
+                            try {
+                                val s0 = binding.consoleOutput.selectionStart
+                                val s1 = binding.consoleOutput.selectionEnd
+                                if (s0 == s1) {
+                                    binding.consoleOutput.setSelection(
+                                        binding.consoleOutput.text.length
+                                    )
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    touching = false
+                    dragging = false
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    tracker?.recycle()
+                    tracker = null
+                }
             }
             false
         }
-        binding.inputCommand.requestFocus()
+        binding.consoleOutput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                onTerminalEdited(s)
+            }
+        })
+        binding.consoleOutput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
+                submitTerminalInput()
+                true
+            } else false
+        }
+        binding.consoleOutput.requestFocus()
+    }
+
+    /** Shows rendered log + prompt + preserved input tail.
+     * Cursor follows the end only if it was already there (reading the
+     * history above must never yank the viewport away). */
+    private fun displayConsole() {
+        try {
+            programmatic = true
+            val prevLen = binding.consoleOutput.text.length
+            val prevSel = try {
+                binding.consoleOutput.selectionStart
+            } catch (_: Exception) { prevLen }
+            val sb = SpannableStringBuilder(rendered)
+            if (prompt.isNotEmpty()) {
+                val s = sb.length
+                sb.append(prompt)
+                sb.setSpan(
+                    android.text.style.ForegroundColorSpan(promptColor),
+                    s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                sb.setSpan(
+                    android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                    s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+            sb.append(currentInput)
+            binding.consoleOutput.setText(sb)
+            inputBase = sb.length - currentInput.length
+            // Follow the end only when actually following (not while the user
+            // reads history or drags); otherwise the stream would rip the
+            // viewport down and old messages would be unreachable.
+            if (prevSel >= prevLen && autoScroll && !touching) {
+                binding.consoleOutput.setSelection(sb.length)
+            }
+        } catch (_: Exception) {
+        } finally {
+            programmatic = false
+        }
+    }
+
+    private fun onTerminalEdited(s: Editable?) {
+        if (programmatic) return
+        try {
+            val text = s?.toString() ?: return
+            // Edit touched read-only history/prompt -> revert to log + input tail.
+            val guard = rendered.toString() + prompt
+            if (text.length < inputBase || !text.startsWith(guard)) {
+                displayConsole()
+                return
+            }
+            currentInput = text.substring(inputBase)
+            if (currentInput.contains("\n")) submitTerminalInput()
+        } catch (_: Exception) {}
+    }
+
+    /** Sends every completed line, keeps the unfinished tail as input. */
+    private fun submitTerminalInput() {
+        try {
+            val parts = currentInput.replace("\r", "").split("\n")
+            currentInput = parts.last()
+            for (i in 0 until parts.size - 1) {
+                val line = parts[i]
+                if (line.isNotEmpty()) sendCommand(line) else writeToProcess("\n")
+            }
+            displayConsole()
+            if (autoScroll) scrollToBottom()
+        } catch (_: Exception) {}
     }
 
     private fun setupExtraKeys() {
@@ -377,6 +500,16 @@ class ConsoleActivity : AppCompatActivity() {
         writeToProcessRaw(toSend)
     }
 
+    private fun writeToProcessRaw(data: String) {
+        val id = serverId ?: return
+        val ok = try {
+            // send raw bytes as-is without trailing \n
+            if (data.endsWith("\n")) EmbeddedProcessManager.sendInput(id, data)
+            else EmbeddedProcessManager.sendRaw(id, data.toByteArray(Charsets.UTF_8))
+        } catch (_: Exception) { false }
+        if (!ok) appendOutput("[process not running]\n")
+    }
+
     private fun writeToProcess(data: String) {
         val id = serverId ?: return
         val ok = try {
@@ -391,16 +524,6 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    private fun writeToProcessRaw(data: String) {
-        val id = serverId ?: return
-        val ok = try {
-            // send raw bytes as-is without trailing \n
-            if (data.endsWith("\n")) EmbeddedProcessManager.sendInput(id, data)
-            else EmbeddedProcessManager.sendRaw(id, data.toByteArray(Charsets.UTF_8))
-        } catch (_: Exception) { false }
-        if (!ok) appendOutput("[process not running]\n")
-    }
-
     private fun loadServerInfo() {
         serverId?.let { id ->
             lifecycleScope.launch {
@@ -410,12 +533,14 @@ class ConsoleActivity : AppCompatActivity() {
                             val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
                             workDir = EmbeddedPaths.resolveWorkDir(this@ConsoleActivity, it.id, uriStr)
                             binding.tvServerName.text = it.name
+                            prompt = buildPrompt(it)
+                            displayConsole()
                             updateStatusPill(it.status)
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("ConsoleActivity", "loadServerInfo", e)
-                    binding.consoleOutput.setText("ERROR loading console: ${e.message}\n")
+                    appendOutput("ERROR loading console: ${e.message}\n")
                 }
             }
         }
@@ -510,7 +635,10 @@ class ConsoleActivity : AppCompatActivity() {
                     val length = logFile.length()
                     if (length < offset) {
                         offset = 0L
-                        withContext(Dispatchers.Main) { binding.consoleOutput.text = "" }
+                        withContext(Dispatchers.Main) {
+                            rendered.clear()
+                            displayConsole()
+                        }
                     }
                     if (length > offset) {
                         val text = try {
@@ -557,55 +685,18 @@ class ConsoleActivity : AppCompatActivity() {
             if (line.isEmpty() && logBuffer.isEmpty()) continue
             logBuffer.addLast(line)
             if (logBuffer.size > MAX_BUFFER_LINES) logBuffer.removeFirst()
-            when (lineLevel(line)) {
-                "ERROR" -> errorCount++
-                "WARN" -> warnCount++
-                else -> infoCount++
-            }
-            if (matchesFilter(line)) visible.add(line)
+            visible.add(line)
         }
         if (visible.isNotEmpty()) {
             // Fixed HH:mm column + hanging indent (design); raw text kept in logBuffer.
             val formatted = ConsoleLogFormat.formatLines(this, visible, hangingIndentPx())
-            if (binding.consoleOutput.text.isEmpty()) binding.consoleOutput.append(formatted)
+            if (rendered.isEmpty()) rendered.append(formatted)
             else {
-                binding.consoleOutput.append("\n")
-                binding.consoleOutput.append(formatted)
+                rendered.append("\n")
+                rendered.append(formatted)
             }
+            displayConsole()
             if (autoScroll) scrollToBottom()
-        }
-        updateLevelCounts()
-        updateFooter()
-    }
-
-    private fun lineLevel(line: String): String {
-        return when {
-            ERROR_PATTERN.containsMatchIn(line) -> "ERROR"
-            WARN_PATTERN.containsMatchIn(line) -> "WARN"
-            else -> "INFO"
-        }
-    }
-
-    private fun matchesFilter(line: String): Boolean {
-        if (filterQuery.isNotEmpty() && !line.lowercase().contains(filterQuery)) return false
-        return when (filterLevel) {
-            "INFO" -> lineLevel(line) == "INFO"
-            "WARN" -> lineLevel(line) == "WARN"
-            "ERROR" -> lineLevel(line) == "ERROR"
-            else -> true
-        }
-    }
-
-    /** Full re-render from buffer (used when the filter changes). */
-    private fun renderFiltered() {
-        try {
-            binding.consoleOutput.text =
-                ConsoleLogFormat.formatLines(
-                    this, logBuffer.filter { matchesFilter(it) }, hangingIndentPx()
-                )
-            if (autoScroll) scrollToBottom()
-        } catch (e: Exception) {
-            Log.e("ConsoleActivity", "renderFiltered failed", e)
         }
     }
 
@@ -615,57 +706,26 @@ class ConsoleActivity : AppCompatActivity() {
         } catch (_: Exception) { "" }
     }
 
-    private fun updateLevelCounts() {
-        try {
-            val total = infoCount + warnCount + errorCount
-            binding.chipAll.text = "ALL $total"
-            binding.chipInfo.text = "INFO $infoCount"
-            binding.chipWarn.text = "WARN $warnCount"
-            binding.chipError.text = "ERROR $errorCount"
-        } catch (_: Exception) {}
-    }
-
-    /** Footer shows the REAL process state (throttled: isRunning reads live facts). */
-    private fun updateFooter() {
-        footerTick++
-        if (footerTick % 10 != 0) return
-        val id = serverId ?: return
-        lifecycleScope.launch(Dispatchers.IO) {
-            val running = try {
-                EmbeddedProcessManager.isRunning(id)
-            } catch (_: Exception) { false }
-            withContext(Dispatchers.Main) {
-                try {
-                    val state = if (running) "● running" else "● stopped"
-                    binding.tvFooterStatus.text = "$state • server.log • ${logBuffer.size} lines"
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
     private fun sendCommand(command: String) {
-        recordHistory(command)
-        appendOutput("$ $command\n")
+        appendOutput("$prompt$command\n")
         writeToProcess("$command\n")
     }
 
-    private fun recordHistory(command: String) {
-        val cmd = command.trim()
-        if (cmd.isEmpty()) return
-        if (sentHistory.lastOrNull() != cmd) {
-            sentHistory.addLast(cmd)
-            if (sentHistory.size > 50) sentHistory.removeFirst()
+    /** Shell-style prompt from REAL facts (never sample values like kensur@homeserver).
+     * Ubuntu: guest shell really runs as root (proot -0, HOME=/root).
+     * Minecraft: no shell user exists, so the console identity is the server name.
+     * Host: device codename (Build.DEVICE). Path: ~ (servers start in their
+     * work dir = their home; the guest shell may cd afterwards). */
+    private fun buildPrompt(server: com.pockethost.core.model.Server): String {
+        val user = if (server.type == com.pockethost.core.model.ServerType.UBUNTU_SERVER) {
+            "root"
+        } else {
+            server.name.trim().ifEmpty { "server" }
         }
-        historyPos = -1
-    }
-
-    /** Cycles previously sent commands into the input (terminal-style history). */
-    private fun recallHistory() {
-        if (sentHistory.isEmpty()) return
-        historyPos = (historyPos + 1) % sentHistory.size
-        val cmd = sentHistory[sentHistory.size - 1 - historyPos]
-        binding.inputCommand.setText(cmd)
-        binding.inputCommand.setSelection(cmd.length)
+        val host = try {
+            android.os.Build.DEVICE.ifBlank { android.os.Build.MODEL }
+        } catch (_: Exception) { "" }
+        return "$user@${host.ifBlank { "device" }}:~$ "
     }
 
     override fun onSupportNavigateUp(): Boolean {

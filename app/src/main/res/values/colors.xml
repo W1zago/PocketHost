@@ -57,9 +57,6 @@
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
 
-    <!-- Follow pill (design: primary 20% fill + 50% border when ON) -->
-    <color name="follow_on_bg">#33C0C1FF</color>
-    <color name="follow_on_border">#80C0C1FF</color>
 
     <!-- Server Studio (detail) variant palette, taken from its own code.html:
          cards #141D31, elevated #1B253E, chips #232E4C, borders #283454. -->

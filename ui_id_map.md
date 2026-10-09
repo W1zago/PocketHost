@@ -55,13 +55,15 @@ Orphans (containers/static): logCard, mcSettings.tvSettingsHint.
 ## activity_console.xml ↔ ConsoleActivity.kt
 custom 56dp header (no toolbar): btnBack, tvServerName (14sp mono), statusBadge/Dot/Text (10sp),
 btnCopy/btnShare/btnClear (direct → copyAll/shareLog/clearConsole), btnMenu (popup from menu_console).
-etLogFilter, btnAutoScroll (follow pill via updateFollowPill), chipLevelGroup,
-chipAll/Info/Warn/Error (per-level text selectors + real counts), scrollView,
-consoleOutput, btnJumpLive (end-aligned pill),
-keyEsc/Slash/Dash/Home/Up/End/PgUp/Tab/Left/Down/Right/PgDn/Ctrl/Alt,
-inputCommand, btnHistory, btnSend, tvFooterStatus.
+scrollView (weight-1, fillViewport, content bottom-pinned, overScroll never —
+no scrolling past the last line; follow pauses on scroll-up, resumes at bottom),
+consoleOutput (editable terminal: typing at end → stdin; history guarded;
+shell prompt user@host:~$ from real facts: root/server-name + Build.DEVICE),
+btnJumpLive (end-aligned pill),
+keyEsc/Slash/Dash/Home/Up/End/PgUp/Tab/Left/Down/Right/PgDn/Ctrl/Alt.
 Long-press menu (1-4) + btnMenu popup (menu_console) replace old options menu.
-Orphans (containers): extraKeysPanel, inputRow.
+Extra keys restored (panel under viewport, no overlay): extraKeysPanel,
+keyEsc/Slash/Dash/Home/Up/End/PgUp/Tab/Left/Down/Right/PgDn/Ctrl/Alt.
 
 ## activity_file_manager.xml ↔ FileManagerActivity.kt (UnifiedAdapter → item_file.xml)
 root, toolbar, tvCrumbs, tvStorageInfo, btnNewFile, btnNewFolder, searchInput,
