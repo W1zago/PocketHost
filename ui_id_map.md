@@ -55,15 +55,27 @@ Orphans (containers/static): logCard, mcSettings.tvSettingsHint.
 ## activity_console.xml ↔ ConsoleActivity.kt
 custom 56dp header (no toolbar): btnBack, tvServerName (14sp mono), statusBadge/Dot/Text (10sp),
 btnCopy/btnShare/btnClear (direct → copyAll/shareLog/clearConsole), btnMenu (popup from menu_console).
-scrollView (weight-1, fillViewport, content bottom-pinned, overScroll never —
-no scrolling past the last line; follow pauses on scroll-up, resumes at bottom),
-consoleOutput (editable terminal: typing at end → stdin; history guarded;
-shell prompt user@host:~$ from real facts: root/server-name + Build.DEVICE),
-btnJumpLive (end-aligned pill),
-keyEsc/Slash/Dash/Home/Up/End/PgUp/Tab/Left/Down/Right/PgDn/Ctrl/Alt.
+scrollView is ConsoleScrollView in FrameLayout (weight-1, fillViewport,
+top-aligned child (never layout_gravity=bottom: it collapses scroll range);
+short logs pinned low via minimumHeight + text gravity; 8dp bottom padding;
+child-driven scroll suppressed so nothing yanks the viewport;
+direct finger drag + fling (content follows the finger), no system scrollbar;
+streaming output never touches the viewport mid-gesture or mid-fling;
+history: last 256KB of server.log on open, up to 8000 buffered lines;
+follow pauses on scroll-up, resumes at bottom; slim single-row
+scrollOverlay with btnToTop/btnToBottom with "N new" badge while paused;
+draggable fastScrollTrack/fastScrollThumb on the right edge (thumb size =
+viewport/content, hidden when nothing scrolls; direct manipulation
+to scroll the log),
+logView (Termux-style inline terminal: single editable field, typing after
+the prompt; history guarded, copy via long-press),
+tvScrollPos pill (top-right: live percent + buffered lines, tap = live tail),
+green shell prompt from real facts (root/server-name + Build.DEVICE);
+IME Send / newline submits to stdin, echo goes to the log.
+keyEsc/Slash/Dash/Home/Up/End/Tab/Left/Down/Right/Ctrl/Alt send raw keys;
+PgUp/PgDn page the viewport (tap), long-press sends terminal sequence.
 Long-press menu (1-4) + btnMenu popup (menu_console) replace old options menu.
-Extra keys restored (panel under viewport, no overlay): extraKeysPanel,
-keyEsc/Slash/Dash/Home/Up/End/PgUp/Tab/Left/Down/Right/PgDn/Ctrl/Alt.
+Extra keys panel under the input row: extraKeysPanel (same keys).
 
 ## activity_file_manager.xml ↔ FileManagerActivity.kt (UnifiedAdapter → item_file.xml)
 root, toolbar, tvCrumbs, tvStorageInfo, btnNewFile, btnNewFolder, searchInput,
@@ -73,8 +85,10 @@ NOTE (done): adapter/FileAdapter.kt was dead code — deleted in 256ad4f.
 
 ## activity_remote_console.xml ↔ RemoteConsoleActivity.kt
 root, toolbar, statusBadge/Dot, tvRemoteStatus, etRemoteHost, progressBar,
-btnConnect/Disconnect/Ping, btnRemoteUname/Pwd/Ls/Log, remoteScroll,
-remoteOutput, inputRemoteCommand, btnRemoteSend. All covered.
+btnConnect/Disconnect/Ping, btnRemoteUname/Pwd/Ls/Log, remoteScroll
+(native scroll + visible scrollbar + pause-on-scroll),
+remoteOutput, btnRemoteTop/btnRemoteBottom ("N new" badge while paused),
+inputRemoteCommand, btnRemoteSend. All covered.
 
 ## activity_device_scan.xml + item_device_check.xml ↔ DeviceScanActivity.kt
 activity: root, toolbar, healthTitle, healthSubtitle, healthStatusChip (new),

@@ -32,6 +32,11 @@ class RemoteConsoleActivity : AppCompatActivity() {
     private var connectedBase: String? = null
     private var connecting = false
 
+    // Convenient viewport: native fling, pause-on-scroll, resume on Bottom.
+    private var followLive = true
+    private var pendingLines = 0
+    private var userTouching = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityRemoteConsoleBinding.inflate(layoutInflater)
@@ -62,6 +67,7 @@ class RemoteConsoleActivity : AppCompatActivity() {
         binding.btnRemotePwd.setOnClickListener { quickExec("pwd") }
         binding.btnRemoteLs.setOnClickListener { quickExec("ls -la") }
         binding.btnRemoteLog.setOnClickListener { fetchLog() }
+        setupLogScroll()
     }
 
     private fun loadSavedHost(): String {
@@ -166,7 +172,11 @@ class RemoteConsoleActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 if (tail == null) appendOutput("[log fetch failed]\n")
                 else appendOutput(tail.take(8000) + "\n")
-                scrollToBottom()
+                // Explicit user request: jump to the fresh output.
+                followLive = true
+                pendingLines = 0
+                updateJumpButtons()
+                scrollToBottom(instant = false)
             }
         }
     }
@@ -187,7 +197,11 @@ class RemoteConsoleActivity : AppCompatActivity() {
                 binding.btnRemoteSend.isEnabled = true
                 if (res.output.isNotEmpty()) appendOutput(res.output.trimEnd() + "\n")
                 appendOutput("[exit ${res.code}]\n")
-                scrollToBottom()
+                // Answer to the user's own command: show it.
+                followLive = true
+                pendingLines = 0
+                updateJumpButtons()
+                scrollToBottom(instant = false)
                 if (!res.ok && res.code == -1 && res.raw.contains("failed")) {
                     appendOutput("Hint: PC unreachable - re-check IP:PORT and LAN.\n")
                 }
@@ -198,17 +212,112 @@ class RemoteConsoleActivity : AppCompatActivity() {
     private fun appendOutput(text: String) {
         try {
             val clean = text.replace("\r\n", "\n")
+            val added = clean.lines().size.coerceAtLeast(1)
             binding.remoteOutput.append(
                 if (binding.remoteOutput.text.isEmpty()) clean else clean
             )
-            scrollToBottom()
+            if (followLive && !userTouching) {
+                scrollToBottom(instant = true)
+            } else {
+                pendingLines += added
+                updateJumpButtons()
+                // Paused: keep viewport where it was (TextView append keeps
+                // scrollY, so nothing to restore — just don't auto-scroll).
+            }
         } catch (_: Exception) {}
     }
 
-    private fun scrollToBottom() {
+    /**
+     * Scroll subsystem (same UX as the built-in console, adapted to the
+     * fixed-height log card): native gestures, pause when the user scrolls
+     * up, Bottom/Top jumps, "N new" badge while paused.
+     */
+    private fun setupLogScroll() {
+        try {
+            // Inner card scrolls natively inside the page: don't let the outer
+            // NestedScrollView steal the gesture mid-drag.
+            binding.remoteScroll.setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        userTouching = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        userTouching = false
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        binding.remoteScroll.post {
+                            onRemoteScrolled(binding.remoteScroll.scrollY)
+                        }
+                        binding.remoteScroll.postDelayed(
+                            { onRemoteScrolled(binding.remoteScroll.scrollY) }, 350
+                        )
+                    }
+                }
+                false
+            }
+            binding.remoteScroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                onRemoteScrolled(scrollY)
+            }
+            binding.btnRemoteBottom.setOnClickListener {
+                followLive = true
+                pendingLines = 0
+                updateJumpButtons()
+                scrollToBottom(instant = false)
+            }
+            binding.btnRemoteTop.setOnClickListener {
+                followLive = false
+                updateJumpButtons()
+                try { binding.remoteScroll.smoothScrollTo(0, 0) } catch (_: Exception) {}
+            }
+            updateJumpButtons()
+        } catch (_: Exception) {}
+    }
+
+    private fun remoteMaxScroll(): Int {
+        return try {
+            (binding.remoteOutput.bottom +
+                binding.remoteScroll.paddingTop +
+                binding.remoteScroll.paddingBottom -
+                binding.remoteScroll.height).coerceAtLeast(0)
+        } catch (_: Exception) { 0 }
+    }
+
+    private fun onRemoteScrolled(scrollY: Int) {
+        try {
+            val max = remoteMaxScroll()
+            if (scrollY > max + 2 && max >= 0) {
+                binding.remoteScroll.scrollTo(0, max)
+                return
+            }
+            val threshold = (16 * resources.displayMetrics.density).toInt().coerceAtLeast(8)
+            val atBottom = scrollY >= max - threshold
+            if (atBottom) {
+                followLive = true
+                pendingLines = 0
+            } else {
+                followLive = false
+            }
+            updateJumpButtons()
+        } catch (_: Exception) {}
+    }
+
+    private fun updateJumpButtons() {
+        try {
+            binding.btnRemoteBottom.text = if (!followLive && pendingLines > 0) {
+                "↓ Bottom · $pendingLines new"
+            } else {
+                "↓ Bottom"
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun scrollToBottom(instant: Boolean) {
         binding.remoteOutput.post {
             try {
-                binding.remoteScroll.smoothScrollTo(0, binding.remoteOutput.bottom)
+                val max = remoteMaxScroll()
+                if (instant) binding.remoteScroll.scrollTo(0, max)
+                else binding.remoteScroll.smoothScrollTo(0, max)
             } catch (_: Exception) {}
         }
     }

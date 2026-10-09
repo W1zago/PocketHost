@@ -219,7 +219,13 @@
                     android:layout_height="320dp"
                     android:layout_marginTop="12dp"
                     android:background="@drawable/bg_console_view"
-                    android:padding="10dp">
+                    android:padding="10dp"
+                    android:fillViewport="true"
+                    android:clipToPadding="false"
+                    android:scrollbars="vertical"
+                    android:fadeScrollbars="false"
+                    android:scrollbarSize="6dp"
+                    android:overScrollMode="ifContentScrolls">
 
                     <TextView
                         android:id="@+id/remoteOutput"
@@ -233,6 +239,33 @@
                         android:textIsSelectable="true" />
 
                 </ScrollView>
+
+                <!-- Log viewport jumps: pause-on-scroll, Bottom resumes follow -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:gravity="end">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRemoteTop"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="↑ Top"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnRemoteBottom"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="8dp"
+                        android:text="↓ Bottom"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Start" />
+
+                </LinearLayout>
 
                 <!-- Input row -->
                 <LinearLayout

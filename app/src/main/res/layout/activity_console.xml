@@ -145,28 +145,36 @@
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="@color/outline_variant" />
-        <ScrollView
-            android:id="@+id/scrollView"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="4dp"
-            android:fillViewport="true"
-            android:overScrollMode="never"
-            android:background="@android:color/transparent"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="10dp"
-            android:paddingBottom="4dp">
+            android:layout_weight="1">
 
-                <!-- Editable terminal: typing happens here at the end of the log.
-                     Read-only history is guarded in code (edits outside the
-                     input tail are reverted); selection/copy still works. -->
+            <com.pockethost.app.ui.ConsoleScrollView
+                android:id="@+id/scrollView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="4dp"
+                android:fillViewport="true"
+                android:clipToPadding="false"
+                android:scrollbars="none"
+                android:overScrollMode="ifContentScrolls"
+                android:background="@android:color/transparent"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="8dp">
+
+                <!-- Terminal surface (Termux-style): typing happens inline here,
+                     right after the prompt. NOTE: never put layout_gravity
+                     on this child: bottom gravity on a taller-than-viewport
+                     child collapses the scroll range to ~0 (bottom-aligned,
+                     top goes negative). Short logs are pinned low via
+                     minimumHeight + text gravity instead (updateFastThumb). -->
                 <EditText
-                    android:id="@+id/consoleOutput"
+                    android:id="@+id/logView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="bottom"
                     android:background="@android:color/transparent"
                     android:fontFamily="@font/jetbrains_mono_family"
                     android:textColor="@color/on_surface"
@@ -174,15 +182,83 @@
                     android:hint="Tap here to type…"
                     android:textSize="12sp"
                     android:lineSpacingExtra="2dp"
+                    android:gravity="bottom"
                     android:cursorVisible="true"
                     android:focusable="true"
                     android:focusableInTouchMode="true"
                     android:longClickable="true"
                     android:contextClickable="true"
+                    android:scrollbars="none"
+                    android:overScrollMode="never"
                     android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
                     android:imeOptions="actionSend" />
 
-            </ScrollView>
+            </com.pockethost.app.ui.ConsoleScrollView>
+
+            <!-- Draggable fast-scroll strip (right edge): finger drag here
+                 jumps/scrolls the log directly. The thumb height reflects
+                 viewport/content ratio; hidden when there is nothing to scroll. -->
+            <FrameLayout
+                android:id="@+id/fastScrollTrack"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                android:clipChildren="false"
+                android:background="@android:color/transparent">
+
+                <!-- Faint full-height rail so the drag zone is discoverable. -->
+                <View
+                    android:layout_width="2dp"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:background="@color/outline_variant"
+                    android:alpha="0.5" />
+
+                <View
+                    android:id="@+id/fastScrollThumb"
+                    android:layout_width="8dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top|center_horizontal"
+                    android:background="@drawable/bg_fast_scroll_thumb"
+                    android:alpha="0.9" />
+
+            </FrameLayout>
+
+            <!-- Scroll helper overlay: appears only while reading history
+                 (follow paused). Slim single row, bottom-anchored, so it
+                 covers as little of the log as possible. -->
+            <LinearLayout
+                android:id="@+id/scrollOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnToTop"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="↑ Top"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnToBottom"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="8dp"
+                        android:text="↓ Bottom"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Start" />
+
+            </LinearLayout>
+
+        </FrameLayout>
 
         <LinearLayout
             android:id="@+id/extraKeysPanel"
