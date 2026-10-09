@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
@@ -18,6 +19,7 @@
             android:background="@color/background"
             app:title="Files"
             app:titleTextColor="@color/on_surface"
+            app:titleTextAppearance="@style/PocketHost.ToolbarTitle"
             app:navigationIconTint="@color/on_surface" />
 
         <!-- Breadcrumbs (real path within the opened root) -->
@@ -31,8 +33,8 @@
             android:text="/"
             android:textSize="11sp"
             android:textColor="@color/secondary"
-            android:fontFamily="monospace"
-            android:ellipsize="start"
+            android:fontFamily="@font/jetbrains_mono_family"
+            android:ellipsize="middle"
             android:maxLines="1" />
 
         <!-- Storage card (real StatFs of current dir) -->
@@ -62,7 +64,7 @@
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="@color/on_surface"
-                android:fontFamily="monospace" />
+                android:fontFamily="@font/jetbrains_mono_family" />
 
         </LinearLayout>
 
@@ -78,8 +80,9 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnNewFile"
                 android:layout_width="0dp"
-                android:layout_height="40dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:minHeight="48dp"
                 android:text="New File"
                 android:textSize="12sp"
                 style="@style/PocketHost.Button.Tonal" />
@@ -87,9 +90,10 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnNewFolder"
                 android:layout_width="0dp"
-                android:layout_height="40dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp"
+                android:minHeight="48dp"
                 android:text="New Folder"
                 android:textSize="12sp"
                 style="@style/PocketHost.Button.Tonal" />
@@ -110,7 +114,7 @@
             <EditText
                 android:id="@+id/searchInput"
                 android:layout_width="0dp"
-                android:layout_height="40dp"
+                android:layout_height="48dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_search"
                 android:hint="Search files…"
@@ -133,11 +137,11 @@
                 <com.google.android.material.textfield.MaterialAutoCompleteTextView
                     android:id="@+id/sortInput"
                     android:layout_width="match_parent"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:text="Name"
                     android:textSize="12sp"
                     android:textColor="@color/secondary"
-                    android:fontFamily="monospace"
+                    android:fontFamily="@font/jetbrains_mono_family"
                     android:inputType="none" />
 
             </com.google.android.material.textfield.TextInputLayout>

@@ -25,6 +25,9 @@
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/surface_lowest</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!-- Design fonts: Inter for UI, JetBrains Mono for technical data. -->
+        <item name="android:fontFamily">@font/inter_family</item>
+        <item name="fontFamily">@font/inter_family</item>
     </style>
 
     <!-- Reusable PocketHost components (rounded per design: cards 16dp, controls 8dp, pills full) -->
@@ -41,7 +44,7 @@
         <item name="backgroundTint">@color/primary</item>
         <item name="android:textColor">@color/on_primary</item>
         <item name="cornerRadius">8dp</item>
-        <item name="android:minHeight">44dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
@@ -49,7 +52,7 @@
         <item name="backgroundTint">@color/surface_high</item>
         <item name="android:textColor">@color/on_surface</item>
         <item name="cornerRadius">8dp</item>
-        <item name="android:minHeight">44dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="strokeColor">@color/surface_highest</item>
         <item name="strokeWidth">1dp</item>
     </style>
@@ -58,7 +61,7 @@
         <item name="backgroundTint">@color/badge_error_bg</item>
         <item name="android:textColor">@color/error</item>
         <item name="cornerRadius">8dp</item>
-        <item name="android:minHeight">40dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="strokeColor">@color/error_container</item>
         <item name="strokeWidth">1dp</item>
     </style>
@@ -67,7 +70,7 @@
         <item name="backgroundTint">@color/primary_container</item>
         <item name="android:textColor">@color/on_primary</item>
         <item name="cornerRadius">8dp</item>
-        <item name="android:minHeight">40dp</item>
+        <item name="android:minHeight">48dp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
@@ -78,29 +81,61 @@
     </style>
 
     <style name="PocketHost.Chip.Filter" parent="Widget.Material3.Chip.Filter">
-        <item name="chipBackgroundColor">@color/surface_high</item>
-        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="chipBackgroundColor">@color/chip_filter_bg</item>
+        <item name="android:textColor">@color/chip_filter_text</item>
+        <item name="chipStrokeColor">@color/chip_filter_stroke</item>
+        <item name="chipStrokeWidth">1dp</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="checkedIconVisible">false</item>
+        <item name="ensureMinTouchTargetSize">true</item>
+    </style>
+
+    <!-- Toolbar title per design: Inter 18sp semibold (headline-sm). -->
+    <style name="PocketHost.ToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:fontFamily">@font/inter_family</item>
+    </style>
+
+    <!-- Console header title: JetBrains Mono 14sp bold (server name). -->
+    <style name="PocketHost.ToolbarTitle.Mono" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_family</item>
+    </style>
+
+    <!-- Console level chips: per-level text colors, primary active pill. -->
+    <style name="PocketHost.Chip.Level" parent="Widget.Material3.Chip.Filter">
+        <item name="chipBackgroundColor">@color/chip_level_bg</item>
         <item name="chipStrokeColor">@color/outline_variant</item>
         <item name="chipStrokeWidth">1dp</item>
+        <item name="android:minHeight">32dp</item>
+        <item name="checkedIconVisible">false</item>
+        <item name="ensureMinTouchTargetSize">true</item>
     </style>
+
+    <!-- Quick-command pill (design: container bg, 6dp, mono 11, touch 48). -->
+    <!-- (PocketHost.Button.Pill removed with the console quick pills.) -->
 
     <style name="ExtraKey">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">36dp</item>
+        <item name="android:layout_height">48dp</item>
         <item name="android:layout_weight">1</item>
         <item name="android:layout_margin">2dp</item>
-        <item name="android:background">#222222</item>
+        <item name="android:background">@drawable/bg_extra_key</item>
         <item name="android:gravity">center</item>
-        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textColor">@color/on_surface</item>
         <item name="android:textSize">11sp</item>
-        <item name="android:fontFamily">monospace</item>
+        <item name="android:fontFamily">@font/jetbrains_mono_family</item>
         <item name="android:clickable">true</item>
         <item name="android:focusable">true</item>
         <item name="android:foreground">?attr/selectableItemBackground</item>
     </style>
 
     <style name="ExtraKey.Active">
-        <item name="android:background">#4A4A00</item>
-        <item name="android:textColor">#FFFF55</item>
+        <item name="android:background">@drawable/bg_extra_key_active</item>
+        <item name="android:textColor">@color/primary</item>
     </style>
 </resources>

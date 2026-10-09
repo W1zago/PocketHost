@@ -16,6 +16,9 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
@@ -64,6 +67,12 @@ class ServerDetailActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityServerDetailBinding.inflate(layoutInflater)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         serverId = intent.getStringExtra("server_id")
@@ -79,7 +88,7 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Server Details"
+        supportActionBar?.title = "Server Studio"
     }
 
     private fun setupButtons() {
@@ -91,17 +100,45 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnDelete.setOnClickListener { deleteServer() }
         binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
+        binding.btnCopyGateway.setOnClickListener { copyBindAddress() }
+        binding.btnCopyPath.setOnClickListener { copyWorkDirPath() }
         binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
         // Section tabs: real navigation (scroll within screen or open screen).
-        binding.tabOverview.setOnClickListener { binding.scrollView.smoothScrollTo(0, 0) }
+        setActiveTab(binding.tabOverview)
+        binding.tabOverview.setOnClickListener {
+            setActiveTab(binding.tabOverview)
+            binding.scrollView.smoothScrollTo(0, 0)
+        }
         binding.tabConsole.setOnClickListener { openConsole() }
         binding.tabFiles.setOnClickListener { openFileManager() }
         binding.tabTelemetry.setOnClickListener {
+            setActiveTab(binding.tabTelemetry)
             binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.resourcesCard.top) }
         }
         binding.tabConfig.setOnClickListener {
+            setActiveTab(binding.tabConfig)
             binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
         }
+    }
+
+    /** Active tab pill (design: primary-container) vs idle tabs. */
+    private fun setActiveTab(active: View) {
+        try {
+            val tabs = listOf(
+                binding.tabOverview, binding.tabConsole, binding.tabFiles,
+                binding.tabTelemetry, binding.tabConfig
+            )
+            val onBg = ContextCompat.getColor(this, R.color.primary_container)
+            val onFg = ContextCompat.getColor(this, R.color.on_primary_container)
+            val offBg = ContextCompat.getColor(this, R.color.surface_high)
+            val offFg = ContextCompat.getColor(this, R.color.on_surface_variant)
+            for (tab in tabs) {
+                val on = tab == active
+                tab.backgroundTintList = android.content.res.ColorStateList.valueOf(if (on) onBg else offBg)
+                tab.setTextColor(if (on) onFg else offFg)
+                tab.iconTint = android.content.res.ColorStateList.valueOf(if (on) onFg else offFg)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -127,16 +164,31 @@ class ServerDetailActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    private fun copyWorkDirPath() {
+        val server = currentServer ?: return
+        val path = try {
+            EmbeddedPaths.resolveWorkDir(
+                this, server.id,
+                server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
+            ).absolutePath
+        } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("server path", path))
+            Toast.makeText(this, "Copied path", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {}
+    }
+
     private fun setupMinecraftSettings() {
-        binding.switchPirate.setOnCheckedChangeListener { _, _ ->
+        binding.mcSettings.switchPirate.setOnCheckedChangeListener { _, _ ->
             if (suppressSettingsSave) return@setOnCheckedChangeListener
             saveMinecraftSettings()
         }
-        binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
-            binding.tvViewDistance.text = "View distance: ${value.toInt()} chunks"
+        binding.mcSettings.sliderViewDistance.addOnChangeListener { _, value, _ ->
+            binding.mcSettings.tvViewDistance.text = "${value.toInt()} chunks"
         }
         // Save only when the thumb is released, not on every tick
-        binding.sliderViewDistance.addOnSliderTouchListener(
+        binding.mcSettings.sliderViewDistance.addOnSliderTouchListener(
             object : Slider.OnSliderTouchListener {
                 override fun onStartTrackingTouch(slider: Slider) {}
                 override fun onStopTrackingTouch(slider: Slider) {
@@ -155,8 +207,8 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun saveMinecraftSettings() {
         val server = currentServer ?: return
         if (server.type != ServerType.MINECRAFT) return
-        val allowPirate = binding.switchPirate.isChecked
-        val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
+        val allowPirate = binding.mcSettings.switchPirate.isChecked
+        val viewDistance = binding.mcSettings.sliderViewDistance.value.toInt().coerceIn(2, 32)
         lifecycleScope.launch {
             try {
                 val updated = server.copy(
@@ -282,9 +334,18 @@ class ServerDetailActivity : AppCompatActivity() {
         currentServer = server
         binding.apply {
             serverName.text = server.name
-            serverType.text = server.type.name
+            // Subtitle from REAL config: loader + version (design), never fake.
+            serverType.text = if (server.type == ServerType.MINECRAFT) {
+                val loader = server.config.minecraftLoader?.name?.lowercase()
+                    ?.replaceFirstChar { it.uppercase() } ?: "Minecraft"
+                val ver = server.config.minecraftVersion ?: ""
+                "Minecraft $loader $ver".trim()
+            } else {
+                "Ubuntu PRoot sandbox"
+            }
             serverPort.text = ":${server.port}"
-            serverIcon.text = server.name.firstOrNull()?.uppercase() ?: "?"
+            val letter = server.name.firstOrNull()?.uppercase() ?: "?"
+            serverIcon.text = "[$letter]"
             serverIcon.setTextColor(
                 ContextCompat.getColor(
                     this@ServerDetailActivity,
@@ -325,9 +386,9 @@ class ServerDetailActivity : AppCompatActivity() {
             // Uptime is real: now - lastStarted while running.
             val lastStarted = server.lastStarted
             serverUptime.text = if ((server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) && lastStarted != null) {
-                "Up ${formatUptime(System.currentTimeMillis() - lastStarted)}"
+                formatUptime(System.currentTimeMillis() - lastStarted)
             } else {
-                "Up —"
+                "—"
             }
             btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
             btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
@@ -340,11 +401,12 @@ class ServerDetailActivity : AppCompatActivity() {
                 ).absolutePath
             } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
             // IP -> IP view (serverIpAddress + tvBindAddress), folder -> folder view.
-            // Was: serverIpAddress showed "Folder: /data/.../files/servers/..." - mixed-up label.
             serverIpAddress.text = "$deviceIp:${server.port}"
-            serverFolderPath.text = "Folder: $workDirStr"
+            serverFolderPath.text = workDirStr
             // LAN bind line uses the real device IP + this server's port.
             tvBindAddress.text = "$deviceIp:${server.port}"
+            // Bound socket row: real wildcard bind + port (TCP).
+            tvBoundSocket.text = "0.0.0.0:${server.port} [TCP/UDP]"
             // LAN bind line uses the real device IP + this server port.
             if (server.type == ServerType.MINECRAFT) {
                 minecraftSettingsCard.visibility = View.VISIBLE
@@ -352,14 +414,14 @@ class ServerDetailActivity : AppCompatActivity() {
                 ubuntuSettingsCard.visibility = View.GONE
                 suppressSettingsSave = true
                 try {
-                    switchPirate.isChecked = !server.config.effectiveOnlineMode
+                    mcSettings.switchPirate.isChecked = !server.config.effectiveOnlineMode
                     try {
-                        sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
+                        mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
                     } catch (e: IllegalStateException) {
                         Log.w(TAG, "snap viewDistance fallback", e)
                     }
-                    tvViewDistance.text =
-                        "View distance: ${server.config.effectiveViewDistance} chunks"
+                    mcSettings.tvViewDistance.text =
+                        "${server.config.effectiveViewDistance} chunks"
                 } catch (_: Exception) {
                 } finally {
                     suppressSettingsSave = false
@@ -607,6 +669,7 @@ class ServerDetailActivity : AppCompatActivity() {
             binding.tvBindAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
             // Hero row serverIpAddress is also IP (folder lives in serverFolderPath).
             binding.serverIpAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
+            if (port != null) binding.tvBoundSocket.text = "0.0.0.0:$port [TCP/UDP]"
         } catch (_: Exception) {}
     }
 
@@ -706,12 +769,20 @@ class ServerDetailActivity : AppCompatActivity() {
             val used = totalMem - freeMem
             val max = runtime.maxMemory() / 1024 / 1024
             binding.tileMemory.text = "$used/$max MB"
+            val heapPct = if (max > 0) ((used * 100) / max).toInt().coerceIn(0, 100) else 0
+            binding.tileMemoryPct.text = "$heapPct%"
+            binding.heapBar.progress = heapPct
             val cores = runtime.availableProcessors()
             binding.tileCores.text = cores.toString()
             try {
                 val stat = StatFs(filesDir.absolutePath)
                 val freeGb = stat.availableBytes / 1024.0 / 1024.0 / 1024.0
+                val totalGb = stat.totalBytes / 1024.0 / 1024.0 / 1024.0
                 binding.tileDisk.text = String.format(Locale.US, "%.1f GB", freeGb)
+                binding.tileDiskSub.text =
+                    "free of ${String.format(Locale.US, "%.0f", totalGb)} GB"
+                val usedPct = if (totalGb > 0) (((totalGb - freeGb) * 100) / totalGb).toInt().coerceIn(0, 100) else 0
+                binding.diskBar.progress = usedPct
             } catch (_: Exception) {
                 binding.tileDisk.text = "—"
             }

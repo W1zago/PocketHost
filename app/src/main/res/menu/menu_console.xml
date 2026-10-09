@@ -4,7 +4,7 @@
     <item
         android:id="@+id/action_copy"
         android:title="Copy"
-        android:icon="@android:drawable/ic_menu_share"
+        android:icon="@drawable/ic_content_copy"
         app:showAsAction="never" />
     <item
         android:id="@+id/action_select_all"

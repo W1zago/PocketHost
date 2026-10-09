@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
@@ -17,7 +18,9 @@
             android:layout_height="?attr/actionBarSize"
             android:background="@color/background"
             app:title="PocketHost"
-            app:titleTextColor="@color/on_surface" />
+            app:titleTextColor="@color/on_surface"
+            app:titleTextAppearance="@style/PocketHost.ToolbarTitle"
+            app:menu="@menu/menu_main" />
 
         <!-- Sub-header: runtime caption + alive pill (real counts) -->
         <LinearLayout
@@ -44,15 +47,15 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_status_idle"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp">
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp">
 
                 <View
                     android:id="@+id/aliveDot"
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
                     android:background="@drawable/bg_dot_idle" />
 
                 <TextView
@@ -64,29 +67,56 @@
                     android:textSize="11sp"
                     android:textStyle="bold"
                     android:textColor="@color/badge_idle_fg"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family"
+                    android:fontFeatureSettings="tnum" />
 
             </LinearLayout>
 
         </LinearLayout>
 
-        <!-- Search -->
-        <EditText
-            android:id="@+id/searchInput"
+        <!-- Search (design: h-12, icon 20, Inter 14, clear action) -->
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:background="@drawable/bg_search"
-            android:hint="Filter by name, port, or type…"
-            android:textColor="@color/on_surface"
-            android:textColorHint="@color/on_surface_variant"
-            android:textSize="14sp"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:singleLine="true"
-            android:imeOptions="actionSearch"
-            android:inputType="text" />
+            android:layout_marginEnd="16dp">
+
+            <EditText
+                android:id="@+id/searchInput"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_search"
+                android:hint="Filter by name, port, or type…"
+                android:textColor="@color/on_surface"
+                android:textColorHint="@color/outline"
+                android:textSize="14sp"
+                android:paddingStart="40dp"
+                android:paddingEnd="48dp"
+                android:singleLine="true"
+                android:imeOptions="actionSearch"
+                android:inputType="text" />
+
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="12dp"
+                android:src="@drawable/ic_search"
+                app:tint="@color/outline"
+                android:importantForAccessibility="no" />
+
+            <ImageButton
+                android:id="@+id/btnClearSearch"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="end|center_vertical"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Clear filter search"
+                android:src="@drawable/ic_close"
+                app:tint="@color/outline"
+                android:visibility="gone" />
+
+        </FrameLayout>
 
         <!-- Filter chips + sort -->
         <LinearLayout
@@ -99,12 +129,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:scrollbars="none"
-                android:paddingStart="16dp">
+                android:clipToPadding="false"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
 
                 <com.google.android.material.chip.ChipGroup
                     android:id="@+id/filterGroup"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:paddingEnd="8dp"
                     app:singleSelection="true"
                     app:selectionRequired="true"
                     app:chipSpacingHorizontal="8dp">
@@ -171,7 +204,7 @@
                     android:text="INSTANCES"
                     android:textSize="11sp"
                     android:textColor="@color/on_surface_variant"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="150dp"
@@ -183,11 +216,11 @@
                     <com.google.android.material.textfield.MaterialAutoCompleteTextView
                         android:id="@+id/sortInput"
                         android:layout_width="match_parent"
-                        android:layout_height="40dp"
+                        android:layout_height="48dp"
                         android:text="By Status"
                         android:textSize="12sp"
                         android:textColor="@color/secondary"
-                        android:fontFamily="monospace"
+                        android:fontFamily="@font/jetbrains_mono_family"
                         android:inputType="none" />
 
                 </com.google.android.material.textfield.TextInputLayout>
@@ -207,16 +240,63 @@
 
     </LinearLayout>
 
-    <TextView
+    <!-- Empty state (design card; own space above FAB/sticky buttons) -->
+    <LinearLayout
         android:id="@+id/emptyView"
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="No servers yet\nTap + to create one"
-        android:textAlignment="center"
-        android:textSize="16sp"
-        android:textColor="@color/on_surface_variant"
-        android:visibility="gone" />
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="96dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/bg_empty_card"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/bg_empty_icon"
+            android:src="@drawable/ic_dns"
+            android:scaleType="center"
+            app:tint="@color/outline"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="No servers yet in this group?"
+            android:textAlignment="center"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Tap + to create one, or link your existing directories."
+            android:textAlignment="center"
+            android:textSize="12sp"
+            android:textColor="@color/on_surface_variant" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnEmptyScan"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="Already have a server? Scan device"
+            android:textSize="12sp"
+            android:textColor="@color/secondary"
+            app:icon="@drawable/ic_folder_open"
+            app:iconTint="@color/secondary"
+            style="@style/PocketHost.Button.Tonal" />
+
+    </LinearLayout>
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab"
@@ -225,9 +305,10 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
         android:contentDescription="Create Server"
-        app:backgroundTint="@color/primary_container"
+        app:backgroundTint="@color/primary"
         app:tint="@color/on_primary"
-        app:srcCompat="@android:drawable/ic_input_add" />
+        app:maxImageSize="28dp"
+        app:srcCompat="@drawable/ic_add" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnScan"
@@ -238,7 +319,7 @@
         android:text="Scan device"
         android:textSize="12sp"
         app:backgroundTint="@color/surface_high"
-        app:icon="@android:drawable/ic_menu_search"
+        app:icon="@drawable/ic_battery"
         app:iconTint="@color/secondary"
         android:textColor="@color/on_surface" />
 
@@ -253,7 +334,7 @@
         android:text="PC Console"
         android:textSize="12sp"
         app:backgroundTint="@color/surface_high"
-        app:icon="@android:drawable/ic_menu_send"
+        app:icon="@drawable/ic_server"
         app:iconTint="@color/secondary"
         android:textColor="@color/on_surface" />
 

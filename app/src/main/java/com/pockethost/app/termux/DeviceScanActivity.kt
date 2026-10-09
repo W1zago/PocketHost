@@ -9,18 +9,20 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.StatFs
 import android.provider.Settings
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.button.MaterialButton
+import com.pockethost.app.R
+import com.pockethost.app.databinding.ActivityDeviceScanBinding
+import com.pockethost.app.databinding.ItemDeviceCheckBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,12 +30,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Built-in terminal diagnostics.
+ * Built-in terminal diagnostics (8 checks), now in an XML layout that matches
+ * the Stitch design: header, system-health summary, checklist rows, bottom bar.
  * No Termux / RUN_COMMAND / SAF checks - everything inside the app.
  */
 class DeviceScanActivity : AppCompatActivity() {
 
-    private lateinit var container: LinearLayout
+    private lateinit var binding: ActivityDeviceScanBinding
     // H6: was CoroutineScope(Dispatchers.Main) leaking on Activity destroy -
     // now lifecycleScope everywhere (auto-cancel in onDestroy).
 
@@ -45,17 +48,21 @@ class DeviceScanActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        supportActionBar?.title = "Diagnostics"
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-
-        val scroll = ScrollView(this)
-        scroll.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.background))
-        container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 64)
+        binding = ActivityDeviceScanBinding.inflate(layoutInflater)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
         }
-        scroll.addView(container)
-        setContentView(scroll)
+        setContentView(binding.root)
+
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.title = "Device Scan"
+
+        binding.btnRescan.setOnClickListener { refreshWithInternet() }
+        binding.btnAutoGrant.setOnClickListener { autoRequestAll() }
 
         refresh()
     }
@@ -66,7 +73,7 @@ class DeviceScanActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        onBackPressed()
+        onBackPressedDispatcher.onBackPressed()
         return true
     }
 
@@ -83,15 +90,12 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun refresh() {
         // Skeleton immediately, heavy checks (fork sh) - in IO to avoid ANR.
-        container.removeAllViews()
-        addHeader()
-        val loading = TextView(this).apply {
-            text = "Checking..."
-            gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 24)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(loading)
+        binding.checkContainer.removeAllViews()
+        binding.healthTitle.text = "Checking…"
+        binding.healthSubtitle.text = ""
+        binding.healthStatusChip.visibility = View.GONE
+        binding.warnCard.visibility = View.GONE
+        binding.autoCheckAge.text = ""
         lifecycleScope.launch(Dispatchers.IO) {
             val shellOk = checkEmbeddedShell()
             val storageOk = checkInternalStorage()
@@ -102,116 +106,92 @@ class DeviceScanActivity : AppCompatActivity() {
             val res = ScanResult(shellOk, storageOk, javaPath != null, javaPath, batteryOk, notifOk, freeGb > 0.5, freeGb)
             withContext(Dispatchers.Main) {
                 try {
-                    container.removeAllViews()
-                    addHeader()
-                    addCheck("1. Built-in terminal (sh)", res.shellOk, "Details") { showShellInfo() }
-                    addCheck("2. Internal storage", res.storageOk, "Open storage") { openStorageSettings() }
-                    addCheck("3. Built-in Java", res.javaOk, "Install JRE") { installJre() }
-                    addCheck("4. Built-in shell for Ubuntu", res.shellOk, "Details") { showShellInfo() }
-                    addCheck("5. Battery: ignore optimizations (PocketHost)", res.batteryOk, "Allow background") { requestBatterySelf() }
-                    addCheck("6. POST_NOTIFICATIONS permission", res.notifOk, "Request") { requestNotification() }
-                    addCheck("7. Free space >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "Clear") { openStorageSettings() }
-                    addCheck("8. Internet", checkInternetSync(), "Check network") { openWifiSettings() }
-                    // Java path detail
-                    if (res.javaPath != null) {
-                        container.addView(TextView(this@DeviceScanActivity).apply {
-                            text = "Java: ${res.javaPath}"
-                            textSize = 11f
-                            typeface = android.graphics.Typeface.MONOSPACE
-                            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-                        })
-                    }
-                    addActions()
+                    renderResults(res)
                 } catch (_: Exception) {}
             }
         }
     }
 
-    private fun addHeader() {
-        val title = TextView(this).apply {
-            text = "PocketHost - built-in terminal"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 8)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface))
+    private fun renderResults(res: ScanResult) {
+        val checks = listOf(
+            Triple("Built-in terminal (sh)", res.shellOk, "Details" to { showShellInfo() }),
+            Triple("Internal storage", res.storageOk, "Open storage" to { openStorageSettings() }),
+            Triple("Built-in Java", res.javaOk, "Install JRE" to { installJre() }),
+            Triple("Built-in shell for Ubuntu", res.shellOk, "Details" to { showShellInfo() }),
+            Triple("Battery: ignore optimizations (PocketHost)", res.batteryOk, "Allow background" to { requestBatterySelf() }),
+            Triple("POST_NOTIFICATIONS permission", res.notifOk, "Request" to { requestNotification() }),
+            Triple("Free space >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "Clear" to { openStorageSettings() }),
+            Triple("Internet", checkInternetSync(), "Check network" to { openWifiSettings() })
+        )
+        binding.checkContainer.removeAllViews()
+        var passed = 0
+        for ((title, ok, actionPair) in checks) {
+            if (ok) passed++
+            addCheck(title, ok, actionPair.first, actionPair.second)
         }
-        val subtitle = TextView(this).apply {
-            text = "External Termux NOT needed. Everything runs inside the app without the 'control Termux' permission."
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 16)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
+        // Java path detail (real path, middle-truncated by the row layout).
+        if (res.javaPath != null) {
+            addNote("Java: ${res.javaPath}")
         }
-        container.addView(title)
-        container.addView(subtitle)
-
-        val btnRescan = MaterialButton(this).apply {
-            text = "Scan again"
-            setOnClickListener { refreshWithInternet() }
+        // Health summary bound to the real pass counts.
+        binding.healthTitle.text = "$passed/8 Passed"
+        if (passed == checks.size) {
+            binding.healthSubtitle.text = "All systems operational"
+            binding.healthSubtitle.setTextColor(ContextCompat.getColor(this, R.color.tertiary))
+            binding.healthStatusChip.visibility = View.VISIBLE
+            binding.healthStatusChip.text = "$passed operational"
+            binding.healthStatusChip.setTextColor(ContextCompat.getColor(this, R.color.tertiary))
+            binding.healthStatusChip.setBackgroundResource(R.drawable.bg_scan_ok)
+            binding.warnCard.visibility = View.GONE
+        } else {
+            val missing = checks.size - passed
+            binding.healthSubtitle.text = "$missing issue${if (missing == 1) "" else "s"} require${if (missing == 1) "s" else ""} attention"
+            binding.healthSubtitle.setTextColor(ContextCompat.getColor(this, R.color.error))
+            binding.healthStatusChip.visibility = View.VISIBLE
+            binding.healthStatusChip.text = "$missing issue${if (missing == 1) "" else "s"} require attention"
+            binding.healthStatusChip.setTextColor(ContextCompat.getColor(this, R.color.error))
+            binding.healthStatusChip.setBackgroundResource(R.drawable.bg_scan_fail)
+            binding.warnCard.visibility = View.VISIBLE
         }
-        val btnAuto = MaterialButton(this).apply {
-            text = "Grant permissions automatically"
-            setOnClickListener { autoRequestAll() }
-        }
-        container.addView(btnRescan.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 8) } })
-        container.addView(btnAuto.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 16) } })
-    }
-
-    private fun addActions() {
-        val info = TextView(this).apply {
-            text = "Note: SAF folders and RUN_COMMAND are no longer used. Old SAF servers start in migration mode in the internal folder."
-            textSize = 12f
-            setPadding(0, 24, 0, 0)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(info)
+        binding.autoCheckAge.text = "Auto-check: just now"
     }
 
     private fun addCheck(title: String, ok: Boolean, actionText: String, action: () -> Unit) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundResource(com.pockethost.app.R.drawable.bg_section_card)
-            setPadding(24, 20, 24, 20)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, 0, 0, 8) }
-        }
-        val okColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.tertiary)
-        val errColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.error)
-        val indicator = TextView(this).apply {
-            text = if (ok) "✓" else "✗"
-            textSize = 20f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(if (ok) okColor else errColor)
-            setPadding(0, 0, 16, 0)
-        }
-        val label = TextView(this).apply {
-            text = title
-            textSize = 14f
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val btn = MaterialButton(this).apply {
-            text = if (ok) "OK" else actionText
-            isEnabled = !ok
-            alpha = if (ok) 0.5f else 1f
-            setOnClickListener { action() }
-        }
-        row.addView(indicator)
-        row.addView(label)
-        row.addView(btn.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) })
-        container.addView(row)
+        val row = ItemDeviceCheckBinding.inflate(LayoutInflater.from(this), binding.checkContainer, false)
+        row.checkIcon.text = if (ok) "✓" else "✗"
+        row.checkIcon.setTextColor(
+            ContextCompat.getColor(this, if (ok) R.color.tertiary else R.color.error)
+        )
+        row.checkIcon.setBackgroundResource(
+            if (ok) R.drawable.bg_scan_ok else R.drawable.bg_scan_fail
+        )
+        row.checkTitle.text = title
+        row.checkStatus.visibility = View.VISIBLE
+        row.checkStatus.text = if (ok) "OK" else "FAILED"
+        row.checkStatus.setTextColor(
+            ContextCompat.getColor(this, if (ok) R.color.tertiary else R.color.error)
+        )
+        row.checkStatus.setBackgroundResource(
+            if (ok) R.drawable.bg_scan_ok else R.drawable.bg_scan_fail
+        )
+        row.checkAction.text = if (ok) "OK" else actionText
+        row.checkAction.isEnabled = !ok
+        row.checkAction.alpha = if (ok) 0.5f else 1f
+        row.checkAction.setOnClickListener { action() }
+        row.checkDetail.text = getDetail(title, ok)
+        binding.checkContainer.addView(row.root)
+    }
 
-        val detail = TextView(this).apply {
-            text = getDetail(title, ok)
-            textSize = 11f
-            setPadding(16, 0, 0, 12)
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(detail)
+    private fun addNote(text: String) {
+        val row = ItemDeviceCheckBinding.inflate(LayoutInflater.from(this), binding.checkContainer, false)
+        row.checkIcon.text = "i"
+        row.checkIcon.setTextColor(ContextCompat.getColor(this, R.color.secondary))
+        row.checkIcon.setBackgroundResource(R.drawable.bg_port_chip)
+        row.checkTitle.text = text
+        row.checkStatus.visibility = View.GONE
+        row.checkAction.visibility = View.GONE
+        row.checkDetail.text = ""
+        binding.checkContainer.addView(row.root)
     }
 
     private fun getDetail(title: String, ok: Boolean): String {

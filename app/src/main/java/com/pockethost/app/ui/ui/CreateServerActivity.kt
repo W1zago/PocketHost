@@ -6,6 +6,9 @@ import android.view.View
 import android.widget.ArrayAdapter
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.databinding.ActivityCreateServerBinding
 import com.pockethost.app.embedded.EmbeddedPaths
@@ -95,6 +98,12 @@ class CreateServerActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCreateServerBinding.inflate(layoutInflater)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         setupToolbar()
@@ -180,9 +189,9 @@ class CreateServerActivity : AppCompatActivity() {
         binding.spinnerMinecraftLoader.setText(MinecraftLoader.PAPER.name, false)
 
         // Live render distance: live caption under the slider
-        binding.tvViewDistance.text = viewDistanceLabel(binding.sliderViewDistance.value.toInt())
-        binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
-            binding.tvViewDistance.text = viewDistanceLabel(value.toInt())
+        binding.mcSettings.tvViewDistance.text = viewDistanceLabel(binding.mcSettings.sliderViewDistance.value.toInt())
+        binding.mcSettings.sliderViewDistance.addOnChangeListener { _, value, _ ->
+            binding.mcSettings.tvViewDistance.text = viewDistanceLabel(value.toInt())
         }
 
         // Device memory (not app heap!): a child java process has its own heap.
@@ -331,7 +340,7 @@ class CreateServerActivity : AppCompatActivity() {
     }
 
     private fun viewDistanceLabel(chunks: Int): String =
-        "View distance: $chunks chunks"
+        "$chunks chunks"
 
     private fun storageShortName(kind: EmbeddedPaths.StorageKind): String = when (kind) {
         EmbeddedPaths.StorageKind.EXTERNAL -> "external"
@@ -613,8 +622,8 @@ class CreateServerActivity : AppCompatActivity() {
 
         // Cracked = license check disabled (online-mode=false).
         // Render distance 2..32 chunks, default 10.
-        val allowPirate = binding.switchPirate.isChecked
-        val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
+        val allowPirate = binding.mcSettings.switchPirate.isChecked
+        val viewDistance = binding.mcSettings.sliderViewDistance.value.toInt().coerceIn(2, 32)
 
         binding.btnCreate.isEnabled = false
         binding.btnCreate.text = "Creating..."

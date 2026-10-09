@@ -52,19 +52,23 @@
 
         <activity
             android:name=".ui.CreateServerActivity"
-            android:parentActivityName=".ui.MainActivity" />
+            android:parentActivityName=".ui.MainActivity"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.FileManagerActivity"
-            android:parentActivityName=".ui.MainActivity" />
+            android:parentActivityName=".ui.MainActivity"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.ConsoleActivity"
-            android:parentActivityName=".ui.ServerDetailActivity" />
+            android:parentActivityName=".ui.ServerDetailActivity"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.RemoteConsoleActivity"
-            android:parentActivityName=".ui.MainActivity" />
+            android:parentActivityName=".ui.MainActivity"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".termux.TermuxHardGateActivity"

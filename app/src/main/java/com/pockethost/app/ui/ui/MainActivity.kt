@@ -18,8 +18,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
 import com.pockethost.app.databinding.ActivityMainBinding
@@ -32,7 +36,6 @@ import com.pockethost.core.model.ServerStatus
 import com.pockethost.core.model.ServerType
 import com.pockethost.core.repository.ServerRepository
 import com.google.android.material.chip.Chip
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -78,6 +81,13 @@ class MainActivity : AppCompatActivity() {
         // The app works immediately, no external dependencies.
 
         binding = ActivityMainBinding.inflate(layoutInflater)
+        // Edge-to-edge: draw under system bars, pad the root with real insets.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         setupToolbar()
@@ -99,6 +109,18 @@ class MainActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = getString(R.string.app_name)
+        // Overflow is a real popup menu (same actions as the bottom buttons).
+        binding.toolbar.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_scan -> {
+                    startActivity(Intent(this, DeviceScanActivity::class.java)); true
+                }
+                R.id.action_remote -> {
+                    startActivity(Intent(this, RemoteConsoleActivity::class.java)); true
+                }
+                else -> false
+            }
+        }
     }
 
     private fun setupRecyclerView() {
@@ -142,9 +164,12 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 filterQuery = s?.toString()?.trim() ?: ""
+                binding.btnClearSearch.visibility =
+                    if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
                 applyFilters()
             }
         })
+        binding.btnClearSearch.setOnClickListener { binding.searchInput.text?.clear() }
         binding.filterGroup.setOnCheckedStateChangeListener { group, _ ->
             val chip = group.findViewById<Chip>(group.checkedChipId)
             filterTag = chip?.tag?.toString() ?: "ALL"
@@ -203,13 +228,33 @@ class MainActivity : AppCompatActivity() {
             }
             serverAdapter.submitList(list)
             binding.emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            updateChipCounts()
         } catch (e: Exception) {
             Log.e("MainActivity", "applyFilters failed", e)
         }
     }
 
-    private fun updateAlivePill(servers: List<Server>) {
+    /** Chip counters show REAL backend totals per category (design). */
+    private fun updateChipCounts() {
         try {
+            val all = fullServers
+            val running = all.count {
+                it.status == ServerStatus.RUNNING || it.status == ServerStatus.STARTING
+            }
+            val stopped = all.count {
+                it.status == ServerStatus.STOPPED || it.status == ServerStatus.ERROR
+            }
+            val mc = all.count { it.type == ServerType.MINECRAFT }
+            val ubu = all.count { it.type == ServerType.UBUNTU_SERVER }
+            binding.chipAll.text = "All ${all.size}"
+            binding.chipRunning.text = "Running $running"
+            binding.chipStopped.text = "Stopped $stopped"
+            binding.chipMinecraft.text = "Minecraft $mc"
+            binding.chipUbuntu.text = "Ubuntu $ubu"
+        } catch (_: Exception) {}
+    }
+
+    private fun updateAlivePill(servers: List<Server>) {        try {
             val running = servers.count { it.status == ServerStatus.RUNNING }
             binding.aliveText.text = "$running/${servers.size} Alive"
             if (running > 0) {
@@ -282,20 +327,37 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this, RemoteConsoleActivity::class.java))
             }
         } catch (_: Exception) {}
-    }
-
-    private fun showCreateServerDialog() {
-        val types = ServerType.entries.map { it.name }.toTypedArray()
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Create Server")
-            .setItems(types) { _, which ->
-                val selectedType = ServerType.entries[which]
-                navigateToServerCreation(selectedType)
-            }
-            .setNeutralButton("Scan device") { _, _ ->
+        try {
+            binding.btnEmptyScan.setOnClickListener {
                 startActivity(Intent(this, DeviceScanActivity::class.java))
             }
-            .show()
+        } catch (_: Exception) {}
+    }
+
+    /** Create Instance bottom sheet: type picker + Dismiss (design). */
+    private fun showCreateServerDialog() {
+        val dialog = BottomSheetDialog(
+            this, com.google.android.material.R.style.ThemeOverlay_Material3_BottomSheetDialog
+        )
+        val view = layoutInflater.inflate(R.layout.dialog_create_instance, null)
+        dialog.setContentView(view)
+        try {
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            dialog.findViewById<android.widget.FrameLayout>(
+                com.google.android.material.R.id.design_bottom_sheet
+            )?.setBackgroundResource(android.R.color.transparent)
+        } catch (_: Exception) {}
+        view.findViewById<android.view.View>(R.id.sheetClose).setOnClickListener { dialog.dismiss() }
+        view.findViewById<android.view.View>(R.id.btnDismiss).setOnClickListener { dialog.dismiss() }
+        view.findViewById<android.view.View>(R.id.optionMinecraft).setOnClickListener {
+            dialog.dismiss()
+            navigateToServerCreation(ServerType.MINECRAFT)
+        }
+        view.findViewById<android.view.View>(R.id.optionUbuntu).setOnClickListener {
+            dialog.dismiss()
+            navigateToServerCreation(ServerType.UBUNTU_SERVER)
+        }
+        dialog.show()
     }
 
     private fun navigateToServerCreation(type: ServerType) {

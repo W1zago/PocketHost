@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single diagnostics row for DeviceScanActivity (inflated per check). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:layout_marginTop="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/bg_section_card"
+        android:padding="12dp"
+        android:minHeight="48dp">
+
+        <TextView
+            android:id="@+id/checkIcon"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:text="✓"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/tertiary"
+            android:background="@drawable/bg_scan_ok"
+            android:fontFamily="@font/jetbrains_mono_family" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/checkTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Check"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/on_surface"
+                    android:ellipsize="end"
+                    android:maxLines="1" />
+
+                <TextView
+                    android:id="@+id/checkStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="OK"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/tertiary"
+                    android:fontFamily="@font/jetbrains_mono_family"
+                    android:background="@drawable/bg_scan_ok"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/checkAction"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:minHeight="48dp"
+            android:minWidth="48dp"
+            android:text="OK"
+            android:textSize="12sp"
+            style="@style/PocketHost.Button.Tonal" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/checkDetail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="40dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="4dp"
+        android:text=""
+        android:textSize="11sp"
+        android:textColor="@color/on_surface_variant"
+        android:fontFamily="@font/jetbrains_mono_family"
+        android:ellipsize="middle"
+        android:maxLines="2" />
+
+</LinearLayout>

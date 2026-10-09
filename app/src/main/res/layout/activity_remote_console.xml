@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
@@ -18,6 +19,7 @@
             android:background="@color/background"
             app:title="PC Console (remote)"
             app:titleTextColor="@color/on_surface"
+            app:titleTextAppearance="@style/PocketHost.ToolbarTitle"
             app:navigationIconTint="@color/on_surface" />
 
         <androidx.core.widget.NestedScrollView
@@ -47,7 +49,7 @@
                         android:textSize="11sp"
                         android:textStyle="bold"
                         android:textColor="@color/on_surface_variant"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="@font/jetbrains_mono_family" />
 
                     <LinearLayout
                         android:id="@+id/statusBadge"
@@ -77,7 +79,7 @@
                             android:textSize="11sp"
                             android:textStyle="bold"
                             android:textColor="@color/badge_idle_fg"
-                            android:fontFamily="monospace" />
+                            android:fontFamily="@font/jetbrains_mono_family" />
 
                     </LinearLayout>
 
@@ -100,7 +102,7 @@
                         android:textColorHint="@color/on_surface_variant"
                         android:hint="192.168.0.200:8765"
                         android:textSize="14sp"
-                        android:fontFamily="monospace"
+                        android:fontFamily="@font/jetbrains_mono_family"
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp"
                         android:singleLine="true"
@@ -122,7 +124,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnConnect"
                             android:layout_width="0dp"
-                            android:layout_height="44dp"
+                            android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:text="Connect"
                             android:textSize="13sp"
@@ -131,7 +133,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnDisconnect"
                             android:layout_width="0dp"
-                            android:layout_height="44dp"
+                            android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
                             android:text="Disconnect"
@@ -141,7 +143,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnPing"
                             android:layout_width="wrap_content"
-                            android:layout_height="44dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:text="Ping"
                             android:textSize="13sp"
@@ -174,7 +176,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRemoteUname"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
                             android:text="uname -a"
                             android:textSize="12sp"
                             style="@style/PocketHost.Button.Tonal" />
@@ -182,7 +184,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRemotePwd"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:text="pwd"
                             android:textSize="12sp"
@@ -191,7 +193,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRemoteLs"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:text="ls -la"
                             android:textSize="12sp"
@@ -200,7 +202,7 @@
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRemoteLog"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:text="server.log"
                             android:textSize="12sp"
@@ -216,14 +218,14 @@
                     android:layout_width="match_parent"
                     android:layout_height="320dp"
                     android:layout_marginTop="12dp"
-                    android:background="@drawable/bg_telemetry_strip"
+                    android:background="@drawable/bg_console_view"
                     android:padding="10dp">
 
                     <TextView
                         android:id="@+id/remoteOutput"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:fontFamily="monospace"
+                        android:fontFamily="@font/jetbrains_mono_family"
                         android:textColor="@color/on_surface"
                         android:textSize="12sp"
                         android:lineSpacingExtra="2dp"
@@ -249,7 +251,7 @@
                         android:hint="Command for the PC (POST /api/exec)…"
                         android:textColor="@color/on_surface"
                         android:textColorHint="@color/on_surface_variant"
-                        android:fontFamily="monospace"
+                        android:fontFamily="@font/jetbrains_mono_family"
                         android:textSize="13sp"
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp"

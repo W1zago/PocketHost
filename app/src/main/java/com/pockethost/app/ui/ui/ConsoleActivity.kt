@@ -20,6 +20,9 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
@@ -27,7 +30,6 @@ import com.pockethost.app.databinding.ActivityConsoleBinding
 import com.pockethost.app.embedded.EmbeddedPaths
 import com.pockethost.app.embedded.EmbeddedProcessManager
 import com.pockethost.core.model.ServerStatus
-import com.pockethost.core.model.ServerType
 import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -82,6 +84,13 @@ class ConsoleActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityConsoleBinding.inflate(layoutInflater)
+        // Edge-to-edge: draw under system bars, pad the root with real insets.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         serverId = intent.getStringExtra("server_id")
@@ -90,18 +99,39 @@ class ConsoleActivity : AppCompatActivity() {
         setupConsole()
         setupExtraKeys()
         setupFilters()
-        setupQuickPills()
         loadServerInfo()
         startOutputMonitoring()
     }
 
     private fun setupToolbar() {
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Console"
+        binding.btnBack.setOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        binding.btnCopy.setOnClickListener { copyAll() }
+        binding.btnShare.setOnClickListener { shareLog() }
+        binding.btnClear.setOnClickListener { clearConsole() }
+        binding.btnMenu.setOnClickListener { showOverflow(it) }
         binding.consoleOutput.setOnLongClickListener { false }
         binding.consoleOutput.setOnClickListener { }
         registerForContextMenu(binding.consoleOutput)
+    }
+
+    /** Overflow popup: same actions as the old toolbar menu (Select all lives here). */
+    private fun showOverflow(anchor: View) {
+        try {
+            val popup = androidx.appcompat.widget.PopupMenu(this, anchor)
+            popup.menuInflater.inflate(R.menu.menu_console, popup.menu)
+            popup.setOnMenuItemClickListener { item -> handleMenuAction(item.itemId) }
+            popup.show()
+        } catch (_: Exception) {}
+    }
+
+    private fun handleMenuAction(itemId: Int): Boolean {
+        return when (itemId) {
+            R.id.action_copy -> { copyAll(); true }
+            R.id.action_select_all -> { selectAll(); true }
+            R.id.action_clear -> { clearConsole(); true }
+            R.id.action_share -> { shareLog(); true }
+            else -> false
+        }
     }
 
     /** Log search + level filter + follow toggle (all computed from real output). */
@@ -121,16 +151,17 @@ class ConsoleActivity : AppCompatActivity() {
         })
         binding.btnAutoScroll.setOnClickListener {
             autoScroll = !autoScroll
-            binding.btnAutoScroll.text = if (autoScroll) "Follow: ON" else "Follow: OFF"
+            updateFollowPill()
             binding.btnJumpLive.visibility = if (autoScroll) View.GONE else View.VISIBLE
             if (autoScroll) scrollToBottom()
         }
         binding.btnJumpLive.setOnClickListener {
             autoScroll = true
-            binding.btnAutoScroll.text = "Follow: ON"
+            updateFollowPill()
             binding.btnJumpLive.visibility = View.GONE
             scrollToBottom()
         }
+        updateFollowPill()
         // Manual scroll up pauses follow (standard console UX).
         binding.scrollView.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_MOVE && autoScroll) {
@@ -138,7 +169,7 @@ class ConsoleActivity : AppCompatActivity() {
                     val max = binding.consoleOutput.bottom - binding.scrollView.height
                     if (binding.scrollView.scrollY < max - 120) {
                         autoScroll = false
-                        binding.btnAutoScroll.text = "Follow: OFF"
+                        updateFollowPill()
                         binding.btnJumpLive.visibility = View.VISIBLE
                     }
                 }
@@ -147,22 +178,30 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    /** Quick command pills only fill the input — execution still goes through sendInput. */
-    private fun setupQuickPills() {
-        val fill: (String) -> Unit = { cmd ->
-            binding.inputCommand.setText(cmd)
-            binding.inputCommand.setSelection(cmd.length)
-            binding.inputCommand.requestFocus()
-        }
-        binding.pillList.setOnClickListener { fill("/list") }
-        binding.pillTps.setOnClickListener { fill("/tps") }
-        binding.pillSaveAll.setOnClickListener { fill("/save-all") }
-        binding.pillSay.setOnClickListener { fill("/say ") }
-        binding.pillStop.setOnClickListener { fill("/stop") }
-        binding.pillLs.setOnClickListener { fill("ls") }
-        binding.pillPs.setOnClickListener { fill("ps") }
-        binding.pillDf.setOnClickListener { fill("df -h") }
-        binding.pillPwd.setOnClickListener { fill("pwd") }
+    /** Follow pill states (design: primary translucent ON, outline OFF). */
+    private fun updateFollowPill() {
+        try {
+            val on = autoScroll
+            binding.btnAutoScroll.text = if (on) "Follow: ON" else "Follow: OFF"
+            binding.btnAutoScroll.setTextColor(
+                ContextCompat.getColor(this, if (on) R.color.primary else R.color.on_surface_variant)
+            )
+            binding.btnAutoScroll.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this, if (on) R.color.follow_on_bg else R.color.surface_high)
+                )
+            binding.btnAutoScroll.strokeColor =
+                android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this, if (on) R.color.follow_on_border else R.color.outline_variant)
+                )
+            binding.btnAutoScroll.setIconResource(
+                if (on) R.drawable.bg_dot_running else R.drawable.bg_dot_idle
+            )
+            binding.btnAutoScroll.iconTint =
+                android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this, if (on) R.color.primary else R.color.outline)
+                )
+        } catch (_: Exception) {}
     }
 
     private fun scrollToBottom() {
@@ -196,17 +235,9 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        menuInflater.inflate(R.menu.menu_console, menu)
-        return true
-    }
-
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.action_copy -> { copyAll(); true }
-            R.id.action_select_all -> { selectAll(); true }
-            R.id.action_clear -> { clearConsole(); true }
-            R.id.action_share -> { shareLog(); true }
+            android.R.id.home -> { onBackPressedDispatcher.onBackPressed(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -315,10 +346,18 @@ class ConsoleActivity : AppCompatActivity() {
     private fun toggleAlt() { altActive = !altActive; updateModifierUI() }
 
     private fun updateModifierUI() {
-        binding.keyCtrl.setBackgroundColor(if (ctrlActive) 0xFF4A4A00.toInt() else 0xFF222222.toInt())
-        binding.keyCtrl.setTextColor(if (ctrlActive) 0xFFFFFF55.toInt() else 0xFFFFFFFF.toInt())
-        binding.keyAlt.setBackgroundColor(if (altActive) 0xFF4A4A00.toInt() else 0xFF222222.toInt())
-        binding.keyAlt.setTextColor(if (altActive) 0xFFFFFF55.toInt() else 0xFFFFFFFF.toInt())
+        binding.keyCtrl.setBackgroundResource(
+            if (ctrlActive) R.drawable.bg_extra_key_active else R.drawable.bg_extra_key
+        )
+        binding.keyCtrl.setTextColor(
+            ContextCompat.getColor(this, if (ctrlActive) R.color.primary else R.color.on_surface)
+        )
+        binding.keyAlt.setBackgroundResource(
+            if (altActive) R.drawable.bg_extra_key_active else R.drawable.bg_extra_key
+        )
+        binding.keyAlt.setTextColor(
+            ContextCompat.getColor(this, if (altActive) R.color.primary else R.color.on_surface)
+        )
     }
 
     private fun sendKey(data: String) {
@@ -371,13 +410,6 @@ class ConsoleActivity : AppCompatActivity() {
                             val uriStr = it.effectiveWorkDirUri.ifEmpty { it.workingDirectory }
                             workDir = EmbeddedPaths.resolveWorkDir(this@ConsoleActivity, it.id, uriStr)
                             binding.tvServerName.text = it.name
-                            supportActionBar?.title = it.name
-                            // Quick pills match the REAL server type (Minecraft-only settings rule).
-                            val isMc = it.type == ServerType.MINECRAFT
-                            binding.quickMinecraft.visibility =
-                                if (isMc) View.VISIBLE else View.GONE
-                            binding.quickUbuntu.visibility =
-                                if (!isMc) View.VISIBLE else View.GONE
                             updateStatusPill(it.status)
                         }
                     }
@@ -508,14 +540,18 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
+    /** Width of the fixed "HH:mm  " time column in px (hanging indent). */
+    private fun hangingIndentPx(): Int = try {
+        binding.consoleOutput.paint.measureText("HH:mm  ").toInt().coerceAtLeast(0)
+    } catch (_: Exception) { 0 }
+
     private fun appendOutput(output: String) {
         // Strip ANSI escapes so control codes never render as garbage; keep plain text.
         val clean = try {
             ANSI_REGEX.replace(output, "")
         } catch (_: Exception) { output }
         val newLines = clean.lines()
-        var appendedVisible = false
-        val visibleChunk = StringBuilder()
+        val visible = mutableListOf<String>()
         for (line in newLines) {
             // Preserve blank-line spacing in buffer only if it carries content around it.
             if (line.isEmpty() && logBuffer.isEmpty()) continue
@@ -526,17 +562,16 @@ class ConsoleActivity : AppCompatActivity() {
                 "WARN" -> warnCount++
                 else -> infoCount++
             }
-            if (matchesFilter(line)) {
-                if (visibleChunk.isNotEmpty()) visibleChunk.append("\n")
-                visibleChunk.append(line)
-                appendedVisible = true
-            }
+            if (matchesFilter(line)) visible.add(line)
         }
-        if (appendedVisible) {
-            binding.consoleOutput.append(
-                if (binding.consoleOutput.text.isEmpty()) visibleChunk.toString()
-                else "\n" + visibleChunk.toString()
-            )
+        if (visible.isNotEmpty()) {
+            // Fixed HH:mm column + hanging indent (design); raw text kept in logBuffer.
+            val formatted = ConsoleLogFormat.formatLines(this, visible, hangingIndentPx())
+            if (binding.consoleOutput.text.isEmpty()) binding.consoleOutput.append(formatted)
+            else {
+                binding.consoleOutput.append("\n")
+                binding.consoleOutput.append(formatted)
+            }
             if (autoScroll) scrollToBottom()
         }
         updateLevelCounts()
@@ -564,8 +599,10 @@ class ConsoleActivity : AppCompatActivity() {
     /** Full re-render from buffer (used when the filter changes). */
     private fun renderFiltered() {
         try {
-            val text = logBuffer.filter { matchesFilter(it) }.joinToString("\n")
-            binding.consoleOutput.text = text
+            binding.consoleOutput.text =
+                ConsoleLogFormat.formatLines(
+                    this, logBuffer.filter { matchesFilter(it) }, hangingIndentPx()
+                )
             if (autoScroll) scrollToBottom()
         } catch (e: Exception) {
             Log.e("ConsoleActivity", "renderFiltered failed", e)
