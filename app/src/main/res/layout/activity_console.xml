@@ -165,21 +165,18 @@
                 android:paddingTop="10dp"
                 android:paddingBottom="8dp">
 
-                <!-- Terminal surface (Termux-style): typing happens inline here,
-                     right after the prompt. NOTE: never put layout_gravity
-                     on this child: bottom gravity on a taller-than-viewport
-                     child collapses the scroll range to ~0 (bottom-aligned,
-                     top goes negative). Short logs are pinned low via
-                     minimumHeight + text gravity instead (updateFastThumb). -->
-                <EditText
+                <!-- Log surface (read-only): the input lives in a separate
+                     small field below, so typing never re-lays-out the
+                     whole log (that was the input-lag root cause).
+                     TextView scrolls natively inside ConsoleScrollView;
+                     no custom drag handling needed. -->
+                <TextView
                     android:id="@+id/logView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@android:color/transparent"
                     android:fontFamily="@font/jetbrains_mono_family"
                     android:textColor="@color/on_surface"
-                    android:textColorHint="@color/outline"
-                    android:hint="Tap here to type…"
                     android:textSize="11sp"
                     android:lineSpacingExtra="3dp"
                     android:lineSpacingMultiplier="1.0"
@@ -188,15 +185,13 @@
                     android:justificationMode="none"
                     android:fontFeatureSettings="tnum"
                     android:gravity="bottom"
-                    android:cursorVisible="true"
                     android:focusable="true"
-                    android:focusableInTouchMode="true"
+                    android:focusableInTouchMode="false"
                     android:longClickable="true"
                     android:contextClickable="true"
+                    android:textIsSelectable="true"
                     android:scrollbars="none"
-                    android:overScrollMode="never"
-                    android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
-                    android:imeOptions="actionSend" />
+                    android:overScrollMode="never" />
 
             </com.pockethost.app.ui.ConsoleScrollView>
 
@@ -264,6 +259,62 @@
             </LinearLayout>
 
         </FrameLayout>
+
+        <!-- Command input as terminal continuation: no card/box, just the
+             prompt + cursor on the same background as the log. The field
+             stays a separate tiny EditText (that's the input-lag fix),
+             it only LOOKS like the next terminal line. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/outline_variant" />
+
+        <LinearLayout
+            android:id="@+id/inputBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@android:color/transparent"
+            android:paddingStart="12dp"
+            android:paddingEnd="4dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/promptView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:fontFamily="@font/jetbrains_mono_family"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:textStyle="bold"
+                android:textColor="@color/tertiary"
+                android:text="$ " />
+
+            <EditText
+                android:id="@+id/inputField"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:paddingStart="0dp"
+                android:paddingEnd="0dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:fontFamily="@font/jetbrains_mono_family"
+                android:textColor="@color/on_surface"
+                android:textColorHint="@color/outline"
+                android:hint="Type command…"
+                android:textSize="11sp"
+                android:lineSpacingExtra="3dp"
+                android:cursorVisible="true"
+                android:maxLines="3"
+                android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
+                android:imeOptions="actionSend" />
+
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/extraKeysPanel"

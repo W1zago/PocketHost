@@ -5,12 +5,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.text.Editable
 import android.text.Selection
 import android.text.Spannable
-import android.text.Spanned
 import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.Editable
 import android.util.Log
 import android.view.ContextMenu
 import android.view.MenuItem
@@ -68,20 +68,22 @@ class ConsoleActivity : AppCompatActivity() {
     // gesture itself; this flag only suppresses auto-scroll mid-gesture).
     private var userTouching = false
 
-    // In-terminal typing (Termux-style): rendered holds the read-only log,
-    // currentInput the editable tail after inputBase. programmatic guards
-    // displayConsole(). prompt is the shell prefix (user@host:~$) from real
-    // facts, shown inline before the input tail.
+    // Log-only rendering: logView is a read-only TextView, the command input
+    // lives in a separate small EditText (inputField). Typing therefore never
+    // re-lays-out the whole log — that single-EditText design was the lag root
+    // cause (O(N) guard copy + full setText on every keystroke/log chunk).
+    // prompt is the shell prefix shown in promptView (input bar), not in the log.
     private val rendered = SpannableStringBuilder()
-    private var currentInput = ""
-    private var inputBase = 0
-    private var programmatic = false
     private var prompt = ""
     private var promptColor = 0
+    private var inputProgrammatic = false
 
     companion object {
         private const val INITIAL_TAIL_SIZE = 256 * 1024L
-        private const val MAX_BUFFER_LINES = 8000
+        // 2000 formatted lines is plenty for a phone screen and keeps
+        // TextView layout cheap. Was 8000 — same content in one EditText
+        // made every keystroke re-measure megabytes of spans.
+        private const val MAX_BUFFER_LINES = 2000
         private val ANSI_REGEX = Regex("\u001B\\[[0-9;?]*[A-Za-z]")
     }
 
@@ -116,8 +118,6 @@ class ConsoleActivity : AppCompatActivity() {
         binding.btnShare.setOnClickListener { shareLog() }
         binding.btnClear.setOnClickListener { clearConsole() }
         binding.btnMenu.setOnClickListener { showOverflow(it) }
-        binding.logView.setOnLongClickListener { false }
-        binding.logView.setOnClickListener { }
         registerForContextMenu(binding.logView)
     }
 
@@ -413,11 +413,13 @@ class ConsoleActivity : AppCompatActivity() {
 
     private fun copySelection() {
         val textView = binding.logView
-        val start = textView.selectionStart
-        val end = textView.selectionEnd
+        val text = textView.text?.toString() ?: ""
+        val start = try { textView.selectionStart } catch (_: Exception) { -1 }
+        val end = try { textView.selectionEnd } catch (_: Exception) { -1 }
         val textToCopy = if (start >= 0 && end > start) {
-            textView.text.substring(start, end).toString()
-        } else textView.text.toString()
+            try { text.substring(start.coerceIn(0, text.length), end.coerceIn(0, text.length)) }
+            catch (_: Exception) { text }
+        } else text
         copyToClipboard(textToCopy)
     }
 
@@ -428,21 +430,32 @@ class ConsoleActivity : AppCompatActivity() {
 
     private fun selectAll() {
         binding.logView.post {
-            val text = binding.logView.text
-            if (text is Spannable) {
-                Selection.selectAll(text as Spannable)
-            } else copyAll()
+            try {
+                val t = binding.logView.text
+                if (t is Spannable) {
+                    try { binding.logView.requestFocus() } catch (_: Exception) {}
+                    Selection.selectAll(t)
+                } else copyAll()
+            } catch (_: Exception) { copyAll() }
         }
     }
 
     private fun clearConsole() {
         logBuffer.clear()
         rendered.clear()
-        currentInput = ""
         pendingLines = 0
         followLive = true
         updateScrollOverlay()
-        displayConsole()
+        try {
+            binding.logView.text = ""
+        } catch (_: Exception) {}
+        try {
+            inputProgrammatic = true
+            binding.inputField.text?.clear()
+        } catch (_: Exception) {
+        } finally {
+            inputProgrammatic = false
+        }
         Toast.makeText(this, "Console cleared (log file kept)", Toast.LENGTH_SHORT).show()
     }
 
@@ -467,189 +480,74 @@ class ConsoleActivity : AppCompatActivity() {
     }
 
     private fun setupConsole() {
-        // Terminal touch policy: vertical drags scroll the log DIRECTLY here
-        // (natural direction: content follows the finger) instead of relying
-        // on the parent to steal the gesture from the text field — the field
-        // keeps swallowing it, which is why scrolling felt "blocked".
-        // Long-press selection is never disturbed (copy flow keeps working).
-        var downX = 0f
-        var downY = 0f
-        var downT = 0L
-        var lastY = 0f
-        var dragging = false
-        var tracker: android.view.VelocityTracker? = null
-        val vc = android.view.ViewConfiguration.get(this)
-        val slop = vc.scaledTouchSlop.toFloat()
-        binding.logView.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    userTouching = true
-                    downX = event.x
-                    downY = event.y
-                    downT = event.eventTime
-                    lastY = event.y
-                    dragging = false
-                    tracker?.recycle()
-                    tracker = android.view.VelocityTracker.obtain()
-                    tracker?.addMovement(event)
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    tracker?.addMovement(event)
-                    if (!dragging) {
-                        try {
-                            val s0 = binding.logView.selectionStart
-                            val s1 = binding.logView.selectionEnd
-                            // Active selection (copy flow): don't interfere.
-                            if (s0 != s1) return@setOnTouchListener false
-                        } catch (_: Exception) {}
-                        val dx = event.x - downX
-                        val dyTotal = event.y - downY
-                        val dist = kotlin.math.hypot(dx.toDouble(), dyTotal.toDouble())
-                        if (dist > slop && kotlin.math.abs(dyTotal) > kotlin.math.abs(dx)) {
-                            dragging = true
-                            lastY = event.y
-                            v.parent?.requestDisallowInterceptTouchEvent(true)
-                        }
-                    }
-                    if (dragging) {
-                        val dy = event.y - lastY
-                        lastY = event.y
-                        // Natural: content follows the finger.
-                        binding.scrollView.scrollBy(0, (-dy).toInt())
-                        return@setOnTouchListener true
-                    }
-                }
-                MotionEvent.ACTION_UP -> {
-                    userTouching = false
-                    tracker?.addMovement(event)
-                    if (dragging) {
-                        dragging = false
-                        v.parent?.requestDisallowInterceptTouchEvent(false)
-                        try {
-                            tracker?.computeCurrentVelocity(
-                                1000, vc.scaledMaximumFlingVelocity.toFloat()
-                            )
-                            val vy = tracker?.yVelocity ?: 0f
-                            if (kotlin.math.abs(vy) > vc.scaledMinimumFlingVelocity) {
-                                binding.scrollView.fling((-vy).toInt())
-                            }
-                        } catch (_: Exception) {}
-                        tracker?.recycle()
-                        tracker = null
-                        binding.scrollView.post { onLogScrolled(binding.scrollView.scrollY) }
-                        binding.scrollView.postDelayed(
-                            { onLogScrolled(binding.scrollView.scrollY) }, 350
-                        )
-                        return@setOnTouchListener true
-                    }
-                    tracker?.recycle()
-                    tracker = null
-                    val dt = event.eventTime - downT
-                    val dist = kotlin.math.hypot(
-                        (event.x - downX).toDouble(), (event.y - downY).toDouble()
-                    )
-                    if (dt < 300 && dist < 24) {
-                        binding.logView.post {
-                            try {
-                                val s0 = binding.logView.selectionStart
-                                val s1 = binding.logView.selectionEnd
-                                // Tap with no active selection -> jump to input.
-                                if (s0 == s1) {
-                                    binding.logView.setSelection(
-                                        binding.logView.text.length
-                                    )
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    userTouching = false
-                    dragging = false
-                    v.parent?.requestDisallowInterceptTouchEvent(false)
-                    tracker?.recycle()
-                    tracker = null
-                    binding.scrollView.post { onLogScrolled(binding.scrollView.scrollY) }
-                }
-            }
-            false
-        }
-        binding.logView.addTextChangedListener(object : TextWatcher {
+        // Log is read-only: native ScrollView gestures just work, no custom
+        // drag/fling code needed (the old EditText swallowed touches).
+        // Input lives in inputField below — its TextWatcher only sees a few
+        // dozen chars, never the whole log.
+        try {
+            binding.promptView.text = prompt.ifEmpty { "$ " }
+            binding.promptView.setTextColor(promptColor)
+        } catch (_: Exception) {}
+        try { binding.logView.text = "" } catch (_: Exception) {}
+        binding.inputField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                onTerminalEdited(s)
+                if (inputProgrammatic) return
+                try {
+                    val text = s?.toString() ?: return
+                    if (text.contains("\n")) submitInput()
+                } catch (_: Exception) {}
             }
         })
-        binding.logView.setOnEditorActionListener { _, actionId, _ ->
+        binding.inputField.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
-                submitTerminalInput()
+                submitInput()
                 true
             } else false
         }
-        binding.logView.requestFocus()
+        // Hardware Enter / keyboards that send key events instead of actions.
+        binding.inputField.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
+                event.action == android.view.KeyEvent.ACTION_DOWN
+            ) {
+                submitInput()
+                true
+            } else false
+        }
+        // Tap on empty log area focuses the input (selection still works via
+        // long-press because the TextView is selectable).
+        binding.logView.setOnClickListener {
+            try {
+                val s0 = binding.logView.selectionStart
+                val s1 = binding.logView.selectionEnd
+                if (s0 == s1) binding.inputField.requestFocus()
+            } catch (_: Exception) {
+                try { binding.inputField.requestFocus() } catch (_: Exception) {}
+            }
+        }
+        binding.inputField.requestFocus()
     }
 
-    /** Shows rendered log + prompt + preserved input tail.
-     * Viewport policy (the actual scroll fix): while the finger is down,
-     * the viewport is NEVER touched — no pin, no restore — so drags and
-     * flings are never fought. Otherwise live-follow pins to the bottom,
-     * paused history keeps its exact position. Cursor/selection restore
-     * never moves the viewport (child scroll is suppressed). */
+    /** Full refresh of the read-only log (clear / truncate / prompt change).
+     * Viewport policy: finger down -> hands off completely; live-follow pins
+     * to the bottom; paused history keeps its position (clamped on shrink). */
     private fun displayConsole() {
         try {
-            programmatic = true
-            // Remember viewport before the text swap so paused history can be
-            // restored after layout.
             val savedY = try { binding.scrollView.scrollY } catch (_: Exception) { 0 }
-            val prevStart = try {
-                binding.logView.selectionStart
-            } catch (_: Exception) { -1 }
-            val prevEnd = try {
-                binding.logView.selectionEnd
-            } catch (_: Exception) { -1 }
-            val hadSelection = prevStart >= 0 && prevEnd > prevStart
-            val sb = SpannableStringBuilder(rendered)
-            if (prompt.isNotEmpty()) {
-                val s = sb.length
-                sb.append(prompt)
-                sb.setSpan(
-                    android.text.style.ForegroundColorSpan(promptColor),
-                    s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-                sb.setSpan(
-                    android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
-                    s, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-            }
-            sb.append(currentInput)
-            binding.logView.setText(sb)
-            inputBase = sb.length - currentInput.length
-            // Cursor back to the input end (typing must keep working even
-            // while paused); an active copy selection is kept, clamped.
-            // Neither moves the viewport: child scroll is suppressed.
             try {
-                if (hadSelection) {
-                    val t = binding.logView.text
-                    if (t is Spannable) {
-                        Selection.setSelection(
-                            t,
-                            prevStart.coerceIn(0, sb.length),
-                            prevEnd.coerceIn(0, sb.length)
-                        )
-                    }
-                } else {
-                    binding.logView.setSelection(sb.length)
-                }
+                binding.logView.text = SpannableStringBuilder(rendered)
+            } catch (_: Exception) {
+                try { binding.logView.text = rendered.toString() } catch (_: Exception) {}
+            }
+            try {
+                binding.promptView.text = prompt.ifEmpty { "$ " }
+                binding.promptView.setTextColor(promptColor)
             } catch (_: Exception) {}
-            // THE rule: finger down -> hands off the viewport completely.
             if (userTouching) return
             if (followLive) {
                 scrollToBottom(smooth = false)
             } else {
-                // Streaming append-at-end preserves scrollY by itself, so do
-                // NOT restore here: any scrollTo would kill an in-flight fling
-                // and feel "stuck". Only clamp when content shrank (clear).
                 binding.scrollView.post {
                     try {
                         val max = contentMaxScroll()
@@ -657,48 +555,81 @@ class ConsoleActivity : AppCompatActivity() {
                     } catch (_: Exception) {}
                 }
             }
-        } catch (_: Exception) {
-        } finally {
-            programmatic = false
-        }
-    }
-
-    private fun onTerminalEdited(s: Editable?) {
-        if (programmatic) return
-        try {
-            val text = s?.toString() ?: return
-            // Edit touched read-only history/prompt -> revert to log + input tail.
-            val guard = rendered.toString() + prompt
-            if (text.length < inputBase || !text.startsWith(guard)) {
-                displayConsole()
-                return
-            }
-            currentInput = text.substring(inputBase)
-            if (currentInput.contains("\n")) submitTerminalInput()
         } catch (_: Exception) {}
     }
 
-    /** Sends every completed line, keeps the unfinished tail as input. */
-    private fun submitTerminalInput() {
+    /** Incremental append: avoids full setText() on every log chunk.
+     * Both the source-of-truth [rendered] and the TextView grow by the same
+     * formatted span; layout cost stays proportional to the chunk. */
+    private fun appendFormatted(formatted: Spanned) {
         try {
-            val parts = currentInput.replace("\r", "").split("\n")
-            currentInput = parts.last()
-            for (i in 0 until parts.size - 1) {
-                val line = parts[i]
+            if (rendered.isEmpty()) rendered.append(formatted)
+            else {
+                rendered.append("\n")
+                rendered.append(formatted)
+            }
+        } catch (_: Exception) {}
+        try {
+            if (binding.logView.length() == 0) {
+                binding.logView.text = SpannableStringBuilder(rendered)
+            } else {
+                binding.logView.append("\n")
+                binding.logView.append(formatted)
+            }
+        } catch (_: Exception) {
+            // Fallback: full refresh (never lose output).
+            try { displayConsole() } catch (_: Exception) {}
+        }
+        if (userTouching) return
+        if (followLive) {
+            scrollToBottom(smooth = false)
+        }
+    }
+
+    /** Sends the input field content line-by-line, keeps nothing buffered.
+     * The field is tiny, so substring/split here is O(chars typed), not O(log). */
+    private fun submitInput() {
+        try {
+            val raw = try { binding.inputField.text?.toString() ?: "" } catch (_: Exception) { "" }
+            if (raw.isEmpty()) return
+            inputProgrammatic = true
+            try { binding.inputField.text?.clear() } catch (_: Exception) {}
+            inputProgrammatic = false
+            val parts = raw.replace("\r", "").split("\n")
+            for (line in parts) {
                 if (line.isNotEmpty()) sendCommand(line) else writeToProcess("\n")
             }
             // Sending means the user is at the tail: resume live follow.
             followLive = true
             pendingLines = 0
             updateScrollOverlay()
-            displayConsole()
+            if (followLive && !userTouching) scrollToBottom(smooth = false)
+            try { binding.inputField.requestFocus() } catch (_: Exception) {}
+        } catch (_: Exception) {
+            try { inputProgrammatic = false } catch (_: Exception) {}
+        }
+    }
+
+    /** Inserts printable helper text at the input cursor (/, —, TAB).
+     * Control sequences (arrows/ESC/…) still go raw to the process. */
+    private fun insertIntoInput(text: String) {
+        try {
+            val field = binding.inputField
+            field.requestFocus()
+            val start = try { field.selectionStart.coerceAtLeast(0) } catch (_: Exception) { field.text?.length ?: 0 }
+            val end = try { field.selectionEnd.coerceAtLeast(start) } catch (_: Exception) { start }
+            try { field.text?.replace(start, end, text) } catch (_: Exception) {
+                try { field.append(text) } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 
     private fun setupExtraKeys() {
         binding.keyEsc.setOnClickListener { sendKey(27.toChar().toString()) }
-        binding.keySlash.setOnClickListener { sendKey("/") }
-        binding.keyDash.setOnClickListener { sendKey("-") }
+        // Printable helpers type into the input field (line-buffered);
+        // control sequences still go raw straight to the process.
+        binding.keySlash.setOnClickListener { insertIntoInput("/") }
+        binding.keyDash.setOnClickListener { insertIntoInput("-") }
         binding.keyHome.setOnClickListener { sendKey("\u001B[H") }
         binding.keyUp.setOnClickListener { sendKey("\u001B[A") }
         binding.keyEnd.setOnClickListener { sendKey("\u001B[F") }
@@ -707,7 +638,7 @@ class ConsoleActivity : AppCompatActivity() {
         binding.keyPgUp.setOnClickListener { scrollPage(up = true) }
         binding.keyPgUp.setOnLongClickListener { sendKey("\u001B[5~"); true }
 
-        binding.keyTab.setOnClickListener { sendKey("\t") }
+        binding.keyTab.setOnClickListener { insertIntoInput("\t") }
         binding.keyLeft.setOnClickListener { sendKey("\u001B[D") }
         binding.keyDown.setOnClickListener { sendKey("\u001B[B") }
         binding.keyRight.setOnClickListener { sendKey("\u001B[C") }
@@ -788,7 +719,10 @@ class ConsoleActivity : AppCompatActivity() {
                             workDir = EmbeddedPaths.resolveWorkDir(this@ConsoleActivity, it.id, uriStr)
                             binding.tvServerName.text = it.name
                             prompt = buildPrompt(it)
-                            displayConsole()
+                            try {
+                                binding.promptView.text = prompt.ifEmpty { "$ " }
+                                binding.promptView.setTextColor(promptColor)
+                            } catch (_: Exception) {}
                             updateStatusPill(it.status)
                         }
                     }
@@ -923,11 +857,6 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    /** Width of the fixed "HH:mm " time column in px (hanging indent). */
-    private fun hangingIndentPx(): Int = try {
-        binding.logView.paint.measureText("HH:mm ").toInt().coerceAtLeast(0)
-    } catch (_: Exception) { 0 }
-
     private fun appendOutput(output: String) {
         // Strip ANSI escapes so control codes never render as garbage; keep plain text.
         val clean = try {
@@ -946,6 +875,7 @@ class ConsoleActivity : AppCompatActivity() {
             }
             visible.add(line)
         }
+        var truncated = false
         // Keep the rendered spans 1:1 with the buffer: drop the same lines.
         if (removed > 0 && rendered.isNotEmpty()) {
             try {
@@ -956,24 +886,55 @@ class ConsoleActivity : AppCompatActivity() {
                     cut++
                 }
                 if (cut > 0) rendered.delete(0, cut)
+                truncated = true
             } catch (_: Exception) {}
         }
         if (visible.isNotEmpty()) {
-            // Fixed HH:mm column + hanging indent (design); raw text kept in logBuffer.
-            val formatted = ConsoleLogFormat.formatLines(this, visible, hangingIndentPx())
-            if (rendered.isEmpty()) rendered.append(formatted)
-            else {
-                rendered.append("\n")
-                rendered.append(formatted)
-            }
-            if (followLive && !userTouching) {
-                displayConsole() // displayConsole pins to bottom when following
+            // hangingIndentPx is 0: ConsoleLogFormat ignores it by design
+            // (flat left edge); avoids a paint.measure on every chunk.
+            val formatted = ConsoleLogFormat.formatLines(this, visible, 0)
+            if (truncated) {
+                // Buffer head was cut: one full refresh to stay in sync,
+                // then continue incrementally.
+                try {
+                    if (rendered.isEmpty()) rendered.append(formatted)
+                    else {
+                        rendered.append("\n")
+                        rendered.append(formatted)
+                    }
+                } catch (_: Exception) {}
+                displayConsole()
+                if (!followLive || userTouching) {
+                    pendingLines += visible.size
+                    updateScrollOverlay()
+                }
+            } else if (followLive && !userTouching) {
+                appendFormatted(formatted) // pins to bottom inside
             } else {
                 // Paused: count unread, keep viewport exactly where it was.
+                // Still append incrementally (cheap) instead of full setText().
                 pendingLines += visible.size
-                displayConsole()
+                try {
+                    if (rendered.isEmpty()) rendered.append(formatted)
+                    else {
+                        rendered.append("\n")
+                        rendered.append(formatted)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    if (binding.logView.length() == 0) {
+                        binding.logView.text = SpannableStringBuilder(rendered)
+                    } else {
+                        binding.logView.append("\n")
+                        binding.logView.append(formatted)
+                    }
+                } catch (_: Exception) {
+                    try { displayConsole() } catch (_: Exception) {}
+                }
                 updateScrollOverlay()
             }
+        } else if (truncated) {
+            displayConsole()
         }
     }
 
