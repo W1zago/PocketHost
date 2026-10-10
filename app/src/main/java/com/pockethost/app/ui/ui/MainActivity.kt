@@ -115,9 +115,6 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_scan -> {
                     startActivity(Intent(this, DeviceScanActivity::class.java)); true
                 }
-                R.id.action_remote -> {
-                    startActivity(Intent(this, RemoteConsoleActivity::class.java)); true
-                }
                 else -> false
             }
         }
@@ -326,11 +323,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnScan.setOnLongClickListener {
                 autoRequestAllPermissions()
                 true
-            }
-        } catch (_: Exception) {}
-        try {
-            binding.btnRemote.setOnClickListener {
-                startActivity(Intent(this, RemoteConsoleActivity::class.java))
             }
         } catch (_: Exception) {}
         try {

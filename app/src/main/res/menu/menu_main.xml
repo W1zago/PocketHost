@@ -6,9 +6,4 @@
         android:title="Scan device"
         android:icon="@drawable/ic_battery"
         app:showAsAction="never" />
-    <item
-        android:id="@+id/action_remote"
-        android:title="PC Console"
-        android:icon="@drawable/ic_server"
-        app:showAsAction="never" />
 </menu>

@@ -66,11 +66,6 @@
             android:windowSoftInputMode="adjustNothing" />
 
         <activity
-            android:name=".ui.RemoteConsoleActivity"
-            android:parentActivityName=".ui.MainActivity"
-            android:windowSoftInputMode="adjustResize" />
-
-        <activity
             android:name=".termux.TermuxHardGateActivity"
             android:exported="false"
             android:noHistory="true"

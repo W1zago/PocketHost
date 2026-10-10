@@ -74,12 +74,13 @@
 
         </LinearLayout>
 
-        <!-- Search (design: h-12, icon 20, Inter 14, clear action) -->
+        <!-- Search (hidden per user request) -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp">
+            android:layout_marginEnd="16dp"
+            android:visibility="gone">
 
             <EditText
                 android:id="@+id/searchInput"
@@ -118,12 +119,12 @@
 
         </FrameLayout>
 
-        <!-- Filter chips + sort -->
+        <!-- Filter chips + sort (chips hidden per user request, sort kept) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingTop="8dp">
+            android:paddingTop="0dp">
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
@@ -131,7 +132,8 @@
                 android:scrollbars="none"
                 android:clipToPadding="false"
                 android:paddingStart="16dp"
-                android:paddingEnd="16dp">
+                android:paddingEnd="16dp"
+                android:visibility="gone">
 
                 <com.google.android.material.chip.ChipGroup
                     android:id="@+id/filterGroup"
@@ -211,13 +213,21 @@
                     android:layout_width="150dp"
                     android:layout_height="wrap_content"
                     app:hintEnabled="false"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense.ExposedDropdownMenu"
                     app:boxBackgroundColor="@color/surface_high"
-                    app:boxStrokeColor="@color/outline_variant">
+                    app:boxStrokeColor="@color/outline_variant"
+                    app:endIconMode="dropdown_menu"
+                    app:endIconTint="@color/secondary">
 
                     <com.google.android.material.textfield.MaterialAutoCompleteTextView
                         android:id="@+id/sortInput"
                         android:layout_width="match_parent"
-                        android:layout_height="48dp"
+                        android:layout_height="40dp"
+                        android:gravity="center_vertical"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="8dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:text="By Status"
                         android:textSize="12sp"
                         android:textColor="@color/secondary"
@@ -330,21 +340,6 @@
         android:textSize="12sp"
         app:backgroundTint="@color/surface_high"
         app:icon="@drawable/ic_battery"
-        app:iconTint="@color/secondary"
-        android:textColor="@color/on_surface" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnRemote"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="76dp"
-        android:text="PC Console"
-        android:textSize="12sp"
-        app:backgroundTint="@color/surface_high"
-        app:icon="@drawable/ic_server"
         app:iconTint="@color/secondary"
         android:textColor="@color/on_surface" />
 
