@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
@@ -17,6 +18,7 @@
             android:background="@color/background"
             app:title="Create Server"
             app:titleTextColor="@color/on_surface"
+            app:titleTextAppearance="@style/PocketHost.ToolbarTitle"
             app:navigationIconTint="@color/on_surface" />
 
         <androidx.core.widget.NestedScrollView
@@ -98,7 +100,7 @@
                         android:text="ARM64"
                         android:textSize="10sp"
                         android:textColor="@color/secondary"
-                        android:fontFamily="monospace"
+                        android:fontFamily="@font/jetbrains_mono_family"
                         android:background="@drawable/bg_port_chip"
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
@@ -231,7 +233,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Linux PRoot"
+                                    android:text="Linux Server"
                                     android:textSize="15sp"
                                     android:textStyle="bold"
                                     android:textColor="@color/on_surface" />
@@ -239,7 +241,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Debian • rootless sandbox"
+                                    android:text="Ubuntu 22.04 • rootless sandbox"
                                     android:textSize="11sp"
                                     android:textColor="@color/on_surface_variant" />
 
@@ -308,9 +310,10 @@
                         android:text="Assigned Listen Port"
                         android:textSize="11sp"
                         android:textColor="@color/on_surface_variant"
-                        android:fontFamily="monospace" />
+                        android:fontFamily="@font/jetbrains_mono_family" />
 
                     <LinearLayout
+                        android:id="@+id/portRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
@@ -442,7 +445,7 @@
                                 android:textSize="13sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/tertiary"
-                                android:fontFamily="monospace"
+                                android:fontFamily="@font/jetbrains_mono_family"
                                 android:background="@drawable/bg_port_chip"
                                 android:paddingStart="8dp"
                                 android:paddingEnd="8dp"
@@ -564,46 +567,13 @@
                         android:text="Use Maximum Resources"
                         style="@style/PocketHost.Button.Tonal" />
 
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchPirate"
+                    <!-- Shared component: same Allow cracked + View distance as Server Detail -->
+                    <include
+                        android:id="@+id/mcSettings"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:text="Дозволити гравців без ліцензії (піратка)"
-                        android:checked="false" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Вимикає перевірку ліцензії Mojang (online-mode=false). Увімкни, якщо не можуть зайти з неліцензійних лаунчерів."
-                        android:textSize="11sp"
-                        android:textColor="@color/on_surface_variant" />
-
-                    <TextView
-                        android:id="@+id/tvViewDistance"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="Дальність промальовки: 10 чанків"
-                        android:textSize="13sp"
-                        android:textColor="@color/on_surface" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderViewDistance"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="10"
-                        android:valueFrom="2"
-                        android:valueTo="32"
-                        android:stepSize="1" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Менше значення — менше RAM/CPU і лагів на телефоні. Сервер застосовує після рестарту."
-                        android:textSize="11sp"
-                        android:textColor="@color/on_surface_variant" />
+                        layout="@layout/include_minecraft_settings" />
 
                 </LinearLayout>
 

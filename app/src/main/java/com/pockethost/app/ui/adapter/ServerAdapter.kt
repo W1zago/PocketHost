@@ -100,9 +100,9 @@ class ServerAdapter(
                 if ((server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) && lastStarted != null) {
                     serverUptime.text = formatUptime(System.currentTimeMillis() - lastStarted)
                 } else if (server.status == ServerStatus.STOPPING) {
-                    serverUptime.text = "вЂ¦"
+                    serverUptime.text = "…"
                 } else {
-                    serverUptime.text = "вЂ”"
+                    serverUptime.text = "—"
                 }
                 if (lastStarted != null) {
                     val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
@@ -143,7 +143,7 @@ class ServerAdapter(
         }
 
         private fun formatUptime(millis: Long): String {
-            if (millis < 0) return "вЂ”"
+            if (millis < 0) return "—"
             val minutes = millis / 60000
             if (minutes < 1) return "just now"
             if (minutes < 60) return "${minutes}m"

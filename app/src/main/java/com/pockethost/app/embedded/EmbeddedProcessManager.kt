@@ -6,23 +6,23 @@ import com.pockethost.app.jvm.InProcessServer
 import java.io.File
 
 /**
- * Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р·Р°РїСѓСЃРє РїСЂРѕС†РµСЃС–РІ Р‘Р•Р— Р·РѕРІРЅС–С€РЅСЊРѕРіРѕ Termux
- * С– Р‘Р•Р— РґРѕР·РІРѕР»Сѓ com.termux.permission.RUN_COMMAND.
+ * Built-in terminal: process launch WITHOUT external Termux
+ * and WITHOUT com.termux.permission.RUN_COMMAND.
  *
- * Р’РёРєРѕСЂРёСЃС‚РѕРІСѓС” Р·РІРёС‡Р°Р№РЅРёР№ ProcessBuilder РІСЃРµСЂРµРґРёРЅС– UID РґРѕРґР°С‚РєСѓ:
- *   - СЂРѕР±РѕС‡Р° РїР°РїРєР°: filesDir/servers/<id>
- *   - stdin  -> sendInput() (РєРѕРЅСЃРѕР»СЊ СЃРµСЂРІРµСЂР° / shell)
- *   - stdout+stderr -> server.log (tail С‡РёС‚Р°С” ConsoleActivity)
+ * Uses plain ProcessBuilder inside the app UID:
+ *   - work dir: filesDir/servers/<id>
+ *   - stdin  -> sendInput() (server console / shell)
+ *   - stdout+stderr -> server.log (tailed by ConsoleActivity)
  *
- * РџРѕС‚РѕРєРѕР±РµР·РїРµС‡РЅРёР№ singleton. РњР°РєСЃРёРјСѓРј 2 РѕРґРЅРѕС‡Р°СЃРЅРёС… СЃРµСЂРІРµСЂРё (СЏРє Р±СѓР»Рѕ).
+ * Thread-safe singleton. Max 2 concurrent servers (as before).
  */
 object EmbeddedProcessManager {
 
     private const val TAG = "EmbeddedTerminal"
-    // MAX 2 РґР»СЏ shell-РїСЂРѕС†РµСЃС–РІ, Р°Р»Рµ in-process JVM вЂ” Р»РёС€Рµ РћР”РќРђ РЅР° РїСЂРѕС†РµСЃ
-    // (-Djava.class.path С„С–РєСЃСѓС”С‚СЊСЃСЏ РїСЂРё СЃС‚РІРѕСЂРµРЅРЅС– JVM, С–РЅС€РёР№ classpath = РїРѕС‚СЂС–Р±РµРЅ
-    // СЂРµСЃС‚Р°СЂС‚ Р°РїРєРё). РўРѕРјСѓ РґР»СЏ Minecraft РґС–С” РґРѕРґР°С‚РєРѕРІРёР№ canStartMinecraftCheck()
-    // РЅРёР¶С‡Рµ, Р° РЅРµ Р»РёС€Рµ С†РµР№ Р»С–РјС–С‚.
+    // MAX 2 for shell processes, but in-process JVM is only ONE per process
+    // (-Djava.class.path is fixed at JVM creation, another classpath needs
+    // an apk restart). So Minecraft gets an extra canStartMinecraftCheck()
+    // below, not just this limit.
     const val MAX_SERVERS = 2
 
     data class EmbeddedSession(
@@ -41,14 +41,14 @@ object EmbeddedProcessManager {
     private val running = mutableMapOf<String, RunningProcess>()
 
     fun isRunning(serverId: String): Boolean = synchronized(lock) {
-        // In-process JVM (Mojo-РїС–РґС…С–Рґ) Р¶РёРІРµ РѕРєСЂРµРјРѕ РІС–Рґ ProcessBuilder-РјР°РїРё
+        // In-process JVM (Mojo approach) lives separately from the ProcessBuilder map
         if (InProcessServer.isRunning(serverId)) return true
         val r = running[serverId] ?: return false
         try { r.process.isAlive } catch (_: Exception) { false }
     }
 
     fun runningCount(): Int = synchronized(lock) {
-        // С‡РёСЃС‚РёРјРѕ РјРµСЂС‚РІС–
+        // sweep the dead
         val dead = running.filterValues { try { !it.process.isAlive } catch (_: Exception) { true } }.keys.toList()
         dead.forEach { running.remove(it) }
         running.size + (if (InProcessServer.isRunning()) 1 else 0)
@@ -62,28 +62,28 @@ object EmbeddedProcessManager {
     }
 
     /**
-     * C4: С‡Рё РјРѕР¶РЅР° СЃС‚Р°СЂС‚СѓРІР°С‚Рё Minecraft-СЃРµСЂРІРµСЂ in-process.
-     * JVM РѕРґРЅР° РЅР° РїСЂРѕС†РµСЃ: СЏРєС‰Рѕ РІР¶Рµ Р±С–Р¶РёС‚СЊ Р†РќРЁРР™ СЃРµСЂРІРµСЂ вЂ” РґСЂСѓРіРёР№ Р· С–РЅС€РёРј classpath
-     * РІРјСЂРµ Р· FAILED_DEFINITIVE. Р§РµСЃРЅРѕ РІС–РґРјРѕРІР»СЏС”РјРѕ РѕРґСЂР°Р·Сѓ Р· user-friendly РїСЂРёС‡РёРЅРѕСЋ.
-     * @return Pair(canStart, reasonIfNot) вЂ” reason РІР¶Рµ СѓРєСЂР°С—РЅСЃСЊРєРѕСЋ РґР»СЏ Р»РѕРіСѓ/Toast.
+     * C4: can a Minecraft server start in-process?
+     * JVM is one per process: if ANOTHER server already runs, a second one with a different classpath
+     * fails with FAILED_DEFINITIVE. Refuse honestly upfront with a user-friendly reason.
+     * @return Pair(canStart, reasonIfNot) - reason already in English for log/Toast.
      */
     fun canStartMinecraft(serverId: String): Pair<Boolean, String> {
         try {
             val liveId = InProcessServer.serverId
             if (InProcessServer.isRunning() && liveId != null && liveId != serverId) {
-                return false to "Р—СѓРїРёРЅРё С–РЅС€РёР№ СЃРµСЂРІРµСЂ (С–РЅС€РёР№ classpath, РїРѕС‚СЂС–Р±РµРЅ СЂРµСЃС‚Р°СЂС‚ Р°РїРєРё)"
+                return false to "Stop the other server first (different classpath, apk restart needed)"
             }
         } catch (_: Exception) {}
         val count = try { runningCount() } catch (_: Exception) { 0 }
         if (count >= MAX_SERVERS) {
-            return false to "Р—СѓРїРёРЅРё РїРµСЂС€РёР№ СЃРµСЂРІРµСЂ (РјР°РєСЃРёРјСѓРј $MAX_SERVERS)"
+            return false to "Stop the first server (max $MAX_SERVERS)"
         }
         return true to ""
     }
 
     /**
-     * Р—Р°РїСѓСЃРє РєРѕРјР°РЅРґРё. command - РіРѕС‚РѕРІРёР№ argv (Р±РµР· shell-РѕР±РіРѕСЂС‚РєРё).
-     * РџРѕРІРµСЂС‚Р°С” true СЏРєС‰Рѕ РїСЂРѕС†РµСЃ СЃС‚Р°СЂС‚СѓРІР°РІ.
+     * Launches a command. command is a ready argv (no shell wrapper).
+     * Returns true when the process started.
      */
     fun start(
         context: Context,
@@ -114,36 +114,38 @@ object EmbeddedProcessManager {
                 .directory(workDir)
                 .redirectErrorStream(true)
 
-            // Р‘Р°Р·РѕРІРµ РѕС‚РѕС‡РµРЅРЅСЏ РІР±СѓРґРѕРІР°РЅРѕРіРѕ С‚РµСЂРјС–РЅР°Р»Сѓ (Р°РЅР°Р»РѕРі $PREFIX)
+            // Base env of the built-in terminal ($PREFIX analog)
             val env = pb.environment()
             try {
                 env["TERM"] = "xterm-256color"
                 env["HOME"] = workDir.absolutePath
                 env["TMPDIR"] = context.cacheDir.absolutePath
-                // tools (jre/proot/busybox) РїРµСЂС€РёРјРё РІ PATH
+                // tools (jre/proot/busybox) first in PATH
                 val toolsBin = File(EmbeddedPaths.toolsDir(context), "bin").absolutePath
                 val oldPath = env["PATH"] ?: "/system/bin:/system/xbin:/vendor/bin"
                 env["PATH"] = "$toolsBin:$oldPath"
                 env["ANDROID_DATA"] = "/data"
                 env["ANDROID_ROOT"] = "/system"
                 for ((k, v) in envExtra) env[k] = v
-                // P0 FORK-fix: СЏРєС‰Рѕ РєРѕРјР°РЅРґР° Р№РґРµ С‡РµСЂРµР· СЃРёСЃС‚РµРјРЅРёР№ Р»С–РЅРєРµСЂ
-                // ([linker, <abs java>, ...]), LD_LIBRARY_PATH+JAVA_HOME РѕР±РѕРІ'СЏР·РєРѕРІС–,
-                // С–РЅР°РєС€Рµ `library "libjli.so" not found`. РЇРєС‰Рѕ РІРёРєР»РёРєР°С‡ РЅРµ РїРµСЂРµРґР°РІ вЂ”
-                // РґРѕР±СѓРґРѕРІСѓС”РјРѕ Р· linkerEnv Р·Р° java-С€Р»СЏС…РѕРј (command[1]).
-                if (command.isNotEmpty() && command[0].contains("linker")) {
+                // P0 FORK-fix: when the command goes through the system linker
+                // ([linker, <abs java>, ...]), LD_LIBRARY_PATH+JAVA_HOME are mandatory,
+                // otherwise `library "libjli.so" not found`. When the caller did not pass them -
+                // append from linkerEnv by java path (command[1]).
+                if (command.isNotEmpty() && command[0].contains("linker") &&
+                    (command.getOrNull(1)?.contains("java") == true)
+                ) {
                     val javaPath = command.getOrNull(1) ?: ""
                     if (javaPath.isEmpty() || !File(javaPath).isAbsolute) {
-                        val msg = "Р’С–РґРјРѕРІР°: argv[1] РјР°С” Р±СѓС‚Рё Р°Р±СЃРѕР»СЋС‚РЅРёРј С€Р»СЏС…РѕРј РґРѕ java (РѕС‚СЂРёРјР°РЅРѕ '$javaPath'), " +
-                            "С–РЅР°РєС€Рµ linker РїР°РґР°С” `expected absolute path: \"-Xmx64M\"`"
+                        val msg = "Refusing: argv[1] must be the absolute java path (got '$javaPath'), " +
+                            "otherwise the linker fails `expected absolute path: \"-Xmx64M\"`"
                         Log.e(TAG, msg)
-                        appendLog(logFile, "\n[РџРћРњРР›РљРђ Р—РђРџРЈРЎРљРЈ: $msg]\n")
+                        appendLog(logFile, "\n[LAUNCH ERROR: $msg]\n")
                         return false
                     }
                     if (!EmbeddedJava.hasLibJli(javaPath)) {
-                        val jli = try { EmbeddedJava.findLibJli(javaPath)?.absolutePath ?: "РЅРµ Р·РЅР°Р№РґРµРЅРѕ" } catch (_: Exception) { "?" }
+                        val jli = try { EmbeddedJava.findLibJli(javaPath)?.absolutePath ?: "not found" } catch (_: Exception) { "?" }
                         Log.e(TAG, "libjli.so missing for $javaPath (found: $jli)")
-                        appendLog(logFile, "\n[РџРћРџР•Р Р•Р”Р–Р•РќРќРЇ: libjli.so РЅРµ Р·РЅР°Р№РґРµРЅРѕ ($jli) вЂ” РјРѕР¶Р»РёРІРёР№ CANNOT LINK EXECUTABLE]\n")
+                        appendLog(logFile, "\n[WARNING: libjli.so not found ($jli) - possible CANNOT LINK EXECUTABLE]\n")
                     }
                     if (!env.containsKey("LD_LIBRARY_PATH") || !env.containsKey("JAVA_HOME")) {
                         try {
@@ -152,12 +154,12 @@ object EmbeddedProcessManager {
                             Log.i(TAG, "linker env injected LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]} JAVA_HOME=${env["JAVA_HOME"]}")
                         } catch (_: Exception) {}
                     }
-                    // -Xmx РЅС–РєРѕР»Рё РЅРµ РјР°С” Р±СѓС‚Рё РЅР° РјС–СЃС†С– executable (command[1]).
+                    // -Xmx must never sit where the executable goes (command[1]).
                     val exe = command.getOrNull(1) ?: ""
                     if (exe.startsWith("-")) {
-                        val msg = "Р’С–РґРјРѕРІР°: linker executable РЅРµ РјРѕР¶Рµ Р±СѓС‚Рё РїСЂР°РїРѕСЂС†РµРј ($exe)"
+                        val msg = "Refusing: linker executable cannot be a flag ($exe)"
                         Log.e(TAG, msg)
-                        appendLog(logFile, "\n[РџРћРњРР›РљРђ Р—РђРџРЈРЎРљРЈ: $msg]\n")
+                        appendLog(logFile, "\n[LAUNCH ERROR: $msg]\n")
                         return false
                     }
                 }
@@ -169,9 +171,9 @@ object EmbeddedProcessManager {
                 pb.start()
             } catch (e: Exception) {
                 Log.e(TAG, "ProcessBuilder failed for $command", e)
-                // Fallback С‡РµСЂРµР· sh -c (РЅР° РІРёРїР°РґРѕРє СЃРєР»Р°РґРЅРёС… РєРѕРјР°РЅРґ)
+                // Fallback via sh -c (for complex commands)
                 if (shellFallback != null) {
-                    appendLog(logFile, "РџСЂСЏРјРёР№ Р·Р°РїСѓСЃРє РЅРµ РІРґР°РІСЃСЏ (${e.message}), РїСЂРѕР±СѓСЋ С‡РµСЂРµР· sh...\n")
+                    appendLog(logFile, "Direct launch failed (${e.message}), trying via sh...\n")
                     ProcessBuilder("sh", "-c", shellFallback)
                         .directory(workDir)
                         .redirectErrorStream(true)
@@ -179,17 +181,23 @@ object EmbeddedProcessManager {
                 } else throw e
             }
 
-            // process.pid() РґРѕСЃС‚СѓРїРЅРёР№ Р»РёС€Рµ Р· API 26+ СЏРє hidden РЅР° С‡Р°СЃС‚РёРЅРё РїСЂРёСЃС‚СЂРѕС—РІ,
-            // С‚РѕРјСѓ С‡РµСЂРµР· СЂРµС„Р»РµРєСЃС–СЋ С‰РѕР± РЅРµ Р»Р°РјР°С‚Рё compileDebugKotlin РЅР° СЃС‚Р°СЂРёС… bootclasspath.
+            // PID without hidden-API reflection and without java.lang.Process.pid()
+            // (missing from the Android bootclasspath used here, and reflective
+            // getMethod("pid") is blocked on Android 16). Parse ART's
+            // Process.toString() ("Process[pid=1234, ...]") - best effort only,
+            // the pid is display-only (EmbeddedSession.pid), null is fine.
             val pid: Long? = try {
-                process.javaClass.getMethod("pid").invoke(process) as? Long
-            } catch (_: Exception) { null }
+                Regex("pid=(\\d+)").find(process.toString())
+                    ?.groupValues?.getOrNull(1)?.toLongOrNull()
+            } catch (_: Exception) {
+                null
+            }
             val session = EmbeddedSession(serverId, pid)
             val holder = RunningProcess(process, session, logFile)
-            // РђС‚РѕРјР°СЂРЅР° РІСЃС‚Р°РІРєР°: РїРѕРІС‚РѕСЂРЅР° РїРµСЂРµРІС–СЂРєР° РїС–Рґ Р»РѕРєРѕРј С‰РѕР± Р·Р°РєСЂРёС‚Рё race
-            // РґРІРѕС… РѕРґРЅРѕС‡Р°СЃРЅРёС… start() (РїРµСЂРµРІРёС‰РµРЅРЅСЏ MAX Р°Р±Рѕ РїРµСЂРµР·Р°РїРёСЃ РєР»СЋС‡Р°).
+            // Atomic insert: re-check under lock to close the race
+            // of two concurrent start() calls (MAX overflow or key overwrite).
             val inserted: Boolean = synchronized(lock) {
-                // РїСЂРёР±РёСЂР°С”РјРѕ РјРµСЂС‚РІС– С‰РѕР± Р»С–РјС–С‚ Р±СѓРІ С‚РѕС‡РЅРёРј
+                // sweep the dead so the limit is exact
                 val dead = running.filterValues { try { !it.process.isAlive } catch (_: Exception) { true } }.keys.toList()
                 dead.forEach { running.remove(it) }
                 if (running.containsKey(serverId) || running.size >= MAX_SERVERS) {
@@ -200,7 +208,7 @@ object EmbeddedProcessManager {
                 }
             }
             if (!inserted) {
-                // Р—Р°Р№РІРёР№ РїСЂРѕС†РµСЃ РіР»СѓС€РёРјРѕ РѕРґСЂР°Р·Сѓ С‰РѕР± РЅРµ РІРёС‚С–РєР°РІ
+                // Mute the extra process immediately to avoid leaks
                 try { process.destroy() } catch (_: Exception) {}
                 try {
                     Thread {
@@ -208,12 +216,12 @@ object EmbeddedProcessManager {
                         try { if (process.isAlive) process.destroyForcibly() } catch (_: Exception) {}
                     }.apply { isDaemon = true; start() }
                 } catch (_: Exception) {}
-                appendLog(logFile, "\n[СЃРєР°С‚Р°СЂС‚ РІС–РґС…РёР»РµРЅРѕ: СЃРµСЂРІРµСЂ РІР¶Рµ Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ Р°Р±Рѕ Р»С–РјС–С‚ $MAX_SERVERS]\n")
+                appendLog(logFile, "\n[start rejected: server already launching or limit $MAX_SERVERS]\n")
                 Log.w(TAG, "start race lost for $serverId")
                 return false
             }
 
-            // РџР°РјРї stdout -> server.log РІ С„РѕРЅС–
+            // Pump stdout -> server.log in background
             Thread({
                 try {
                     process.inputStream.bufferedReader().use { reader ->
@@ -229,10 +237,10 @@ object EmbeddedProcessManager {
                 } finally {
                     try {
                         val code = process.waitFor()
-                        appendLog(logFile, "\n[РїСЂРѕС†РµСЃ Р·Р°РІРµСЂС€РµРЅРѕ, РєРѕРґ $code]\n")
+                        appendLog(logFile, "\n[process exited, code $code]\n")
                     } catch (_: Exception) {}
-                    // РЅРµ РІРёРґР°Р»СЏС”РјРѕ РѕРґСЂР°Р·Сѓ Р· running С‰РѕР± UI РІСЃС‚РёРі РїРѕР±Р°С‡РёС‚Рё STOPPED С‡РµСЂРµР· liveness;
-                    // ServerService СЃР°Рј РІРёРєР»РёС‡Рµ stop() / РїСЂРёР±РµСЂРµ Р·Р°РїРёСЃ
+                    // do not remove from running yet so UI sees STOPPED via liveness;
+                    // ServerService calls stop() / sweeps the record itself
                 }
             }, "embedded-log-$serverId").apply { isDaemon = true; start() }
 
@@ -242,22 +250,171 @@ object EmbeddedProcessManager {
             Log.e(TAG, "start failed $serverId", e)
             try {
                 val lf = File(workDir, "server.log")
-                appendLog(lf, "\n[РџРћРњРР›РљРђ Р—РђРџРЈРЎРљРЈ: ${e.message}]\n")
+                appendLog(lf, "\n[LAUNCH ERROR: ${e.message}]\n")
             } catch (_: Exception) {}
             false
         }
     }
 
     /**
-     * Р†РЅС‚РµСЂР°РєС‚РёРІРЅРёР№ shell РґР»СЏ Ubuntu-СЃРµСЂРІРµСЂР° / РєРѕРЅСЃРѕР»С–:
-     * Р·Р°РїСѓСЃРєР°С” `sh -i` Р· stdin-С‚СЂСѓР±РѕСЋ. Р’РІС–Рґ РїРѕРґР°С”С‚СЊСЃСЏ С‡РµСЂРµР· sendInput().
+     * Interactive shell for Ubuntu servers / console:
+     * launches `sh -i` with a stdin pipe. Input via sendInput().
      */
     fun startInteractiveShell(context: Context, serverId: String, workDir: File): Boolean {
         return start(context, serverId, listOf("sh", "-i"), workDir)
     }
 
+    /**
+     * Full Ubuntu 22.04 via Termux proot (linker exec, no root).
+     * The server workDir is bind-mounted at /root/server (see
+     * EmbeddedUbuntu.buildLaunch). Returns false when proot/rootfs is
+     * missing so the caller can fall back to the built-in shell.
+     */
+    fun startUbuntuViaProot(context: Context, serverId: String, workDir: File): Boolean {
+        val launch = EmbeddedUbuntu.buildLaunch(context, workDir) { msg ->
+            appendLogToDir(workDir, msg + "\n")
+        } ?: return false
+        // Proof that PROOT_TMPDIR/PROOT_LOADER really reach the proot
+        // process: EmbeddedProcessManager.start() applies launch.env 1:1 to
+        // the ProcessBuilder environment (see the loop over envExtra there).
+        // Logged here so server.log shows the effective values next to the
+        // pre-flight, instead of trusting the code path blindly.
+        appendLogToDir(
+            workDir,
+            "proot env applied: " +
+                launch.env.entries.joinToString(" ") { "${it.key}=${it.value}" } + "\n"
+        )
+        return start(context, serverId, launch.argv, workDir, launch.env)
+    }
+
+    /**
+     * Honest liveness: true only when the process handle is alive AND the
+     * log file grew past [logStartLen] (first shell/proot output arrived).
+     * Proot dies fast on EACCES/ENOENT while ProcessBuilder.start() still
+     * succeeded - RUNNING on start() alone lies. Polls up to [timeoutMs].
+     * Returns false when the process died or stayed silent.
+     */
+    fun waitForLiveOutput(
+        serverId: String,
+        workDir: File,
+        logStartLen: Long,
+        timeoutMs: Long = 15_000L,
+        log: (String) -> Unit = {}
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var lastAlive = false
+        while (System.currentTimeMillis() < deadline) {
+            val holder = synchronized(lock) { running[serverId] }
+            if (holder == null) {
+                log("liveness: session gone (rejected or stopped)")
+                return false
+            }
+            val alive = try { holder.process.isAlive } catch (_: Exception) { false }
+            if (!alive) {
+                // Capture the exit code fast so EACCES vs ENOENT is visible.
+                val code = try { holder.process.exitValue() } catch (_: Exception) { null }
+                log("liveness: process died fast (exit=${code ?: "?"}) - see proot pre-flight above")
+                return false
+            }
+            lastAlive = alive
+            val len = try {
+                val f = File(workDir, "server.log")
+                if (f.isFile) f.length() else logStartLen
+            } catch (_: Exception) { logStartLen }
+            if (len > logStartLen) return true
+            try { Thread.sleep(250) } catch (_: Exception) { break }
+        }
+        // Timeout but still alive (slow device): treat as live so Start does
+        // not flip-flop; the service liveness poll keeps watching.
+        if (lastAlive) {
+            log("liveness: still silent after ${timeoutMs}ms but process alive - continuing")
+            return true
+        }
+        return false
+    }
+
+    /** Current log length for [waitForLiveOutput] baselines. */
+    fun logLength(workDir: File): Long {
+        return try {
+            val f = File(workDir, "server.log")
+            if (f.isFile) f.length() else 0L
+        } catch (_: Exception) { 0L }
+    }
+
+    /**
+     * Honest shell liveness: true only when [marker] (a unique echo token
+     * sent via [sendInput] AFTER launch) comes back through the live
+     * stdin->shell->server.log round-trip while the process stays alive.
+     *
+     * This is what gates RUNNING. [waitForLiveOutput] alone is not enough:
+     * our own pre-flight lines also grow server.log, and a dying proot
+     * stays "alive" for ~1s while printing its fatal error - both used to
+     * produce a false Running that died right after. A unique token cannot
+     * match stale output from a previous boot.
+     *
+     * Returns false when the process dies, the session vanishes, or the
+     * token never arrives within [timeoutMs].
+     */
+    fun waitForMarker(
+        serverId: String,
+        workDir: File,
+        marker: String,
+        timeoutMs: Long = 15_000L,
+        log: (String) -> Unit = {}
+    ): Boolean {
+        val logFile = File(workDir, "server.log")
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val holder = synchronized(lock) { running[serverId] }
+            if (holder == null) {
+                log("liveness marker: session gone (rejected or stopped)")
+                return false
+            }
+            val alive = try { holder.process.isAlive } catch (_: Exception) { false }
+            // The token may arrive in the same flush as the exit: check the
+            // log first so a live answer is never missed, then the handle.
+            val found = tailContains(logFile, marker)
+            if (found && alive) return true
+            if (found) {
+                log("liveness marker: '$marker' arrived but the process is already dead")
+                return false
+            }
+            if (!alive) {
+                val code = try { holder.process.exitValue() } catch (_: Exception) { null }
+                log("liveness marker: process died before answering (exit=${code ?: "?"})")
+                return false
+            }
+            try { Thread.sleep(250) } catch (_: Exception) { break }
+        }
+        log("liveness marker: '$marker' not seen in ${timeoutMs}ms - shell is not answering")
+        return false
+    }
+
+    /** True when the tail (last 256 KB) of [logFile] contains [marker]. */
+    private fun tailContains(logFile: File, marker: String): Boolean {
+        return try {
+            if (!logFile.isFile) return false
+            val len = logFile.length()
+            if (len <= 0) return false
+            val maxBytes = 256 * 1024L
+            val start = maxOf(0L, len - maxBytes)
+            val n = (len - start).toInt()
+            val buf = ByteArray(n)
+            java.io.RandomAccessFile(logFile, "r").use { raf ->
+                raf.seek(start)
+                var tot = 0
+                while (tot < n) {
+                    val r = raf.read(buf, tot, n - tot)
+                    if (r <= 0) break
+                    tot += r
+                }
+                String(buf, 0, tot, Charsets.UTF_8).contains(marker)
+            }
+        } catch (_: Exception) { false }
+    }
+
     fun sendInput(serverId: String, data: String): Boolean {
-        // In-process СЃРµСЂРІРµСЂ С‡РёС‚Р°С” System.in JVM, Р° РЅРµ С‚СЂСѓР±Сѓ РїСЂРѕС†РµСЃСѓ
+        // In-process server reads System.in of the JVM, not the process pipe
         if (InProcessServer.isRunning(serverId)) {
             return InProcessServer.sendInput(serverId, data)
         }
@@ -274,7 +431,7 @@ object EmbeddedProcessManager {
         }
     }
 
-    /** РќР°РґС–СЃР»Р°С‚Рё СЃРёСЂС– Р±Р°Р№С‚Рё Р±РµР· РґРѕРґР°РІР°РЅРЅСЏ \n (РґР»СЏ Ctrl/C, Esc-РїРѕСЃР»С–РґРѕРІРЅРѕСЃС‚РµР№) */
+    /** Send raw bytes without appending \n (for Ctrl/C, Esc sequences) */
     fun sendRaw(serverId: String, bytes: ByteArray): Boolean {
         if (InProcessServer.isRunning(serverId)) {
             return InProcessServer.sendRaw(serverId, bytes)
@@ -292,14 +449,14 @@ object EmbeddedProcessManager {
     }
 
     fun stop(serverId: String): Boolean {
-        // In-process СЃРµСЂРІРµСЂ Р·СѓРїРёРЅСЏС”С‚СЊСЃСЏ С‡РµСЂРµР· "stop" РІ System.in (System.exit РїР°СЃС‚РєР°),
-        // РІР±РёС‚Рё JVM-РЅРёС‚РєСѓ РїСЂРёРјСѓСЃРѕРІРѕ Р±РµР·РїРµС‡РЅРѕ РЅРµРјРѕР¶Р»РёРІРѕ вЂ” СЏРє С– РІ Mojo.
+        // In-process server stops via "stop" into System.in (System.exit trap),
+        // killing the JVM thread forcibly is unsafe - same as Mojo.
         if (InProcessServer.isRunning(serverId)) {
             return InProcessServer.stop(serverId)
         }
         val holder = synchronized(lock) { running.remove(serverId) } ?: return false
         return try {
-            // РІРІС–С‡Р»РёРІРµ Р·Р°РІРµСЂС€РµРЅРЅСЏ: СЃРїСЂРѕР±Р° С‡РµСЂРµР· stdin
+            // polite shutdown: try via stdin first
             try {
                 holder.process.outputStream.write("exit\n".toByteArray())
                 holder.process.outputStream.flush()
@@ -313,7 +470,7 @@ object EmbeddedProcessManager {
                 try { holder.process.outputStream.close() } catch (_: Exception) {}
                 try { holder.process.inputStream.close() } catch (_: Exception) {}
             }.apply { isDaemon = true; start() }
-            appendLog(holder.logFile, "\n[Р·СѓРїРёРЅРµРЅРѕ РєРѕСЂРёСЃС‚СѓРІР°С‡РµРј]\n")
+            appendLog(holder.logFile, "\n[stopped by user]\n")
             true
         } catch (e: Exception) {
             Log.e(TAG, "stop failed", e)
@@ -331,13 +488,13 @@ object EmbeddedProcessManager {
     @Synchronized
     private fun appendLog(logFile: File, text: String) {
         try {
-            // СЂРѕС‚Р°С†С–СЏ 5MB -> Р»РёС€Р°С”РјРѕ РѕСЃС‚Р°РЅРЅС–Р№ 1MB (СЏРє Р±СѓР»Рѕ РІ TermuxBridge)
+            // rotation 5MB -> keep last 1MB (as in TermuxBridge)
             if (logFile.exists() && logFile.length() > 5 * 1024 * 1024) {
                 try {
                     val bytes = logFile.readBytes()
                     val keep = bytes.takeLast(1024 * 1024).toByteArray()
                     logFile.writeBytes(keep)
-                    logFile.appendText("\n[Р»РѕРі РѕР±СЂС–Р·Р°РЅРѕ РґРѕ 1MB]\n")
+                    logFile.appendText("\n[log trimmed to 1MB]\n")
                 } catch (_: Exception) {}
             }
             logFile.appendText(text)
@@ -345,8 +502,8 @@ object EmbeddedProcessManager {
     }
 
     /**
-     * Р”РѕРїРёСЃ Сѓ server.log РєРѕРЅРєСЂРµС‚РЅРѕС— РїР°РїРєРё. РџР°РїРєСѓ РїРµСЂРµРґР°С” РІРёРєР»РёРєР°С‡
-     * (Сѓ СЃРµСЂРІС–СЃР° вЂ” Р·Р°РєРµС€РѕРІР°РЅР° workDir), С‰РѕР± Р»РѕРіРё РєР°СЃС‚РѕРјРЅРёС… РїР°РїРѕРє РЅРµ РіСѓР±РёР»РёСЃСЊ.
+     * Append to server.log of a specific folder. The caller passes the folder
+     * (in the service it is the cached workDir) so custom-folder logs are not lost.
      */
     fun appendLogToDir(workDir: File, text: String) {
         try {
@@ -356,17 +513,17 @@ object EmbeddedProcessManager {
     }
 
     /**
-     * Р‘СѓРґСѓС” РєРѕРјР°РЅРґСѓ Р·Р°РїСѓСЃРєСѓ Minecraft: [java, -Xmx..., -jar, jar, nogui].
-     * @param linkerPrefix РЅРµРїРѕСЂРѕР¶РЅС–Р№ РЅР° РїСЂРёСЃС‚СЂРѕСЏС… Р· W^X exec-Р·Р°Р±РѕСЂРѕРЅРѕСЋ
-     * (targetSdk 29+): ["/system/bin/linker64"] СЃС‚Р°РІРёС‚СЊСЃСЏ РїРѕРїРµСЂРµРґСѓ java.
+     * Builds the Minecraft launch command: [java, -Xmx..., -jar, jar, nogui].
+     * @param linkerPrefix non-empty on devices with the W^X exec ban
+     * (targetSdk 29+): ["/system/bin/linker64"] goes before java.
      *
-     * P0 FORK-fix РєРѕРЅС‚СЂР°РєС‚:
-     *  - argv[0] РїС–СЃР»СЏ РїСЂРµС„С–РєСЃР° Р—РђР’Р–Р”Р Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РґРѕ java (РЅС–РєРѕР»Рё "-Xmx...").
-     *    Р’С–РґРЅРѕСЃРЅРёР№ "java" Р· PATH РґР°С” `F/linker: expected absolute path: "-Xmx64M"`.
-     *  - LD_LIBRARY_PATH (jre/lib/server:jre/lib:jre/lib/jli) + JAVA_HOME РјР°СЋС‚СЊ РїСЂРёР№С‚Рё
-     *    С‡РµСЂРµР· envExtra (РґРёРІ. EmbeddedJava.linkerEnv) Р°Р±Рѕ Р±СѓРґСѓС‚СЊ РґРѕС–РЅР¶РµРєС‡РµРЅС– РІ start(),
-     *    С–РЅР°РєС€Рµ `CANNOT LINK EXECUTABLE ... library "libjli.so" not found`.
-     *  - libjli.so РјР°С” С–СЃРЅСѓРІР°С‚Рё РїРѕСЂСѓС‡ Р· java вЂ” РїРµСЂРµРІС–СЂСЏС”С‚СЊСЃСЏ РІ start()/probeJava.
+     * P0 FORK-fix contract:
+     *  - argv[0] after the prefix is ALWAYS the absolute java path (never "-Xmx...").
+     *    Relative "java" from PATH yields `F/linker: expected absolute path: "-Xmx64M"`.
+     *  - LD_LIBRARY_PATH (jre/lib/server:jre/lib:jre/lib/jli) + JAVA_HOME must arrive
+     *    via envExtra (see EmbeddedJava.linkerEnv) or they are injected in start(),
+     *    otherwise `CANNOT LINK EXECUTABLE ... library "libjli.so" not found`.
+     *  - libjli.so must sit next to java - verified in start()/probeJava.
      */
     fun buildMinecraftCommand(
         javaPath: String,
@@ -377,12 +534,12 @@ object EmbeddedProcessManager {
         linkerPrefix: List<String> = emptyList()
     ): List<String> {
         if (!File(javaPath).isAbsolute) {
-            Log.e(TAG, "buildMinecraftCommand: javaPath not absolute ($javaPath) вЂ” linker РІРїР°РґРµ expected absolute path")
+            Log.e(TAG, "buildMinecraftCommand: javaPath not absolute ($javaPath) - linker will fail expected absolute path")
         }
         if (linkerPrefix.any { it.startsWith("-X") }) {
             Log.e(TAG, "buildMinecraftCommand: linkerPrefix must not contain -X flags: $linkerPrefix")
         }
-        // linkerPrefix[0] вЂ” Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС… РґРѕ Р»С–РЅРєРµСЂР°, [1] вЂ” Р°Р±СЃРѕР»СЋС‚РЅРёР№ java. -Xmx Р»РёС€Рµ РїС–СЃР»СЏ java.
+        // linkerPrefix[0] is the absolute linker path, [1] the absolute java. -Xmx only after java.
         val cmd = mutableListOf<String>()
         cmd.addAll(linkerPrefix)
         cmd.addAll(
@@ -395,7 +552,7 @@ object EmbeddedProcessManager {
                 "-Xss256k"
             )
         )
-        // Android 14+ MTE С„С–РєСЃ (СЏРє Р±СѓР»Рѕ)
+        // Android 14+ MTE fix (as before)
         cmd.add("-XX:-UseCompressedOops")
         cmd.addAll(extraArgs)
         cmd.addAll(listOf("-jar", jarName, "nogui"))
@@ -418,7 +575,7 @@ object EmbeddedProcessManager {
         for (c in candidates) {
             if (File(workDir, c).exists()) return c
         }
-        // Р±СѓРґСЊ-СЏРєРёР№ *.jar
+        // any *.jar
         return try {
             workDir.listFiles { f -> f.isFile && f.name.endsWith(".jar") }
                 ?.maxByOrNull { it.length() }?.name

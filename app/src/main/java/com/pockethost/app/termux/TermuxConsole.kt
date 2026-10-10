@@ -4,9 +4,9 @@ import android.content.Context
 import com.pockethost.app.embedded.EmbeddedProcessManager
 
 /**
- * Legacy РєРѕРЅСЃРѕР»СЊ - РґРµР»РµРіРѕРІР°РЅРѕ Сѓ РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р».
+ * Legacy console - delegated to the built-in terminal.
  */
-@Deprecated("Р’РёРєРѕСЂРёСЃС‚РѕРІСѓР№ EmbeddedProcessManager")
+@Deprecated("Use EmbeddedProcessManager")
 object TermuxConsole {
 
     fun sendViaFifo(context: Context, session: TermuxBridge.TermuxSession, data: String) {
@@ -16,6 +16,6 @@ object TermuxConsole {
     }
 
     fun sendRaw(context: Context, termuxPath: String, command: String) {
-        // С–РіРЅРѕСЂСѓС”С‚СЊСЃСЏ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” СЃРёСЂРёС… RUN_COMMAND
+        // ignored: built-in terminal does not need raw RUN_COMMAND
     }
 }

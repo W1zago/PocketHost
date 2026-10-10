@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is permitted for LAN/local tooling (same trust level as adb -
+  no auth, no internet exposure). Base-config governs IP literals,
+  belt-and-suspenders with android:usesCleartextTraffic="true".
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

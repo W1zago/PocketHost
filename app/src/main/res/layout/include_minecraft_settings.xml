@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared "Allow cracked + View distance" component, used by both
+     CreateServer (activity_create_server.xml) and ServerDetail
+     (activity_server_detail.xml). IDs are stable: switchPirate,
+     tvViewDistance, sliderViewDistance, tvSettingsHint. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_studio_tile"
+        android:padding="12dp">
+
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchPirate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="Allow cracked players"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_surface"
+            android:checked="false" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Disables Mojang license check (online-mode=false)."
+            android:textSize="11sp"
+            android:textColor="@color/on_surface_variant" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:src="@drawable/ic_info"
+                app:tint="@color/secondary"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="Applies after restart"
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_studio_tile"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="View distance"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface" />
+
+            <TextView
+                android:id="@+id/tvViewDistance"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_port_chip"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:text="10 chunks"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="@color/secondary"
+                android:fontFamily="@font/jetbrains_mono_family" />
+
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderViewDistance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:value="10"
+            android:valueFrom="2"
+            android:valueTo="32"
+            android:stepSize="1"
+            app:trackColor="@color/studio_chip"
+            app:trackColorActive="@color/primary"
+            app:thumbColor="@color/primary"
+            app:thumbStrokeColor="@color/surface_container" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2 chunks (fast)"
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant"
+                android:fontFamily="@font/jetbrains_mono_family" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="16 default"
+                android:textAlignment="center"
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant"
+                android:fontFamily="@font/jetbrains_mono_family" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="32 chunks (extreme)"
+                android:textSize="10sp"
+                android:textColor="@color/on_surface_variant"
+                android:fontFamily="@font/jetbrains_mono_family" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvSettingsHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="On a stopped server applies immediately, on a running one — after restart."
+        android:textSize="11sp"
+        android:textColor="@color/on_surface_variant" />
+
+</LinearLayout>

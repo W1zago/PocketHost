@@ -53,7 +53,7 @@
                 android:text="rwx"
                 android:textSize="10sp"
                 android:textColor="@color/tertiary"
-                android:fontFamily="monospace" />
+                android:fontFamily="@font/jetbrains_mono_family" />
 
             <TextView
                 android:id="@+id/fileSize"
@@ -63,7 +63,7 @@
                 android:text="Size"
                 android:textSize="10sp"
                 android:textColor="@color/on_surface_variant"
-                android:fontFamily="monospace" />
+                android:fontFamily="@font/jetbrains_mono_family" />
 
             <TextView
                 android:id="@+id/fileDate"
@@ -74,7 +74,7 @@
                 android:text="Date"
                 android:textSize="10sp"
                 android:textColor="@color/on_surface_variant"
-                android:fontFamily="monospace" />
+                android:fontFamily="@font/jetbrains_mono_family" />
 
         </LinearLayout>
 

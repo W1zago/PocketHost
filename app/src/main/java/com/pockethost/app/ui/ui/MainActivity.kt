@@ -18,8 +18,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
 import com.pockethost.app.databinding.ActivityMainBinding
@@ -32,7 +36,6 @@ import com.pockethost.core.model.ServerStatus
 import com.pockethost.core.model.ServerType
 import com.pockethost.core.repository.ServerRepository
 import com.google.android.material.chip.Chip
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -50,7 +53,7 @@ class MainActivity : AppCompatActivity() {
     private var filterTag: String = "ALL"
     private var sortMode: String = "By Status"
     private val repository by lazy {
-        // РЈРЅС–С„С–РєРѕРІР°РЅРёР№ Р±РµР·РїРµС‡РЅРёР№ РґРѕСЃС‚СѓРї (РґРёРІ. PocketHostApplication.getRepositoryOrNull).
+        // Unified safe access (see PocketHostApplication.getRepositoryOrNull).
         PocketHostApplication.getRepositoryOrNull() ?: run {
             Log.e("MainActivity", "repo not ready, using fallback")
             ServerRepository(this@MainActivity)
@@ -74,10 +77,17 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р¶РѕРґРЅРѕРіРѕ РіРµР№С‚Сѓ Termux / RUN_COMMAND Р±С–Р»СЊС€Рµ РЅРµРјР°.
-        // Р”РѕРґР°С‚РѕРє РїСЂР°С†СЋС” РѕРґСЂР°Р·Сѓ, Р±РµР· Р·РѕРІРЅС–С€РЅС–С… Р·Р°Р»РµР¶РЅРѕСЃС‚РµР№.
+        // Built-in terminal: no Termux / RUN_COMMAND gate anymore.
+        // The app works immediately, no external dependencies.
 
         binding = ActivityMainBinding.inflate(layoutInflater)
+        // Edge-to-edge: draw under system bars, pad the root with real insets.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         setupToolbar()
@@ -93,12 +103,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // РіРµР№С‚ РІРёРґР°Р»РµРЅРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” Termux
+        // gate removed: built-in terminal does not need Termux
     }
 
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = getString(R.string.app_name)
+        // Overflow is a real popup menu (same actions as the bottom buttons).
+        binding.toolbar.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.action_scan -> {
+                    startActivity(Intent(this, DeviceScanActivity::class.java)); true
+                }
+                else -> false
+            }
+        }
     }
 
     private fun setupRecyclerView() {
@@ -142,9 +161,12 @@ class MainActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 filterQuery = s?.toString()?.trim() ?: ""
+                binding.btnClearSearch.visibility =
+                    if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
                 applyFilters()
             }
         })
+        binding.btnClearSearch.setOnClickListener { binding.searchInput.text?.clear() }
         binding.filterGroup.setOnCheckedStateChangeListener { group, _ ->
             val chip = group.findViewById<Chip>(group.checkedChipId)
             filterTag = chip?.tag?.toString() ?: "ALL"
@@ -202,14 +224,40 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             serverAdapter.submitList(list)
-            binding.emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            val isEmpty = list.isEmpty()
+            binding.emptyView.visibility = if (isEmpty) View.VISIBLE else View.GONE
+            binding.recyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
+            // Hide INSTANCES + sort row when there are no servers at all —
+            // otherwise it peeks from behind the empty card (see screenshot bug).
+            binding.listHeader.visibility =
+                if (fullServers.isEmpty()) View.GONE else View.VISIBLE
+            updateChipCounts()
         } catch (e: Exception) {
             Log.e("MainActivity", "applyFilters failed", e)
         }
     }
 
-    private fun updateAlivePill(servers: List<Server>) {
+    /** Chip counters show REAL backend totals per category (design). */
+    private fun updateChipCounts() {
         try {
+            val all = fullServers
+            val running = all.count {
+                it.status == ServerStatus.RUNNING || it.status == ServerStatus.STARTING
+            }
+            val stopped = all.count {
+                it.status == ServerStatus.STOPPED || it.status == ServerStatus.ERROR
+            }
+            val mc = all.count { it.type == ServerType.MINECRAFT }
+            val ubu = all.count { it.type == ServerType.UBUNTU_SERVER }
+            binding.chipAll.text = "All ${all.size}"
+            binding.chipRunning.text = "Running $running"
+            binding.chipStopped.text = "Stopped $stopped"
+            binding.chipMinecraft.text = "Minecraft $mc"
+            binding.chipUbuntu.text = "Ubuntu $ubu"
+        } catch (_: Exception) {}
+    }
+
+    private fun updateAlivePill(servers: List<Server>) {        try {
             val running = servers.count { it.status == ServerStatus.RUNNING }
             binding.aliveText.text = "$running/${servers.size} Alive"
             if (running > 0) {
@@ -277,20 +325,37 @@ class MainActivity : AppCompatActivity() {
                 true
             }
         } catch (_: Exception) {}
-    }
-
-    private fun showCreateServerDialog() {
-        val types = ServerType.entries.map { it.name }.toTypedArray()
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Create Server")
-            .setItems(types) { _, which ->
-                val selectedType = ServerType.entries[which]
-                navigateToServerCreation(selectedType)
-            }
-            .setNeutralButton("РЎРєР°РЅСѓРІР°С‚Рё РїСЂРёСЃС‚СЂС–Р№") { _, _ ->
+        try {
+            binding.btnEmptyScan.setOnClickListener {
                 startActivity(Intent(this, DeviceScanActivity::class.java))
             }
-            .show()
+        } catch (_: Exception) {}
+    }
+
+    /** Create Instance bottom sheet: type picker + Dismiss (design). */
+    private fun showCreateServerDialog() {
+        val dialog = BottomSheetDialog(
+            this, com.google.android.material.R.style.ThemeOverlay_Material3_BottomSheetDialog
+        )
+        val view = layoutInflater.inflate(R.layout.dialog_create_instance, null)
+        dialog.setContentView(view)
+        try {
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            dialog.findViewById<android.widget.FrameLayout>(
+                com.google.android.material.R.id.design_bottom_sheet
+            )?.setBackgroundResource(android.R.color.transparent)
+        } catch (_: Exception) {}
+        view.findViewById<android.view.View>(R.id.sheetClose).setOnClickListener { dialog.dismiss() }
+        view.findViewById<android.view.View>(R.id.btnDismiss).setOnClickListener { dialog.dismiss() }
+        view.findViewById<android.view.View>(R.id.optionMinecraft).setOnClickListener {
+            dialog.dismiss()
+            navigateToServerCreation(ServerType.MINECRAFT)
+        }
+        view.findViewById<android.view.View>(R.id.optionUbuntu).setOnClickListener {
+            dialog.dismiss()
+            navigateToServerCreation(ServerType.UBUNTU_SERVER)
+        }
+        dialog.show()
     }
 
     private fun navigateToServerCreation(type: ServerType) {
@@ -311,6 +376,8 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         Log.e("MainActivity", "submitList failed", e)
                         binding.emptyView.visibility = View.VISIBLE
+                        binding.recyclerView.visibility = View.GONE
+                        binding.listHeader.visibility = View.GONE
                     }
                 }
             } catch (e: Exception) {
@@ -319,7 +386,7 @@ class MainActivity : AppCompatActivity() {
                     lifecycleScope.launch {
                         try { repository.clearAll() } catch (_: Exception) {}
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "РћС‡РёС‰РµРЅРѕ РїРѕС€РєРѕРґР¶РµРЅС– СЃРµСЂРІРµСЂРё. РЎС‚РІРѕСЂС–С‚СЊ Р·Р°РЅРѕРІРѕ", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "Cleared corrupted servers. Recreate them", Toast.LENGTH_LONG).show()
                         }
                     }
                 } catch (_: Exception) {}
@@ -345,16 +412,16 @@ class MainActivity : AppCompatActivity() {
             val pkg = packageName
             if (!pm.isIgnoringBatteryOptimizations(pkg)) {
                 // Show snackbar with action instead of auto-popup to avoid spam
-                Snackbar.make(binding.root, "Р”РѕР·РІРѕР»РёС‚Рё PocketHost РїСЂР°С†СЋРІР°С‚Рё РІ С„РѕРЅС–?", Snackbar.LENGTH_LONG)
-                    .setAction("Р”РѕР·РІРѕР»РёС‚Рё") { requestBattery(pkg) }
+                Snackbar.make(binding.root, "Allow PocketHost to run in background?", Snackbar.LENGTH_LONG)
+                    .setAction("Allow") { requestBattery(pkg) }
                     .show()
             }
-            // Р—РѕРІРЅС–С€РЅС–Р№ Termux Р±С–Р»СЊС€Рµ РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓС”С‚СЊСЃСЏ - Р·Р°РїРёС‚ РґР»СЏ com.termux РїСЂРёР±СЂР°РЅРѕ
+            // External Termux is no longer used - the com.termux request is removed
         } catch (_: Exception) {}
     }
 
     private fun autoRequestAllPermissions() {
-        // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: Р»РёС€Рµ notification + battery РґР»СЏ СЃР°РјРѕРіРѕ РґРѕРґР°С‚РєСѓ
+        // Built-in terminal: only notification + battery for the app itself
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_PERMISSIONS)
@@ -366,9 +433,9 @@ class MainActivity : AppCompatActivity() {
             requestBattery(packageName)
             return
         }
-        // Р’СЃРµ РіРѕС‚РѕРІРѕ - РІС–РґРєСЂРёРІР°С”РјРѕ РґС–Р°РіРЅРѕСЃС‚РёРєСѓ РІР±СѓРґРѕРІР°РЅРѕРіРѕ С‚РµСЂРјС–РЅР°Р»Сѓ
+        // Everything ready - open the built-in terminal diagnostics
         startActivity(Intent(this, DeviceScanActivity::class.java))
-        Snackbar.make(binding.root, "Р’СЃРµ РіРѕС‚РѕРІРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” РґРѕР·РІРѕР»С–РІ", Snackbar.LENGTH_LONG).show()
+        Snackbar.make(binding.root, "All set: built-in terminal needs no permissions", Snackbar.LENGTH_LONG).show()
     }
 
     private fun autoRequestOnStartup() {
@@ -384,11 +451,11 @@ class MainActivity : AppCompatActivity() {
                 val pm = getSystemService(POWER_SERVICE) as PowerManager
                 if (!pm.isIgnoringBatteryOptimizations(packageName)) {
                     // Auto-request battery for app
-                    Snackbar.make(binding.root, "Р—Р°РїРёС‚СѓС”РјРѕ РґРѕР·РІС–Р» РЅР° С„РѕРЅРѕРІРёР№ СЂРµР¶РёРј...", Snackbar.LENGTH_SHORT).show()
+                    Snackbar.make(binding.root, "Requesting background permission...", Snackbar.LENGTH_SHORT).show()
                     requestBattery(packageName)
                     return@launch
                 }
-                // com.termux Р±С–Р»СЊС€Рµ РЅРµ РїРѕС‚СЂС–Р±РµРЅ
+                // com.termux no longer needed
             } catch (_: Exception) {}
         }
     }
@@ -409,9 +476,9 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_PERMISSIONS) {
             val denied = grantResults.any { it != PackageManager.PERMISSION_GRANTED }
             if (denied) {
-                Snackbar.make(binding.root, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РІС–РґС…РёР»РµРЅРѕ. РЎРµСЂРІС–СЃ РјРѕР¶Рµ РЅРµ РїРѕРєР°Р·Р°С‚Рё СЃС‚Р°С‚СѓСЃ", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(binding.root, "Notifications denied. Service may not show status", Snackbar.LENGTH_LONG).show()
             } else {
-                Snackbar.make(binding.root, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РґРѕР·РІРѕР»РµРЅРѕ", Snackbar.LENGTH_SHORT).show()
+                Snackbar.make(binding.root, "Notifications granted", Snackbar.LENGTH_SHORT).show()
             }
             // Chain to battery
             autoRequestBatteryIfNeeded()

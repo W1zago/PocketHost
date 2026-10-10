@@ -4,8 +4,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="12dp"
-    android:layout_marginEnd="12dp"
+    android:layout_marginStart="4dp"
+    android:layout_marginEnd="4dp"
     android:layout_marginTop="6dp"
     android:layout_marginBottom="6dp"
     app:cardBackgroundColor="@color/surface_container"
@@ -50,7 +50,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Server Name"
-                    android:textSize="16sp"
+                    android:textSize="18sp"
                     android:textStyle="bold"
                     android:textColor="@color/on_surface"
                     android:ellipsize="end"
@@ -62,9 +62,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="MINECRAFT"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textColor="@color/on_surface_variant"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family" />
 
             </LinearLayout>
 
@@ -75,10 +75,10 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:background="@drawable/bg_status_idle"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp">
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp">
 
                 <View
                     android:id="@+id/statusDot"
@@ -92,10 +92,10 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
                     android:text="Stopped"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textStyle="bold"
                     android:textColor="@color/badge_idle_fg"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family" />
 
             </LinearLayout>
 
@@ -108,7 +108,7 @@
             android:layout_marginTop="12dp"
             android:orientation="horizontal"
             android:background="@drawable/bg_telemetry_strip"
-            android:padding="10dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -121,7 +121,7 @@
                     android:layout_height="wrap_content"
                     android:text="PORT"
                     android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/outline" />
 
                 <TextView
                     android:id="@+id/serverPort"
@@ -132,7 +132,8 @@
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:textColor="@color/secondary"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family"
+                    android:fontFeatureSettings="tnum" />
 
             </LinearLayout>
 
@@ -147,7 +148,7 @@
                     android:layout_height="wrap_content"
                     android:text="UPTIME"
                     android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/outline" />
 
                 <TextView
                     android:id="@+id/serverUptime"
@@ -158,7 +159,8 @@
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:textColor="@color/on_surface"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family"
+                    android:fontFeatureSettings="tnum" />
 
             </LinearLayout>
 
@@ -173,7 +175,7 @@
                     android:layout_height="wrap_content"
                     android:text="LAST RUN"
                     android:textSize="10sp"
-                    android:textColor="@color/on_surface_variant" />
+                    android:textColor="@color/outline" />
 
                 <TextView
                     android:id="@+id/serverLastStarted"
@@ -183,7 +185,7 @@
                     android:text="Never"
                     android:textSize="11sp"
                     android:textColor="@color/on_surface_variant"
-                    android:fontFamily="monospace" />
+                    android:fontFamily="@font/jetbrains_mono_family" />
 
             </LinearLayout>
 
@@ -194,60 +196,72 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:scrollbars="none">
+            android:scrollbars="none"
+            android:clipToPadding="false">
 
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:paddingEnd="4dp">
 
                 <Button
                     android:id="@+id/btnStart"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:minWidth="88dp"
                     android:text="Start"
                     android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_play_arrow"
+                    android:drawablePadding="6dp"
                     style="@style/PocketHost.Button.Start" />
 
                 <Button
                     android:id="@+id/btnStop"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:layout_marginStart="8dp"
                     android:minWidth="88dp"
                     android:text="Stop"
                     android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_stop"
+                    android:drawablePadding="6dp"
                     style="@style/PocketHost.Button.Destructive" />
 
                 <Button
                     android:id="@+id/btnRestart"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:layout_marginStart="8dp"
                     android:minWidth="48dp"
                     android:text="Restart"
                     android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_restart"
+                    android:drawablePadding="6dp"
                     style="@style/PocketHost.Button.Tonal" />
 
                 <Button
                     android:id="@+id/btnConsole"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:layout_marginStart="8dp"
                     android:minWidth="48dp"
                     android:text="Logs"
                     android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_terminal"
+                    android:drawablePadding="6dp"
                     style="@style/PocketHost.Button.Tonal" />
 
                 <Button
                     android:id="@+id/btnFiles"
                     android:layout_width="wrap_content"
-                    android:layout_height="40dp"
+                    android:layout_height="48dp"
                     android:layout_marginStart="8dp"
                     android:minWidth="48dp"
                     android:text="Files"
                     android:textSize="13sp"
+                    android:drawableStart="@drawable/ic_folder"
+                    android:drawablePadding="6dp"
                     style="@style/PocketHost.Button.Tonal" />
 
             </LinearLayout>

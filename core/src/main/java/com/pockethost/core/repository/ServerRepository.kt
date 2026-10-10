@@ -24,16 +24,16 @@ private val gson = Gson()
 
 class ServerRepository(private val context: Context) {
     private val servers = MutableStateFlow<Map<String, Server>>(emptyMap())
-    // H6: SupervisorJob С‰РѕР± РѕРґРЅР° РІРїР°РІС€Р° persist РЅРµ РІР±РёРІР°Р»Р° РІРµСЃСЊ scope + close() РґР»СЏ СЃРєР°СЃСѓРІР°РЅРЅСЏ.
+    // H6: SupervisorJob so one failed persist does not kill the whole scope + close() for cancellation.
     private val repoJob = SupervisorJob()
     private val scope = CoroutineScope(repoJob + Dispatchers.IO)
 
-    /** РЎРєР°СЃСѓРІР°С‚Рё С„РѕРЅРѕРІС– Р·Р°РґР°С‡С– СЂРµРїРѕР·РёС‚РѕСЂС–СЋ (РІРёРєР»РёРєР°С‚Рё РїСЂРё Р·РЅРёС‰РµРЅРЅС– РІР»Р°СЃРЅРёРєР°). */
+    /** Cancel the repository background tasks (call when the owner is destroyed). */
     fun close() {
         try { scope.cancel() } catch (_: Exception) {}
     }
 
-    /** РђР»С–Р°СЃ РґР»СЏ close() вЂ” СЃРєР°СЃСѓРІР°РЅРЅСЏ scope. */
+    /** Alias for close() - scope cancellation. */
     fun cancel() = close()
 
     init {
@@ -58,16 +58,16 @@ class ServerRepository(private val context: Context) {
                             if (rawName.isNullOrEmpty()) { removedLegacy++; continue }
                             if (rawPort == null || rawPort !in 1..65535) { removedLegacy++; continue }
                             val wd = (rawWd?.takeIf { it.isNotEmpty() } ?: rawWorking ?: "").trim()
-                            // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: РїСЂРёР№РјР°С”РјРѕ embedded://, content:// (legacy SAF) С‚Р°
-                            // РІРЅСѓС‚СЂС–С€РЅС– С€Р»СЏС…Рё /data/... . РџРѕСЂРѕР¶РЅС– РІС–РґРєРёРґР°С”РјРѕ.
+                            // Built-in terminal: accepts embedded://, content:// (legacy SAF) and
+                            // internal /data/... paths. Empty ones are dropped.
                             if (wd.isEmpty()) {
                                 removedLegacy++
                                 continue
                             }
-                            // Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: РєР°РЅРѕРЅС–С‡РЅРёР№ С„РѕСЂРјР°С‚ embedded://<id>.
-                            // Legacy content:// С‚Р° Р°Р±СЃРѕР»СЋС‚РЅС– РІРЅСѓС‚СЂС–С€РЅС– С€Р»СЏС…Рё РїСЂРёР№РјР°С”РјРѕ СЏРє С”
-                            // (Р·Р°РїСѓСЃРє РІСЃРµ РѕРґРЅРѕ Р№РґРµ С‡РµСЂРµР· EmbeddedPaths.resolveWorkDir),
-                            // РЅРµРІС–РґРѕРјС– СЃС…РµРјРё РјС–РіСЂСѓС”РјРѕ Сѓ embedded С‰РѕР± РЅРµ РІС‚СЂР°С‚РёС‚Рё СЃРµСЂРІРµСЂ.
+                            // Built-in terminal: canonical format embedded://<id>.
+                            // Legacy content:// and absolute internal paths accepted as-is
+                            // (launch still goes through EmbeddedPaths.resolveWorkDir),
+                            // unknown schemes are migrated to embedded to avoid losing the server.
                             var normalizedWd = wd
                             val isEmbedded = wd.startsWith("embedded://")
                             val isSaf = wd.startsWith("content://")
@@ -98,7 +98,7 @@ class ServerRepository(private val context: Context) {
                         // Notify user on main thread
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
                             try {
-                                android.widget.Toast.makeText(context, "Р’РёРґР°Р»РµРЅРѕ $removedLegacy РїРѕС€РєРѕРґР¶РµРЅРёС… СЃРµСЂРІРµСЂС–РІ", android.widget.Toast.LENGTH_LONG).show()
+                                android.widget.Toast.makeText(context, "Removed $removedLegacy corrupted servers", android.widget.Toast.LENGTH_LONG).show()
                             } catch (_: Exception) {}
                         }
                     }

@@ -34,16 +34,35 @@
     <color name="error_container">#93000A</color>
     <color name="on_error_container">#FFDAD6</color>
 
-    <!-- Status badges -->
-    <color name="badge_running_bg">#0E3B2E</color>
+    <!-- Status badges: functional colors per DESIGN.md body
+         (Active #10B981/#064E3B, Warning #F59E0B/#78350F,
+          Critical #F43F5E/#881337, Idle #94A3B8/#1E293B).
+         Foregrounds reuse tertiary/secondary/error tokens where identical. -->
+    <color name="badge_running_bg">#064E3B</color>
     <color name="badge_running_fg">#4EDEA3</color>
-    <color name="badge_warning_bg">#4A2C07</color>
-    <color name="badge_warning_fg">#F5A524</color>
-    <color name="badge_error_bg">#4C1113</color>
-    <color name="badge_error_fg">#FFB4AB</color>
-    <color name="badge_idle_bg">#23293C</color>
-    <color name="badge_idle_fg">#908FA0</color>
+    <color name="badge_warning_bg">#78350F</color>
+    <color name="badge_warning_fg">#F59E0B</color>
+    <color name="badge_error_bg">#881337</color>
+    <color name="badge_error_fg">#F43F5E</color>
+    <color name="badge_idle_bg">#1E293B</color>
+    <color name="badge_idle_fg">#94A3B8</color>
+
+    <!-- Functional accents (telemetry states, log levels) -->
+    <color name="warning">#F59E0B</color>
+    <color name="warning_container">#78350F</color>
+    <color name="rose">#F43F5E</color>
+    <color name="rose_container">#881337</color>
+    <color name="log_timestamp">#63697E</color>
 
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
+
+
+    <!-- Server Studio (detail) variant palette, taken from its own code.html:
+         cards #141D31, elevated #1B253E, chips #232E4C, borders #283454. -->
+    <color name="studio_card">#141D31</color>
+    <color name="studio_elevated">#1B253E</color>
+    <color name="studio_chip">#232E4C</color>
+    <color name="studio_border">#283454</color>
+    <color name="studio_variant">#9098B8</color>
 </resources>

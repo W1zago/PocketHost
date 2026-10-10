@@ -9,18 +9,20 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.StatFs
 import android.provider.Settings
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.button.MaterialButton
+import com.pockethost.app.R
+import com.pockethost.app.databinding.ActivityDeviceScanBinding
+import com.pockethost.app.databinding.ItemDeviceCheckBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,34 +30,39 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Р”С–Р°РіРЅРѕСЃС‚РёРєР° Р’Р‘РЈР”РћР’РђРќРћР“Рћ С‚РµСЂРјС–РЅР°Р»Сѓ.
- * Р–РѕРґРЅРёС… РїРµСЂРµРІС–СЂРѕРє Termux / RUN_COMMAND / SAF - РІСЃРµ РІСЃРµСЂРµРґРёРЅС– РґРѕРґР°С‚РєСѓ.
+ * Built-in terminal diagnostics (8 checks), now in an XML layout that matches
+ * the Stitch design: header, system-health summary, checklist rows, bottom bar.
+ * No Termux / RUN_COMMAND / SAF checks - everything inside the app.
  */
 class DeviceScanActivity : AppCompatActivity() {
 
-    private lateinit var container: LinearLayout
-    // H6: Р±СѓРІ CoroutineScope(Dispatchers.Main) Р· РІРёС‚РѕРєРѕРј РїСЂРё Р·РЅРёС‰РµРЅРЅС– Activity вЂ”
-    // С‚РµРїРµСЂ lifecycleScope РІСЃСЋРґРё (Р°РІС‚Рѕ-cancel РІ onDestroy).
+    private lateinit var binding: ActivityDeviceScanBinding
+    // H6: was CoroutineScope(Dispatchers.Main) leaking on Activity destroy -
+    // now lifecycleScope everywhere (auto-cancel in onDestroy).
 
     private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) Toast.makeText(this, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РґРѕР·РІРѕР»РµРЅРѕ", Toast.LENGTH_SHORT).show()
-        else Toast.makeText(this, "РЎРїРѕРІС–С‰РµРЅРЅСЏ РІС–РґС…РёР»РµРЅРѕ", Toast.LENGTH_SHORT).show()
+        if (granted) Toast.makeText(this, "Notifications granted", Toast.LENGTH_SHORT).show()
+        else Toast.makeText(this, "Notifications denied", Toast.LENGTH_SHORT).show()
         refresh()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        supportActionBar?.title = "Р”С–Р°РіРЅРѕСЃС‚РёРєР°"
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-
-        val scroll = ScrollView(this)
-        scroll.setBackgroundColor(androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.background))
-        container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 64)
+        binding = ActivityDeviceScanBinding.inflate(layoutInflater)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
         }
-        scroll.addView(container)
-        setContentView(scroll)
+        setContentView(binding.root)
+
+        setSupportActionBar(binding.toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.title = "Device Scan"
+
+        binding.btnRescan.setOnClickListener { refreshWithInternet() }
+        binding.btnAutoGrant.setOnClickListener { autoRequestAll() }
 
         refresh()
     }
@@ -66,7 +73,7 @@ class DeviceScanActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        onBackPressed()
+        onBackPressedDispatcher.onBackPressed()
         return true
     }
 
@@ -82,16 +89,13 @@ class DeviceScanActivity : AppCompatActivity() {
     )
 
     private fun refresh() {
-        // РЎРєРµР»РµС‚ РѕРґСЂР°Р·Сѓ, РІР°Р¶РєС– РїРµСЂРµРІС–СЂРєРё (fork sh) вЂ” Сѓ IO С‰РѕР± РЅРµ ANR.
-        container.removeAllViews()
-        addHeader()
-        val loading = TextView(this).apply {
-            text = "РџРµСЂРµРІС–СЂРєР°..."
-            gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 24)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(loading)
+        // Skeleton immediately, heavy checks (fork sh) - in IO to avoid ANR.
+        binding.checkContainer.removeAllViews()
+        binding.healthTitle.text = "Checking…"
+        binding.healthSubtitle.text = ""
+        binding.healthStatusChip.visibility = View.GONE
+        binding.warnCard.visibility = View.GONE
+        binding.autoCheckAge.text = ""
         lifecycleScope.launch(Dispatchers.IO) {
             val shellOk = checkEmbeddedShell()
             val storageOk = checkInternalStorage()
@@ -102,137 +106,113 @@ class DeviceScanActivity : AppCompatActivity() {
             val res = ScanResult(shellOk, storageOk, javaPath != null, javaPath, batteryOk, notifOk, freeGb > 0.5, freeGb)
             withContext(Dispatchers.Main) {
                 try {
-                    container.removeAllViews()
-                    addHeader()
-                    addCheck("1. Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» (sh)", res.shellOk, "Р”РµС‚Р°Р»С–") { showShellInfo() }
-                    addCheck("2. Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ", res.storageOk, "Р’С–РґРєСЂРёС‚Рё СЃС…РѕРІРёС‰Рµ") { openStorageSettings() }
-                    addCheck("3. Р’Р±СѓРґРѕРІР°РЅР° Java", res.javaOk, "Р’СЃС‚Р°РЅРѕРІРёС‚Рё JRE") { installJre() }
-                    addCheck("4. Р’Р±СѓРґРѕРІР°РЅРёР№ shell РґР»СЏ Ubuntu", res.shellOk, "Р”РµС‚Р°Р»С–") { showShellInfo() }
-                    addCheck("5. Р‘Р°С‚Р°СЂРµСЏ: С–РіРЅРѕСЂ РѕРїС‚РёРјС–Р·Р°С†С–С— (PocketHost)", res.batteryOk, "Р”РѕР·РІРѕР»РёС‚Рё С„РѕРЅ") { requestBatterySelf() }
-                    addCheck("6. РЎРїРѕРІС–С‰РµРЅРЅСЏ POST_NOTIFICATIONS", res.notifOk, "Р—Р°РїСЂРѕСЃРёС‚Рё") { requestNotification() }
-                    addCheck("7. Р’С–Р»СЊРЅРѕ РјС–СЃС†СЏ >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "РћС‡РёСЃС‚РёС‚Рё") { openStorageSettings() }
-                    addCheck("8. Р†РЅС‚РµСЂРЅРµС‚", checkInternetSync(), "РџРµСЂРµРІС–СЂРёС‚Рё РјРµСЂРµР¶Сѓ") { openWifiSettings() }
-                    // РґРµС‚Р°Р»СЊ Java-С€Р»СЏС…Сѓ
-                    if (res.javaPath != null) {
-                        container.addView(TextView(this@DeviceScanActivity).apply {
-                            text = "Java: ${res.javaPath}"
-                            textSize = 11f
-                            typeface = android.graphics.Typeface.MONOSPACE
-                            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-                        })
-                    }
-                    addActions()
+                    renderResults(res)
                 } catch (_: Exception) {}
             }
         }
     }
 
-    private fun addHeader() {
-        val title = TextView(this).apply {
-            text = "PocketHost вЂ” РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»"
-            textSize = 18f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 8)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface))
+    private fun renderResults(res: ScanResult) {
+        val checks = listOf(
+            Triple("Built-in terminal (sh)", res.shellOk, "Details" to { showShellInfo() }),
+            Triple("Internal storage", res.storageOk, "Open storage" to { openStorageSettings() }),
+            Triple("Built-in Java", res.javaOk, "Install JRE" to { installJre() }),
+            Triple("Built-in shell for Ubuntu", res.shellOk, "Details" to { showShellInfo() }),
+            Triple("Battery: ignore optimizations (PocketHost)", res.batteryOk, "Allow background" to { requestBatterySelf() }),
+            Triple("POST_NOTIFICATIONS permission", res.notifOk, "Request" to { requestNotification() }),
+            Triple("Free space >512MB (${String.format("%.1f", res.freeGb)} GB)", res.spaceOk, "Clear" to { openStorageSettings() }),
+            Triple("Internet", checkInternetSync(), "Check network" to { openWifiSettings() })
+        )
+        binding.checkContainer.removeAllViews()
+        var passed = 0
+        for ((title, ok, actionPair) in checks) {
+            if (ok) passed++
+            addCheck(title, ok, actionPair.first, actionPair.second)
         }
-        val subtitle = TextView(this).apply {
-            text = "Р—РѕРІРЅС–С€РЅС–Р№ Termux РќР• РїРѕС‚СЂС–Р±РµРЅ. Р’СЃРµ РїСЂР°С†СЋС” РІСЃРµСЂРµРґРёРЅС– РґРѕРґР°С‚РєСѓ Р±РµР· РґРѕР·РІРѕР»Сѓ В«РєРµСЂСѓРІР°РЅРЅСЏ TermuxВ»."
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 16)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
+        // Java path detail (real path, middle-truncated by the row layout).
+        if (res.javaPath != null) {
+            addNote("Java: ${res.javaPath}")
         }
-        container.addView(title)
-        container.addView(subtitle)
-
-        val btnRescan = MaterialButton(this).apply {
-            text = "РЎРєР°РЅСѓРІР°С‚Рё Р·РЅРѕРІСѓ"
-            setOnClickListener { refreshWithInternet() }
+        // Health summary bound to the real pass counts.
+        binding.healthTitle.text = "$passed/8 Passed"
+        if (passed == checks.size) {
+            binding.healthSubtitle.text = "All systems operational"
+            binding.healthSubtitle.setTextColor(ContextCompat.getColor(this, R.color.tertiary))
+            binding.healthStatusChip.visibility = View.VISIBLE
+            binding.healthStatusChip.text = "$passed operational"
+            binding.healthStatusChip.setTextColor(ContextCompat.getColor(this, R.color.tertiary))
+            binding.healthStatusChip.setBackgroundResource(R.drawable.bg_scan_ok)
+            binding.warnCard.visibility = View.GONE
+        } else {
+            val missing = checks.size - passed
+            binding.healthSubtitle.text = "$missing issue${if (missing == 1) "" else "s"} require${if (missing == 1) "s" else ""} attention"
+            binding.healthSubtitle.setTextColor(ContextCompat.getColor(this, R.color.error))
+            binding.healthStatusChip.visibility = View.VISIBLE
+            binding.healthStatusChip.text = "$missing issue${if (missing == 1) "" else "s"} require attention"
+            binding.healthStatusChip.setTextColor(ContextCompat.getColor(this, R.color.error))
+            binding.healthStatusChip.setBackgroundResource(R.drawable.bg_scan_fail)
+            binding.warnCard.visibility = View.VISIBLE
         }
-        val btnAuto = MaterialButton(this).apply {
-            text = "РќР°РґР°С‚Рё РґРѕР·РІРѕР»Рё Р°РІС‚РѕРјР°С‚РёС‡РЅРѕ"
-            setOnClickListener { autoRequestAll() }
-        }
-        container.addView(btnRescan.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 8) } })
-        container.addView(btnAuto.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 8, 0, 16) } })
-    }
-
-    private fun addActions() {
-        val info = TextView(this).apply {
-            text = "РџСЂРёРјС–С‚РєР°: SAF-РїР°РїРєРё С‚Р° RUN_COMMAND Р±С–Р»СЊС€Рµ РЅРµ РІРёРєРѕСЂРёСЃС‚РѕРІСѓСЋС‚СЊСЃСЏ. РЎС‚Р°СЂС– SAF-СЃРµСЂРІРµСЂРё Р·Р°РїСѓСЃРєР°СЋС‚СЊСЃСЏ РІ РјС–РіСЂР°С†С–Р№РЅРѕРјСѓ СЂРµР¶РёРјС– Сѓ РІРЅСѓС‚СЂС–С€РЅС–Р№ РїР°РїС†С–."
-            textSize = 12f
-            setPadding(0, 24, 0, 0)
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(info)
+        binding.autoCheckAge.text = "Auto-check: just now"
     }
 
     private fun addCheck(title: String, ok: Boolean, actionText: String, action: () -> Unit) {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundResource(com.pockethost.app.R.drawable.bg_section_card)
-            setPadding(24, 20, 24, 20)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, 0, 0, 8) }
-        }
-        val okColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.tertiary)
-        val errColor = androidx.core.content.ContextCompat.getColor(this, com.pockethost.app.R.color.error)
-        val indicator = TextView(this).apply {
-            text = if (ok) "вњ“" else "вњ—"
-            textSize = 20f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(if (ok) okColor else errColor)
-            setPadding(0, 0, 16, 0)
-        }
-        val label = TextView(this).apply {
-            text = title
-            textSize = 14f
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface))
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val btn = MaterialButton(this).apply {
-            text = if (ok) "OK" else actionText
-            isEnabled = !ok
-            alpha = if (ok) 0.5f else 1f
-            setOnClickListener { action() }
-        }
-        row.addView(indicator)
-        row.addView(label)
-        row.addView(btn.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) })
-        container.addView(row)
+        val row = ItemDeviceCheckBinding.inflate(LayoutInflater.from(this), binding.checkContainer, false)
+        row.checkIcon.text = if (ok) "✓" else "✗"
+        row.checkIcon.setTextColor(
+            ContextCompat.getColor(this, if (ok) R.color.tertiary else R.color.error)
+        )
+        row.checkIcon.setBackgroundResource(
+            if (ok) R.drawable.bg_scan_ok else R.drawable.bg_scan_fail
+        )
+        row.checkTitle.text = title
+        row.checkStatus.visibility = View.VISIBLE
+        row.checkStatus.text = if (ok) "OK" else "FAILED"
+        row.checkStatus.setTextColor(
+            ContextCompat.getColor(this, if (ok) R.color.tertiary else R.color.error)
+        )
+        row.checkStatus.setBackgroundResource(
+            if (ok) R.drawable.bg_scan_ok else R.drawable.bg_scan_fail
+        )
+        row.checkAction.text = if (ok) "OK" else actionText
+        row.checkAction.isEnabled = !ok
+        row.checkAction.alpha = if (ok) 0.5f else 1f
+        row.checkAction.setOnClickListener { action() }
+        row.checkDetail.text = getDetail(title, ok)
+        binding.checkContainer.addView(row.root)
+    }
 
-        val detail = TextView(this).apply {
-            text = getDetail(title, ok)
-            textSize = 11f
-            setPadding(16, 0, 0, 12)
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextColor(androidx.core.content.ContextCompat.getColor(this@DeviceScanActivity, com.pockethost.app.R.color.on_surface_variant))
-        }
-        container.addView(detail)
+    private fun addNote(text: String) {
+        val row = ItemDeviceCheckBinding.inflate(LayoutInflater.from(this), binding.checkContainer, false)
+        row.checkIcon.text = "i"
+        row.checkIcon.setTextColor(ContextCompat.getColor(this, R.color.secondary))
+        row.checkIcon.setBackgroundResource(R.drawable.bg_port_chip)
+        row.checkTitle.text = text
+        row.checkStatus.visibility = View.GONE
+        row.checkAction.visibility = View.GONE
+        row.checkDetail.text = ""
+        binding.checkContainer.addView(row.root)
     }
 
     private fun getDetail(title: String, ok: Boolean): String {
         return when {
-            title.contains("Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»") -> if (ok) "ProcessBuilder sh РїСЂР°С†СЋС”" else "sh РЅРµРґРѕСЃС‚СѓРїРЅРёР№ (РґСѓР¶Рµ СЂС–РґРєРѕ). РџРµСЂРµР·Р°РїСѓСЃС‚Рё РїСЂРёСЃС‚СЂС–Р№"
-            title.contains("Р’РЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ") -> {
+            title.contains("Built-in terminal") -> if (ok) "ProcessBuilder sh works" else "sh unavailable (very rare). Reboot the device"
+            title.contains("Internal storage") -> {
                 val root = filesDir.absolutePath
-                if (ok) "Р”РѕСЃС‚СѓРїРЅРѕ: $root" else "РќРµРјР° Р·Р°РїРёСЃСѓ РІ $root"
+                if (ok) "Available: $root" else "Not writable: $root"
             }
-            title.contains("Р’Р±СѓРґРѕРІР°РЅР° Java") -> {
+            title.contains("Built-in Java") -> {
                 val java = try { com.pockethost.app.embedded.EmbeddedJava.findJava(this) } catch (_: Exception) { null }
-                if (ok) "Р—РЅР°Р№РґРµРЅРѕ: $java" else "РќРµ Р·РЅР°Р№РґРµРЅРѕ. РќР°С‚РёСЃРЅРё В«Р’СЃС‚Р°РЅРѕРІРёС‚Рё JREВ» (РїРѕС‚СЂС–Р±РµРЅ С–РЅС‚РµСЂРЅРµС‚, ~100MB)"
+                if (ok) "Found: $java" else "Not found. Press Install JRE (needs internet, ~100MB)"
             }
-            title.contains("Ubuntu") -> if (ok) "sh -i РіРѕС‚РѕРІРёР№ РґР»СЏ РєРѕРјР°РЅРґ" else "sh РЅРµРґРѕСЃС‚СѓРїРЅРёР№"
-            title.contains("Р‘Р°С‚Р°СЂРµСЏ") -> if (ok) "Р†РіРЅРѕСЂ РѕРїС‚РёРјС–Р·Р°С†С–С— СѓРІС–РјРєРЅРµРЅРѕ" else "РЎРёСЃС‚РµРјР° РјРѕР¶Рµ РІР±РёРІР°С‚Рё С„РѕРЅРѕРІРёР№ СЃРµСЂРІС–СЃ"
-            title.contains("РЎРїРѕРІС–С‰РµРЅРЅСЏ") -> if (ok) "POST_NOTIFICATIONS РґРѕР·РІРѕР»РµРЅРѕ" else "РџРѕС‚СЂС–Р±РµРЅ РґР»СЏ foreground service"
-            title.contains("Р’С–Р»СЊРЅРѕ РјС–СЃС†СЏ") -> {
+            title.contains("Ubuntu") -> if (ok) "sh -i ready for commands" else "sh unavailable"
+            title.contains("Battery") -> if (ok) "Optimization ignore enabled" else "System may kill the background service"
+            title.contains("POST_NOTIFICATIONS") -> if (ok) "POST_NOTIFICATIONS granted" else "Required for foreground service"
+            title.contains("Free space") -> {
                 val free = getFreeSpaceGB()
-                if (ok) "${String.format("%.1f", free)} GB РІС–Р»СЊРЅРѕ" else "${String.format("%.1f", free)} GB <0.5GB, Р·РІС–Р»СЊРЅРё РјС–СЃС†Рµ"
+                if (ok) "${String.format("%.1f", free)} GB free" else "${String.format("%.1f", free)} GB <0.5GB, free up space"
             }
-            title.contains("Р†РЅС‚РµСЂРЅРµС‚") -> if (ok) "Р”РѕСЃС‚СѓРї С” (Р°Р±Рѕ РєРµС€)" else "РџРµСЂРµРІС–СЂРєР° РЅРµ РїСЂРѕР№С€Р»Р°. РЈРІС–РјРєРЅРё WiFi/РјРѕР±С–Р»СЊРЅС–"
+            title.contains("Internet") -> if (ok) "Reachable (or cached)" else "Check failed. Enable WiFi/mobile data"
             else -> ""
         }
     }
@@ -295,7 +275,7 @@ class DeviceScanActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) { checkInternet() }
             internetCache = result
             refresh()
-            if (!result) Toast.makeText(this@DeviceScanActivity, "Р†РЅС‚РµСЂРЅРµС‚ РЅРµРґРѕСЃС‚СѓРїРЅРёР№", Toast.LENGTH_SHORT).show()
+            if (!result) Toast.makeText(this@DeviceScanActivity, "Internet unavailable", Toast.LENGTH_SHORT).show()
         }
         refresh()
     }
@@ -320,16 +300,16 @@ class DeviceScanActivity : AppCompatActivity() {
             !checkNotification() -> requestNotification()
             !checkBatterySelf() -> requestBatterySelf()
             !checkJava() -> installJre()
-            else -> Toast.makeText(this, "Р’СЃРµ РіРѕС‚РѕРІРѕ: РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» РЅРµ РїРѕС‚СЂРµР±СѓС” РґРѕР·РІРѕР»С–РІ", Toast.LENGTH_LONG).show()
+            else -> Toast.makeText(this, "All set: built-in terminal needs no permissions", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun showShellInfo() {
-        Toast.makeText(this, "Р’Р±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р»: sh + stdin/stdout, Р»РѕРіРё РІ filesDir/servers/<id>/server.log", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Built-in terminal: sh + stdin/stdout, logs in filesDir/servers/<id>/server.log", Toast.LENGTH_LONG).show()
     }
 
     private fun installJre() {
-        Toast.makeText(this, "Р—Р°РІР°РЅС‚Р°Р¶РµРЅРЅСЏ JRE СЃС‚Р°СЂС‚СѓС” РїСЂРё РїРµСЂС€РѕРјСѓ Р·Р°РїСѓСЃРєСѓ Minecraft-СЃРµСЂРІРµСЂР°", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "JRE download starts on first Minecraft server launch", Toast.LENGTH_LONG).show()
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 com.pockethost.app.embedded.EmbeddedBootstrap.ensureJava(this@DeviceScanActivity) {}

@@ -16,11 +16,16 @@ import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.PocketHostApplication
 import com.pockethost.app.R
 import com.pockethost.app.databinding.ActivityServerDetailBinding
+import com.pockethost.app.embedded.EmbeddedBootstrap
 import com.pockethost.app.embedded.EmbeddedPaths
+import com.pockethost.app.embedded.EmbeddedUbuntu
 import com.pockethost.app.embedded.EmbeddedProcessManager
 import com.pockethost.app.service.ServerService
 import com.pockethost.app.util.ServerProperties
@@ -44,9 +49,9 @@ class ServerDetailActivity : AppCompatActivity() {
     }
 
     private lateinit var binding: ActivityServerDetailBinding
-    // РЈРЅС–С„С–РєРѕРІР°РЅРѕ Р· MainActivity/CreateServerActivity: Р±РµР·РїРµС‡РЅРёР№ lazy-РґРѕСЃС‚СѓРї.
-    // РЇРєС‰Рѕ Application РЅРµ РІСЃС‚РёРі РїСЂРѕС–РЅС–С†С–Р°Р»С–Р·СѓРІР°С‚Рё СЂРµРїРѕР·РёС‚РѕСЂС–Р№ (РїРѕС€РєРѕРґР¶РµРЅРёР№ DataStore),
-    // СЃС‚РІРѕСЂСЋС”РјРѕ Р»РѕРєР°Р»СЊРЅРёР№ fallback Р·Р°РјС–СЃС‚СЊ РєСЂР°С€Сѓ РЅР° lateinit.
+    // Unified with MainActivity/CreateServerActivity: safe lazy access.
+    // When Application failed to init the repository (corrupted DataStore),
+    // create a local fallback instead of crashing on lateinit.
     private val repository by lazy {
         runCatching { PocketHostApplication.serverRepository }.getOrElse { e ->
             Log.e(TAG, "repo not ready, using fallback", e)
@@ -55,13 +60,19 @@ class ServerDetailActivity : AppCompatActivity() {
     }
     private var serverId: String? = null
     private var currentServer: Server? = null
-    private var deviceIp: String = "вЂ¦"
-    // Р‘Р»РѕРєСѓС” Р·Р±РµСЂРµР¶РµРЅРЅСЏ РїС–Рґ С‡Р°СЃ РїСЂРѕРіСЂР°РјРЅРѕРіРѕ Р·Р°РїРѕРІРЅРµРЅРЅСЏ РєРѕРЅС‚СЂРѕР»С–РІ Сѓ updateUI
+    private var deviceIp: String = "…"
+    // Blocks settings save while controls are filled programmatically in updateUI
     private var suppressSettingsSave = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityServerDetailBinding.inflate(layoutInflater)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
         setContentView(binding.root)
 
         serverId = intent.getStringExtra("server_id")
@@ -77,7 +88,7 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Server Details"
+        supportActionBar?.title = "Server Studio"
     }
 
     private fun setupButtons() {
@@ -89,16 +100,35 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnDelete.setOnClickListener { deleteServer() }
         binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
+        binding.btnCopyGateway.setOnClickListener { copyBindAddress() }
+        binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
         // Section tabs: real navigation (scroll within screen or open screen).
-        binding.tabOverview.setOnClickListener { binding.scrollView.smoothScrollTo(0, 0) }
         binding.tabConsole.setOnClickListener { openConsole() }
         binding.tabFiles.setOnClickListener { openFileManager() }
-        binding.tabTelemetry.setOnClickListener {
-            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.resourcesCard.top) }
-        }
         binding.tabConfig.setOnClickListener {
+            setActiveTab(binding.tabConfig)
             binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
         }
+    }
+
+    /** Active tab pill (design: primary-container) vs idle tabs. */
+    private fun setActiveTab(active: View) {
+        try {
+            val tabs = listOf(
+                binding.tabConsole, binding.tabFiles,
+                binding.tabConfig
+            )
+            val onBg = ContextCompat.getColor(this, R.color.primary_container)
+            val onFg = ContextCompat.getColor(this, R.color.on_primary_container)
+            val offBg = ContextCompat.getColor(this, R.color.surface_high)
+            val offFg = ContextCompat.getColor(this, R.color.on_surface_variant)
+            for (tab in tabs) {
+                val on = tab == active
+                tab.backgroundTintList = android.content.res.ColorStateList.valueOf(if (on) onBg else offBg)
+                tab.setTextColor(if (on) onFg else offFg)
+                tab.iconTint = android.content.res.ColorStateList.valueOf(if (on) onFg else offFg)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -120,20 +150,20 @@ class ServerDetailActivity : AppCompatActivity() {
         try {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("server address", text))
-            Toast.makeText(this, "РЎРєРѕРїС–Р№РѕРІР°РЅРѕ: $text", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Copied: $text", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
     }
 
     private fun setupMinecraftSettings() {
-        binding.switchPirate.setOnCheckedChangeListener { _, _ ->
+        binding.mcSettings.switchPirate.setOnCheckedChangeListener { _, _ ->
             if (suppressSettingsSave) return@setOnCheckedChangeListener
             saveMinecraftSettings()
         }
-        binding.sliderViewDistance.addOnChangeListener { _, value, _ ->
-            binding.tvViewDistance.text = "Р”Р°Р»СЊРЅС–СЃС‚СЊ РїСЂРѕРјР°Р»СЊРѕРІРєРё: ${value.toInt()} С‡Р°РЅРєС–РІ"
+        binding.mcSettings.sliderViewDistance.addOnChangeListener { _, value, _ ->
+            binding.mcSettings.tvViewDistance.text = "${value.toInt()} chunks"
         }
-        // Р—Р±РµСЂС–РіР°С”РјРѕ Р»РёС€Рµ РєРѕР»Рё РїР°Р»РµС†СЊ РІС–РґРїСѓС‰РµРЅРѕ, Р° РЅРµ РЅР° РєРѕР¶РµРЅ С‚С–Рє
-        binding.sliderViewDistance.addOnSliderTouchListener(
+        // Save only when the thumb is released, not on every tick
+        binding.mcSettings.sliderViewDistance.addOnSliderTouchListener(
             object : Slider.OnSliderTouchListener {
                 override fun onStartTrackingTouch(slider: Slider) {}
                 override fun onStopTrackingTouch(slider: Slider) {
@@ -145,15 +175,15 @@ class ServerDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * Р—Р±РµСЂС–РіР°С” С‚СѓРјР±Р»РµСЂ/РїРѕРІР·СѓРЅРѕРє Сѓ РєРѕРЅС„С–Рі СЃРµСЂРІРµСЂР°.
-     * РќР° Р·СѓРїРёРЅРµРЅРѕРјСѓ вЂ” РѕРґСЂР°Р·Сѓ РїР°С‚С‡РёС‚СЊ server.properties,
-     * РЅР° Р·Р°РїСѓС‰РµРЅРѕРјСѓ вЂ” Р·Р°СЃС‚РѕСЃСѓС”С‚СЊСЃСЏ РїСЂРё РЅР°СЃС‚СѓРїРЅРѕРјСѓ СЃС‚Р°СЂС‚С– (СЃРµСЂРІС–СЃ РїР°С‚С‡РёС‚СЊ СЃР°Рј).
+     * Saves the tumbler/slider into the server config.
+     * On a stopped server - patches server.properties at once,
+     * on a running one - applies on next start (service patches itself).
      */
     private fun saveMinecraftSettings() {
         val server = currentServer ?: return
         if (server.type != ServerType.MINECRAFT) return
-        val allowPirate = binding.switchPirate.isChecked
-        val viewDistance = binding.sliderViewDistance.value.toInt().coerceIn(2, 32)
+        val allowPirate = binding.mcSettings.switchPirate.isChecked
+        val viewDistance = binding.mcSettings.sliderViewDistance.value.toInt().coerceIn(2, 32)
         lifecycleScope.launch {
             try {
                 val updated = server.copy(
@@ -169,7 +199,7 @@ class ServerDetailActivity : AppCompatActivity() {
                 ) {
                     Toast.makeText(
                         this@ServerDetailActivity,
-                        "Р—Р±РµСЂРµР¶РµРЅРѕ. Р—Р°СЃС‚РѕСЃСѓС”С‚СЊСЃСЏ РїС–СЃР»СЏ СЂРµСЃС‚Р°СЂС‚Сѓ СЃРµСЂРІРµСЂР°.",
+                        "Saved. Applies after server restart.",
                         Toast.LENGTH_SHORT
                     ).show()
                 } else {
@@ -187,7 +217,7 @@ class ServerDetailActivity : AppCompatActivity() {
                         )
                         Toast.makeText(
                             this@ServerDetailActivity,
-                            "Р—Р±РµСЂРµР¶РµРЅРѕ С– Р·Р°СЃС‚РѕСЃРѕРІР°РЅРѕ.",
+                            "Saved and applied.",
                             Toast.LENGTH_SHORT
                         ).show()
                     } catch (e: Exception) {
@@ -222,7 +252,7 @@ class ServerDetailActivity : AppCompatActivity() {
 
     private fun observeLogFile(logFile: File) {
         lifecycleScope.launch {
-            // РҐРІС–СЃС‚ РѕСЃС‚Р°РЅРЅС–С… 16KB С‰РѕР± Р±Р°РЅРµСЂ РїРѕРјРёР»РѕРє Р±Р°С‡РёРІ С– С–СЃС‚РѕСЂС–СЋ, СЏРє ConsoleActivity.
+            // Tail of last 16KB so the error banner sees history too, like ConsoleActivity.
             var offset = try {
                 val len = logFile.length()
                 if (len > 16 * 1024) len - 16 * 1024 else 0L
@@ -260,7 +290,7 @@ class ServerDetailActivity : AppCompatActivity() {
                             if (tail.isNotBlank()) {
                                 runOnUiThread {
                                     binding.tvLogPreview.text = tail.take(1200)
-                                    binding.tvLogLive.text = "в—Џ LIVE"
+                                    binding.tvLogLive.text = "● LIVE"
                                 }
                             }
                             offset = currentLength
@@ -279,9 +309,18 @@ class ServerDetailActivity : AppCompatActivity() {
         currentServer = server
         binding.apply {
             serverName.text = server.name
-            serverType.text = server.type.name
+            // Subtitle from REAL config: loader + version (design), never fake.
+            serverType.text = if (server.type == ServerType.MINECRAFT) {
+                val loader = server.config.minecraftLoader?.name?.lowercase()
+                    ?.replaceFirstChar { it.uppercase() } ?: "Minecraft"
+                val ver = server.config.minecraftVersion ?: ""
+                "Minecraft $loader $ver".trim()
+            } else {
+                "Ubuntu PRoot sandbox"
+            }
             serverPort.text = ":${server.port}"
-            serverIcon.text = server.name.firstOrNull()?.uppercase() ?: "?"
+            val letter = server.name.firstOrNull()?.uppercase() ?: "?"
+            serverIcon.text = "[$letter]"
             serverIcon.setTextColor(
                 ContextCompat.getColor(
                     this@ServerDetailActivity,
@@ -322,40 +361,34 @@ class ServerDetailActivity : AppCompatActivity() {
             // Uptime is real: now - lastStarted while running.
             val lastStarted = server.lastStarted
             serverUptime.text = if ((server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) && lastStarted != null) {
-                "Up ${formatUptime(System.currentTimeMillis() - lastStarted)}"
+                formatUptime(System.currentTimeMillis() - lastStarted)
             } else {
-                "Up вЂ”"
+                "—"
             }
             btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
             btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
             btnRestart.isEnabled = server.status == ServerStatus.RUNNING
-            // Р’Р±СѓРґРѕРІР°РЅРёР№ С€Р»СЏС… Р·Р°РјС–СЃС‚СЊ SAF
-            val workDirStr = try {
-                EmbeddedPaths.resolveWorkDir(
-                    this@ServerDetailActivity, server.id,
-                    server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-                ).absolutePath
-            } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
-            // IP -> IP view (serverIpAddress + tvBindAddress), РїР°РїРєР° -> folder view.
-            // Р‘СѓР»Рѕ: serverIpAddress РїРѕРєР°Р·СѓРІР°РІ "РџР°РїРєР°: /data/.../files/servers/..." вЂ” РїРµСЂРµРїР»СѓС‚Р°РЅР° РјС–С‚РєР°.
+            // IP -> IP view (serverIpAddress + tvBindAddress).
             serverIpAddress.text = "$deviceIp:${server.port}"
-            serverFolderPath.text = "РџР°РїРєР°: $workDirStr"
             // LAN bind line uses the real device IP + this server's port.
             tvBindAddress.text = "$deviceIp:${server.port}"
-            // РљР°СЂС‚РєР° РЅР°Р»Р°С€С‚СѓРІР°РЅСЊ вЂ” Р»РёС€Рµ РґР»СЏ Minecraft, Р·РЅР°С‡РµРЅРЅСЏ Р·С– Р·Р±РµСЂРµР¶РµРЅРѕРіРѕ РєРѕРЅС„С–РіСѓ
+            // Bound socket row: real wildcard bind + port (TCP).
+            tvBoundSocket.text = "0.0.0.0:${server.port} [TCP/UDP]"
+            // LAN bind line uses the real device IP + this server port.
             if (server.type == ServerType.MINECRAFT) {
                 minecraftSettingsCard.visibility = View.VISIBLE
                 tabConfig.visibility = View.VISIBLE
+                ubuntuSettingsCard.visibility = View.GONE
                 suppressSettingsSave = true
                 try {
-                    switchPirate.isChecked = !server.config.effectiveOnlineMode
+                    mcSettings.switchPirate.isChecked = !server.config.effectiveOnlineMode
                     try {
-                        sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
+                        mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
                     } catch (e: IllegalStateException) {
                         Log.w(TAG, "snap viewDistance fallback", e)
                     }
-                    tvViewDistance.text =
-                        "Р”Р°Р»СЊРЅС–СЃС‚СЊ РїСЂРѕРјР°Р»СЊРѕРІРєРё: ${server.config.effectiveViewDistance} С‡Р°РЅРєС–РІ"
+                    mcSettings.tvViewDistance.text =
+                        "${server.config.effectiveViewDistance} chunks"
                 } catch (_: Exception) {
                 } finally {
                     suppressSettingsSave = false
@@ -363,12 +396,14 @@ class ServerDetailActivity : AppCompatActivity() {
             } else {
                 minecraftSettingsCard.visibility = View.GONE
                 tabConfig.visibility = View.GONE
+                ubuntuSettingsCard.visibility = View.VISIBLE
+                refreshUbuntuCard()
             }
         }
     }
 
     private fun formatUptime(millis: Long): String {
-        if (millis < 0) return "вЂ”"
+        if (millis < 0) return "—"
         val minutes = millis / 60000
         if (minutes < 1) return "just now"
         if (minutes < 60) return "${minutes}m"
@@ -400,9 +435,9 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun restartServer() {
         stopServer()
         lifecycleScope.launch {
-            // FAIL 17:44: СЂРµСЃС‚Р°СЂС‚ С‡РµСЂРµР· 1СЃ РІРїРёСЂР°РІСЃСЏ РІ reserve "РЎРµСЂРІРµСЂ РІР¶Рµ
-            // Р·Р°РїСѓС‰РµРЅРёР№" (Р·Р°РїР°СЂРєРѕРІР°РЅРёР№ future). Р§РµРєР°С”РјРѕ СЂРµР°Р»СЊРЅРѕС— СЃРјРµСЂС‚С– Р·Р°
-            // С„Р°РєС‚Р°РјРё (РЅРѕРІРёР№ isRunning Р±РµР· fast-path) РґРѕ 15СЃ, РїРѕС‚С–Рј СЃС‚Р°СЂС‚.
+            // FAIL 17:44: restart after 1s hit reserve "Server already
+            // running" (parked future). Wait for real death by
+            // facts (new isRunning without fast-path) up to 15s, then start.
             var waited = 0
             while (waited < 15000) {
                 delay(1000)
@@ -451,9 +486,9 @@ class ServerDetailActivity : AppCompatActivity() {
                         delay(1000)
                     }
                 }
-                // Р’РёРґР°Р»СЏС”РјРѕ С– РїР°РїРєСѓ СЃРµСЂРІРµСЂР° вЂ” СЃС‚СЂРѕРіРѕ РІСЃРµСЂРµРґРёРЅС– РїС–СЃРѕС‡РЅРёС†С– РґРѕРґР°С‚РєСѓ
-                // (РІРЅСѓС‚СЂС–С€РЅС” СЃС…РѕРІРёС‰Рµ Р°Р±Рѕ app-external dirs). РљР°СЃС‚РѕРјРЅСѓ РїР°РїРєСѓ вЂ” Р»РёС€Рµ
-                // СЏРєС‰Рѕ С†Рµ С‚РѕС‡РЅРѕ С‚Р° РїР°РїРєР°, С‰Рѕ Р·Р°РїРёСЃР°РЅР° РїСЂРё СЃС‚РІРѕСЂРµРЅРЅС– (Р·Р°С…РёСЃС‚ РІС–Рґ Р·РЅРѕСЃСѓ С‡СѓР¶РѕРіРѕ).
+                // Also delete the server folder - strictly inside the app sandbox
+                // (internal storage or app-external dirs). A custom folder - only
+                // when it is exactly the recorded one (guard against wiping foreign).
                 try {
                     val srv = repository.getServer(id).first()
                     if (srv != null) {
@@ -493,19 +528,87 @@ class ServerDetailActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshUbuntuCard() {
+        lifecycleScope.launch {
+            val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    if (EmbeddedUbuntu.isInstalled(this@ServerDetailActivity)) {
+                        "installed"
+                    } else if (!EmbeddedUbuntu.isSupported()) {
+                        "unsupported"
+                    } else {
+                        "missing"
+                    }
+                } catch (_: Exception) {
+                    "missing"
+                }
+            }
+            try {
+                when (status) {
+                    "installed" -> {
+                        binding.tvUbuntuStatus.text =
+                            "Ubuntu ${EmbeddedUbuntu.UBUNTU_VERSION} installed (proot, apt works)."
+                        binding.btnInstallUbuntu.text = "Reinstall Ubuntu"
+                        binding.btnInstallUbuntu.isEnabled = true
+                    }
+                    "unsupported" -> {
+                        binding.tvUbuntuStatus.text = EmbeddedUbuntu.supportHint()
+                        binding.btnInstallUbuntu.isEnabled = false
+                    }
+                    else -> {
+                        binding.tvUbuntuStatus.text =
+                            "Not installed (~30MB download, ~150MB on disk). Start downloads it automatically."
+                        binding.btnInstallUbuntu.text = "Download Ubuntu (~30MB)"
+                        binding.btnInstallUbuntu.isEnabled = true
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun installUbuntu() {
+        binding.btnInstallUbuntu.isEnabled = false
+        binding.btnInstallUbuntu.text = "Downloading..."
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    EmbeddedBootstrap.installUbuntuFull(this@ServerDetailActivity) { msg ->
+                        try {
+                            runOnUiThread { binding.tvUbuntuStatus.text = msg.takeLast(300) }
+                        } catch (_: Exception) {
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "installUbuntu failed", e)
+                    false
+                }
+            }
+            try {
+                android.widget.Toast.makeText(
+                    this@ServerDetailActivity,
+                    if (ok) "Ubuntu installed" else "Ubuntu install did not finish, see status",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            } catch (_: Exception) {
+            }
+            refreshUbuntuCard()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        // Р”СЂС–Р±РЅРёС†СЏ (Р‘Р°Рі A): РґРµС‚Р°Р»СЊРЅРёР№ РµРєСЂР°РЅ РєРµС€СѓРІР°РІ RUNNING РїС–СЃР»СЏ СЃС‚РѕРїР° вЂ”
-        // РѕРЅРѕРІР»СЋС”РјРѕ СЃС‚Р°С‚СѓСЃ РїСЂРё РїРѕРІРµСЂРЅРµРЅРЅС– (Flow РјС–Рі РїСЂРѕРїСѓСЃС‚РёС‚Рё РµРјС–СЃС–СЋ Сѓ С„РѕРЅС–).
+        // Trivia (Bug A): details screen cached RUNNING after stop -
+        // refresh status on return (Flow could miss the background emission).
         serverId?.let { id ->
             lifecycleScope.launch {
                 try {
                     val s = repository.getServer(id).first()
                     if (s != null) updateUI(s)
-                    // FAIL 17:44: СЃС‚Р°С‚СѓСЃ RUNNING РїСЂРё РјРµСЂС‚РІРёС… С„Р°РєС‚Р°С… (РїРѕСЂС‚ РІС–Р»СЊРЅРёР№ +
-                    // Closing РїС–СЃР»СЏ Done, РЅРѕРІРёР№ isRunning Р±РµР· fast-path = false) вЂ”
-                    // РЅРµ РїРѕРєР°Р·СѓС”РјРѕ stale RUNNING, СЃРёРЅС…СЂРѕРЅС–Р·СѓС”РјРѕ РІ STOPPED РѕРґСЂР°Р·Сѓ,
-                    // РЅРµ С‡РµРєР°СЋС‡Рё 10СЃ liveness-poll СЃРµСЂРІС–СЃР°.
+                    // FAIL 17:44: RUNNING status with dead facts (free port +
+                    // Closing after Done, new isRunning without fast-path = false) -
+                    // do not show stale RUNNING, sync to STOPPED at once,
+                    // without waiting 10s for the service liveness-poll.
                     try {
                         if (s != null && s.status == ServerStatus.RUNNING &&
                             !EmbeddedProcessManager.isRunning(id)
@@ -531,16 +634,17 @@ class ServerDetailActivity : AppCompatActivity() {
         try {
             val port = currentServer?.port
             binding.tvBindAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
-            // Hero-СЂСЏРґРѕРє serverIpAddress вЂ” С‚РµР¶ IP (РїР°РїРєР° Р¶РёРІРµ РІ serverFolderPath).
+            // Hero row serverIpAddress is also IP.
             binding.serverIpAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
+            if (port != null) binding.tvBoundSocket.text = "0.0.0.0:$port [TCP/UDP]"
         } catch (_: Exception) {}
     }
 
     @Suppress("DEPRECATION")
     private fun getLocalIpAddress(): String {
-        // H5: primary вЂ” NetworkInterface (Р±РµР· РґРѕР·РІРѕР»С–РІ, Р±РµР· deprecated API).
-        // WifiManager.connectionInfo вЂ” Р»РёС€Рµ secondary best-effort РІ try/catch
-        // (deprecated + РїРѕС‚СЂРµР±СѓС” location-РґРѕР·РІРѕР»Сѓ РЅР° Android 10+).
+        // H5: primary - NetworkInterface (no permissions, no deprecated API).
+        // WifiManager.connectionInfo is only a secondary best-effort in try/catch
+        // (deprecated + needs location permission on Android 10+).
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
             for (intf in interfaces) {
@@ -552,7 +656,7 @@ class ServerDetailActivity : AppCompatActivity() {
                     if (!addr.isLoopbackAddress) {
                         val hostAddress = addr.hostAddress
                         if (hostAddress != null && hostAddress.indexOf(':') < 0) {
-                            // РџСЂРёРІР°С‚РЅС– РґС–Р°РїР°Р·РѕРЅРё РїРµСЂС€РёРјРё, Р°Р»Рµ РїРѕРІРµСЂРЅРµРјРѕ РїРµСЂС€РёР№ IPv4 РІР·Р°РіР°Р»С–.
+                            // Private ranges first, but return the first IPv4 overall.
                             if (hostAddress.startsWith("192.168.") || hostAddress.startsWith("10.") ||
                                 hostAddress.startsWith("172.")
                             ) return hostAddress
@@ -560,7 +664,7 @@ class ServerDetailActivity : AppCompatActivity() {
                     }
                 }
             }
-            // Р”СЂСѓРіРёР№ РїСЂРѕС…С–Рґ: Р±СѓРґСЊ-СЏРєРёР№ IPv4 СЏРєС‰Рѕ РїСЂРёРІР°С‚РЅРѕРіРѕ РЅРµРјР°.
+            // Second pass: any IPv4 when no private one exists.
             for (intf in interfaces) {
                 try {
                     if (!intf.isUp || intf.isLoopback) continue
@@ -576,7 +680,7 @@ class ServerDetailActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error getting IP via NetworkInterface", e)
         }
-        // Secondary: WifiManager вЂ” Р»РёС€Рµ СЏРєС‰Рѕ С” location-РґРѕР·РІС–Р», С–РЅР°РєС€Рµ РїСЂРѕРїСѓСЃРєР°С”РјРѕ.
+            // Secondary: WifiManager - only with location permission, otherwise skip.
         try {
             val hasLocation = try {
                 androidx.core.content.ContextCompat.checkSelfPermission(
@@ -624,7 +728,7 @@ class ServerDetailActivity : AppCompatActivity() {
             ) {
                 formatUptime(System.currentTimeMillis() - lastStarted)
             } else {
-                "вЂ”"
+                "—"
             }
             val runtime = Runtime.getRuntime()
             val totalMem = runtime.totalMemory() / 1024 / 1024
@@ -632,14 +736,22 @@ class ServerDetailActivity : AppCompatActivity() {
             val used = totalMem - freeMem
             val max = runtime.maxMemory() / 1024 / 1024
             binding.tileMemory.text = "$used/$max MB"
+            val heapPct = if (max > 0) ((used * 100) / max).toInt().coerceIn(0, 100) else 0
+            binding.tileMemoryPct.text = "$heapPct%"
+            binding.heapBar.progress = heapPct
             val cores = runtime.availableProcessors()
             binding.tileCores.text = cores.toString()
             try {
                 val stat = StatFs(filesDir.absolutePath)
                 val freeGb = stat.availableBytes / 1024.0 / 1024.0 / 1024.0
+                val totalGb = stat.totalBytes / 1024.0 / 1024.0 / 1024.0
                 binding.tileDisk.text = String.format(Locale.US, "%.1f GB", freeGb)
+                binding.tileDiskSub.text =
+                    "free of ${String.format(Locale.US, "%.0f", totalGb)} GB"
+                val usedPct = if (totalGb > 0) (((totalGb - freeGb) * 100) / totalGb).toInt().coerceIn(0, 100) else 0
+                binding.diskBar.progress = usedPct
             } catch (_: Exception) {
-                binding.tileDisk.text = "вЂ”"
+                binding.tileDisk.text = "—"
             }
         } catch (e: Exception) {
             Log.e(TAG, "updateSystemResources failed", e)

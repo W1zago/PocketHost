@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background">
@@ -11,337 +12,273 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="@color/background"
-            app:title="Console"
-            app:titleTextColor="@color/on_surface"
-            app:navigationIconTint="@color/on_surface" />
-
-        <!-- Sub-header: server name + live status pill -->
+        <!-- Header (design: single 56dp row — back, name + status pill,
+             direct Copy/Share/Clear actions, overflow for the rest).
+             No "issues" chip (collides in mockup, no such feature);
+             no fake runtime subtitle. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="56dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="8dp">
+            android:background="@color/surface_lowest"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp">
 
-            <TextView
-                android:id="@+id/tvServerName"
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:padding="12dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:src="@drawable/ic_arrow_back"
+                app:tint="@color/outline" />
+
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="server"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:textColor="@color/on_surface"
-                android:fontFamily="monospace"
-                android:ellipsize="end"
-                android:maxLines="1" />
+                android:orientation="vertical">
 
-            <LinearLayout
-                android:id="@+id/statusBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_status_idle"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp">
-
-                <View
-                    android:id="@+id/statusDot"
-                    android:layout_width="6dp"
-                    android:layout_height="6dp"
-                    android:background="@drawable/bg_dot_idle" />
-
-                <TextView
-                    android:id="@+id/statusText"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:text="Stopped"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/badge_idle_fg"
-                    android:fontFamily="monospace" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:id="@+id/statusBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/bg_status_idle"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp">
+
+                        <View
+                            android:id="@+id/statusDot"
+                            android:layout_width="6dp"
+                            android:layout_height="6dp"
+                            android:background="@drawable/bg_dot_idle" />
+
+                        <TextView
+                            android:id="@+id/statusText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="Stopped"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/badge_idle_fg"
+                            android:fontFamily="@font/jetbrains_mono_family" />
+
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvServerName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="server"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface"
+                        android:fontFamily="@font/jetbrains_mono_family"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
+            <ImageButton
+                android:id="@+id/btnCopy"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="8dp"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Copy log"
+                android:src="@drawable/ic_content_copy"
+                app:tint="@color/on_surface_variant" />
+
+            <ImageButton
+                android:id="@+id/btnShare"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="12dp"
+                android:padding="8dp"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Share log"
+                android:src="@drawable/ic_share"
+                app:tint="@color/on_surface_variant" />
+
+            <ImageButton
+                android:id="@+id/btnClear"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="12dp"
+                android:padding="8dp"
+                android:background="@drawable/bg_icon_btn"
+                android:contentDescription="Clear console"
+                android:src="@drawable/ic_delete"
+                app:tint="@color/on_surface_variant" />
+
+            <ImageButton
+                android:id="@+id/btnMenu"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="4dp"
+                android:padding="12dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="More actions"
+                android:src="@drawable/ic_more_vert"
+                app:tint="@color/on_surface_variant" />
+
         </LinearLayout>
 
-        <!-- Filter row: text query + autoscroll toggle -->
-        <LinearLayout
+        <View
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp">
-
-            <EditText
-                android:id="@+id/etLogFilter"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_search"
-                android:hint="Filter logs…"
-                android:textColor="@color/on_surface"
-                android:textColorHint="@color/on_surface_variant"
-                android:textSize="13sp"
-                android:fontFamily="monospace"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:singleLine="true"
-                android:inputType="text" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnAutoScroll"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
-                android:text="Follow: ON"
-                android:textSize="11sp"
-                style="@style/PocketHost.Button.Tonal" />
-
-        </LinearLayout>
-
-        <!-- Level chips with real counts -->
-        <HorizontalScrollView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:paddingStart="16dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp">
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/chipLevelGroup"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                app:singleSelection="true"
-                app:selectionRequired="true"
-                app:chipSpacingHorizontal="8dp">
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipAll"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checked="true"
-                    android:text="ALL"
-                    android:tag="ALL"
-                    style="@style/PocketHost.Chip.Filter" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipInfo"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="INFO"
-                    android:tag="INFO"
-                    style="@style/PocketHost.Chip.Filter" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipWarn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="WARN"
-                    android:tag="WARN"
-                    style="@style/PocketHost.Chip.Filter" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipError"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="ERROR"
-                    android:tag="ERROR"
-                    style="@style/PocketHost.Chip.Filter" />
-
-            </com.google.android.material.chip.ChipGroup>
-
-        </HorizontalScrollView>
-
-        <FrameLayout
+            android:layout_height="1dp"
+            android:background="@color/outline_variant" />
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:layout_marginTop="4dp">
+            android:layout_weight="1">
 
-            <ScrollView
+            <com.pockethost.app.ui.ConsoleScrollView
                 android:id="@+id/scrollView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:background="@drawable/bg_telemetry_strip"
-                android:padding="10dp">
+                android:layout_marginTop="4dp"
+                android:fillViewport="true"
+                android:clipToPadding="false"
+                android:scrollbars="none"
+                android:overScrollMode="ifContentScrolls"
+                android:background="@android:color/transparent"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="8dp">
 
-                <TextView
-                    android:id="@+id/consoleOutput"
+                <!-- Terminal surface (Termux-style): typing happens inline here,
+                     right after the prompt. NOTE: never put layout_gravity
+                     on this child: bottom gravity on a taller-than-viewport
+                     child collapses the scroll range to ~0 (bottom-aligned,
+                     top goes negative). Short logs are pinned low via
+                     minimumHeight + text gravity instead (updateFastThumb). -->
+                <EditText
+                    android:id="@+id/logView"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
+                    android:background="@android:color/transparent"
+                    android:fontFamily="@font/jetbrains_mono_family"
                     android:textColor="@color/on_surface"
-                    android:textSize="12sp"
-                    android:lineSpacingExtra="2dp"
-                    android:textIsSelectable="true"
+                    android:textColorHint="@color/outline"
+                    android:hint="Tap here to type…"
+                    android:textSize="11sp"
+                    android:lineSpacingExtra="3dp"
+                    android:lineSpacingMultiplier="1.0"
+                    android:breakStrategy="simple"
+                    android:hyphenationFrequency="none"
+                    android:justificationMode="none"
+                    android:fontFeatureSettings="tnum"
+                    android:gravity="bottom"
+                    android:cursorVisible="true"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
                     android:longClickable="true"
                     android:contextClickable="true"
-                    android:selectAllOnFocus="false"
-                    android:bufferType="spannable" />
+                    android:scrollbars="none"
+                    android:overScrollMode="never"
+                    android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword"
+                    android:imeOptions="actionSend" />
 
-            </ScrollView>
+            </com.pockethost.app.ui.ConsoleScrollView>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnJumpLive"
+            <!-- Draggable fast-scroll strip (right edge): finger drag here
+                 jumps/scrolls the log directly. The thumb height reflects
+                 viewport/content ratio; hidden when there is nothing to scroll. -->
+            <FrameLayout
+                android:id="@+id/fastScrollTrack"
+                android:layout_width="32dp"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                android:clipChildren="false"
+                android:background="@android:color/transparent">
+
+                <!-- Faint full-height rail so the drag zone is discoverable. -->
+                <View
+                    android:layout_width="2dp"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    android:background="@color/outline_variant"
+                    android:alpha="0.5" />
+
+                <View
+                    android:id="@+id/fastScrollThumb"
+                    android:layout_width="8dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="top|center_horizontal"
+                    android:background="@drawable/bg_fast_scroll_thumb"
+                    android:alpha="0.9" />
+
+            </FrameLayout>
+
+            <!-- Scroll helper overlay: appears only while reading history
+                 (follow paused). Slim single row, bottom-anchored, so it
+                 covers as little of the log as possible. -->
+            <LinearLayout
+                android:id="@+id/scrollOverlay"
                 android:layout_width="wrap_content"
-                android:layout_height="36dp"
+                android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal"
                 android:layout_marginBottom="8dp"
-                android:text="↓ Jump to Live"
-                android:textSize="12sp"
-                android:visibility="gone"
-                style="@style/PocketHost.Button.Tonal" />
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnToTop"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="↑ Top"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Tonal" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnToBottom"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="8dp"
+                        android:text="↓ Bottom"
+                        android:textSize="12sp"
+                        style="@style/PocketHost.Button.Start" />
+
+            </LinearLayout>
 
         </FrameLayout>
-
-        <!-- Quick pills: Minecraft commands (only for Minecraft servers) -->
-        <HorizontalScrollView
-            android:id="@+id/quickMinecraft"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:paddingStart="16dp"
-            android:paddingTop="8dp"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillList"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="/list"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillTps"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="/tps"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillSaveAll"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="/save-all"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillSay"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="/say "
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillStop"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="/stop"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Destructive" />
-
-            </LinearLayout>
-
-        </HorizontalScrollView>
-
-        <!-- Quick pills: shell commands (only for Linux PRoot servers) -->
-        <HorizontalScrollView
-            android:id="@+id/quickUbuntu"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:paddingStart="16dp"
-            android:paddingTop="8dp"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillLs"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="ls"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillPs"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="ps"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillDf"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="df -h"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pillPwd"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:text="pwd"
-                    android:textSize="12sp"
-                    style="@style/PocketHost.Button.Tonal" />
-
-            </LinearLayout>
-
-        </HorizontalScrollView>
 
         <LinearLayout
             android:id="@+id/extraKeysPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp">
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
 
                 <TextView
                     android:id="@+id/keyEsc"
@@ -378,9 +315,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:layout_marginTop="4dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:layout_marginTop="2dp">
 
                 <TextView
                     android:id="@+id/keyTab"
@@ -414,87 +351,6 @@
             </LinearLayout>
 
         </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/surface_low"
-            android:padding="8dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="&gt;"
-                android:textColor="@color/primary"
-                android:textStyle="bold"
-                android:fontFamily="monospace"
-                android:textSize="15sp"
-                android:paddingEnd="8dp"
-                android:paddingStart="8dp" />
-
-            <EditText
-                android:id="@+id/inputCommand"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:background="@drawable/bg_search"
-                android:hint="Enter command or STDIN…"
-                android:textColor="@color/on_surface"
-                android:textColorHint="@color/on_surface_variant"
-                android:fontFamily="monospace"
-                android:textSize="13sp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:inputType="textNoSuggestions|textVisiblePassword"
-                android:imeOptions="actionSend"
-                android:singleLine="true" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnHistory"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                app:cornerRadius="8dp"
-                android:text="↻"
-                android:textSize="18sp"
-                style="@style/PocketHost.Button.Tonal" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSend"
-                android:layout_width="48dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                app:cornerRadius="8dp"
-                app:backgroundTint="@color/primary"
-                android:text="↵"
-                android:textSize="18sp"
-                app:iconTint="@color/on_primary"
-                android:textColor="@color/on_primary" />
-
-        </LinearLayout>
-
-        <!-- Footer: real process state + buffered line count -->
-        <TextView
-            android:id="@+id/tvFooterStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/surface_lowest"
-            android:text="server.log"
-            android:textSize="10sp"
-            android:textColor="@color/on_surface_variant"
-            android:fontFamily="monospace"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp" />
 
     </LinearLayout>
 

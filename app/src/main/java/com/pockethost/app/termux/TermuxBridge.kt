@@ -8,13 +8,13 @@ import com.pockethost.app.embedded.EmbeddedProcessManager
 import com.pockethost.core.model.Server
 
 /**
- * Legacy РјС–СЃС‚ СЃСѓРјС–СЃРЅРѕСЃС‚С–. Р Р°РЅС–С€Рµ СЃР»Р°Р»Рѕ Intent com.termux.RUN_COMMAND
- * Сѓ Р·РѕРІРЅС–С€РЅС–Р№ Termux (Р·РІС–РґСЃРё С– Р·Р°РїРёС‚ РґРѕР·РІРѕР»Сѓ "РєРµСЂСѓРІР°РЅРЅСЏ").
+ * Legacy compatibility bridge. Previously sent Intent com.termux.RUN_COMMAND
+ * to external Termux (reports and "control" permission requests).
  *
- * РўРµРїРµСЂ РґРµР»РµРіСѓС” Сѓ Р’Р‘РЈР”РћР’РђРќРР™ С‚РµСЂРјС–РЅР°Р» - Р¶РѕРґРЅРёС… Intent, Р¶РѕРґРЅРёС… РґРѕР·РІРѕР»С–РІ.
- * РЎРёРіРЅР°С‚СѓСЂРё Р·Р±РµСЂРµР¶РµРЅРѕ С‰РѕР± СЃС‚Р°СЂРёР№ РєРѕРґ РЅРµ Р»Р°РјР°РІСЃСЏ.
+ * Now delegates to the BUILT-IN terminal - no Intents, no permissions.
+ * Signatures kept so old code does not break.
  */
-@Deprecated("Р’РёРєРѕСЂРёСЃС‚РѕРІСѓР№ EmbeddedProcessManager РЅР°РїСЂСЏРјСѓ")
+@Deprecated("Use EmbeddedProcessManager directly")
 object TermuxBridge {
 
     data class TermuxSession(
@@ -51,9 +51,9 @@ object TermuxBridge {
     }
 
     fun start(context: Context, server: Server, isBackground: Boolean = true, pendingIntent: PendingIntent? = null): Boolean {
-        // Р”РµР»РµРіСѓС”РјРѕ Сѓ РІР±СѓРґРѕРІР°РЅРёР№ С‚РµСЂРјС–РЅР°Р» С‡РµСЂРµР· ServerService-Р»РѕРіС–РєСѓ? РўСѓС‚ Р»РёС€Рµ fallback:
-        // РїСЂСЏРјРёР№ Р·Р°РїСѓСЃРє РЅРµРјРѕР¶Р»РёРІРёР№ Р±РµР· java/jar СЂРµР·РѕР»РІСѓ, С‚РѕРјСѓ РїРѕРІРµСЂС‚Р°С”РјРѕ true
-        // Р° СЂРµР°Р»СЊРЅРёР№ Р·Р°РїСѓСЃРє СЂРѕР±РёС‚СЊ ServerService С‡РµСЂРµР· EmbeddedProcessManager.
+        // Delegates to the built-in terminal via ServerService logic? Only fallback here:
+        // direct launch is impossible without java/jar resolution, so return true
+        // and ServerService performs the real launch via EmbeddedProcessManager.
         Log.d("TermuxBridge", "legacy start() -> delegated to embedded, server=${server.id}")
         return true
     }
@@ -72,7 +72,7 @@ object TermuxBridge {
         try {
             val ok = EmbeddedProcessManager.sendInput(session.serverId, data)
             if (!ok) {
-                // fallback: РґРѕРїРёСЃР°С‚Рё Сѓ server.log СЃРїСЂР°РІР¶РЅСЊРѕС— РїР°РїРєРё С‰РѕР± РЅРµ Р·Р°РіСѓР±РёС‚Рё РєРѕРјР°РЅРґСѓ
+                // fallback: append to server.log of the real folder so the command is not lost
                 if (session.termuxPath.isNotEmpty()) {
                     try {
                         EmbeddedProcessManager.appendLogToDir(java.io.File(session.termuxPath), data)
@@ -87,8 +87,8 @@ object TermuxBridge {
 
     fun sendRawCommand(context: Context, termuxPath: String, bashCommand: String, pendingIntent: PendingIntent? = null) {
         try {
-            // termuxPath Сѓ legacy = /data/data/com.termux/... Р°Р±Рѕ Р°Р±СЃРѕР»СЋС‚РЅРёР№ С€Р»СЏС….
-            // РџСЂРѕР±СѓС”РјРѕ Р·РЅР°Р№С‚Рё serverId Р·Р° Р·Р±С–РіРѕРј РїР°РїРєРё, С–РЅР°РєС€Рµ РїСЂРѕСЃС‚Рѕ Р»РѕРіСѓС”РјРѕ.
+            // termuxPath in legacy = /data/data/com.termux/... or an absolute path.
+            // Try to find serverId by folder match, otherwise just log.
             Log.d("TermuxBridge", "legacy sendRawCommand ignored (embedded): $bashCommand")
         } catch (e: Exception) {
             Log.e("TermuxBridge", "sendRawCommand failed", e)
@@ -99,7 +99,7 @@ object TermuxBridge {
         return "embedded"
     }
 
-    /** РҐРµР»РїРµСЂ: РїРѕР±СѓРґСѓРІР°С‚Рё СЃРµСЃС–СЋ Р· embedded-РґР°РЅРёС… */
+    /** Helper: build a session from embedded data */
     fun sessionFor(context: Context, serverId: String, workDirUri: String): TermuxSession {
         val dir = EmbeddedPaths.resolveWorkDir(context, serverId, workDirUri)
         return TermuxSession(serverId, -1, workDirUri, dir.absolutePath)

@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 
 class TermuxResultsService : Service() {
 
-    // H6: SupervisorJob + cancel РІ onDestroy С‰РѕР± РЅРµ РІРёС‚С–РєР°РІ scope.
+    // H6: SupervisorJob + cancel in onDestroy to avoid leaking scope.
     private val serviceJob = SupervisorJob()
     private val scope = CoroutineScope(serviceJob + Dispatchers.IO)
 

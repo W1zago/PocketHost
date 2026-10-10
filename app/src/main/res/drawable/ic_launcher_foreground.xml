@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PocketHost launcher icon, foreground layer (variant B: server rack + terminal + signal).
+     Content is scaled into the 66dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.64"
+        android:scaleY="0.64"
+        android:translateY="3.2">
+
+        <!-- Signal arcs -->
+        <path
+            android:pathData="M37,19 Q54,6 71,19"
+            android:strokeColor="#FF6366F1"
+            android:strokeWidth="5"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M45,26 Q54,19 63,26"
+            android:strokeColor="#FF818CF8"
+            android:strokeWidth="5"
+            android:strokeLineCap="round" />
+
+        <!-- Top bar: terminal -->
+        <path
+            android:fillColor="#FF6366F1"
+            android:pathData="M34,34 H74 A6,6 0 0 1 80,40 V46 A6,6 0 0 1 74,52 H34 A6,6 0 0 1 28,46 V40 A6,6 0 0 1 34,34 Z" />
+        <path
+            android:pathData="M36,39 L41.5,43 L36,47"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M45,47 L54,47"
+            android:strokeColor="#FF34D399"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round" />
+
+        <!-- Server bars -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M34,56 H74 A6,6 0 0 1 80,62 V66 A6,6 0 0 1 74,72 H34 A6,6 0 0 1 28,66 V62 A6,6 0 0 1 34,56 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M34,76 H74 A6,6 0 0 1 80,82 V86 A6,6 0 0 1 74,92 H34 A6,6 0 0 1 28,86 V82 A6,6 0 0 1 34,76 Z" />
+
+        <!-- Status dots -->
+        <path
+            android:fillColor="#FF34D399"
+            android:pathData="M37,64 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+        <path
+            android:fillColor="#FF34D399"
+            android:pathData="M37,84 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+
+        <!-- Activity lines -->
+        <path
+            android:fillColor="#FFCBD5E1"
+            android:pathData="M59.5,62.5 H70.5 A1.5,1.5 0 0 1 70.5,65.5 H59.5 A1.5,1.5 0 0 1 59.5,62.5 Z" />
+        <path
+            android:fillColor="#FFCBD5E1"
+            android:pathData="M59.5,82.5 H70.5 A1.5,1.5 0 0 1 70.5,85.5 H59.5 A1.5,1.5 0 0 1 59.5,82.5 Z" />
+    </group>
+</vector>

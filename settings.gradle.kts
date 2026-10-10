@@ -22,3 +22,4 @@ rootProject.name = "PocketHost"
 include(":app")
 include(":core")
 include(":plugins:minecraft")
+include(":jvm-host")

@@ -20,8 +20,8 @@ object SafHelper {
         }
     }
 
-    // H4: getExternalStorageDirectory deprecated вЂ” РґР»СЏ SAF-display РјР°РїС–РЅРіСѓ РїРѕС‚СЂС–Р±РµРЅ
-    // СЃР°РјРµ legacy root. TODO: РјС–РіСЂСѓРІР°С‚Рё РЅР° SAF-DocumentFile/MediaStore РєРѕР»Рё Р±СѓРґРµ С‡Р°СЃ.
+    // H4: getExternalStorageDirectory deprecated — only the legacy root is needed for SAF-display mapping
+    // the legacy root itself. TODO: migrate to SAF-DocumentFile/MediaStore when time allows.
     @Suppress("DEPRECATION")
     fun getDisplayPath(context: Context, uri: Uri): String {
         return try {
@@ -68,14 +68,14 @@ object SafHelper {
 
     fun validatePrimaryWritableEmpty(context: Context, uri: Uri): ValidationResult {
         try {
-            if (!isOnPrimaryStorage(context, uri)) return ValidationResult(false, "Р’РёР±РµСЂС–С‚СЊ РїР°РїРєСѓ Сѓ РІРЅСѓС‚СЂС–С€РЅС–Р№ РїР°Рј'СЏС‚С–")
-            val doc = DocumentFile.fromTreeUri(context, uri) ?: return ValidationResult(false, "РќРµ РІРґР°Р»РѕСЃСЏ РІС–РґРєСЂРёС‚Рё РїР°РїРєСѓ")
-            if (!doc.exists()) return ValidationResult(false, "РџР°РїРєР° РЅРµ С–СЃРЅСѓС”")
-            if (!doc.canWrite()) return ValidationResult(false, "РќРµРјР° Р·Р°РїРёСЃСѓ")
-            if (doc.listFiles().isNotEmpty()) return ValidationResult(false, "РџР°РїРєР° РЅРµ РїРѕСЂРѕР¶РЅСЏ")
+            if (!isOnPrimaryStorage(context, uri)) return ValidationResult(false, "Select a folder in internal storage")
+            val doc = DocumentFile.fromTreeUri(context, uri) ?: return ValidationResult(false, "Failed to open folder")
+            if (!doc.exists()) return ValidationResult(false, "Folder does not exist")
+            if (!doc.canWrite()) return ValidationResult(false, "Not writable")
+            if (doc.listFiles().isNotEmpty()) return ValidationResult(false, "Folder is not empty")
             return ValidationResult(true, "")
         } catch (e: Exception) {
-            return ValidationResult(false, e.message ?: "РџРѕРјРёР»РєР° РїРµСЂРµРІС–СЂРєРё")
+            return ValidationResult(false, e.message ?: "Validation error")
         }
     }
 

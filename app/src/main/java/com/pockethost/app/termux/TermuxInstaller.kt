@@ -8,13 +8,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Legacy С–РЅСЃС‚Р°Р»РµСЂ: СЂР°РЅС–С€Рµ СЃР»Р°Р»Рѕ pkg install Сѓ Р·РѕРІРЅС–С€РЅС–Р№ Termux.
- * РўРµРїРµСЂ РґРµР»РµРіСѓС” Сѓ РІР±СѓРґРѕРІР°РЅРёР№ bootstrap (Р±РµР· РґРѕР·РІРѕР»С–РІ).
+ * Legacy installer: previously ran pkg install in external Termux.
+ * Now delegates to the built-in bootstrap (no permissions).
  */
-@Deprecated("Р’РёРєРѕСЂРёСЃС‚РѕРІСѓР№ EmbeddedBootstrap")
+@Deprecated("Use EmbeddedBootstrap")
 object TermuxInstaller {
 
-    // H6: СЃРїС–Р»СЊРЅРёР№ scope Р· SupervisorJob Р·Р°РјС–СЃС‚СЊ fire-and-forget CoroutineScope() РЅР° РєРѕР¶РµРЅ РІРёРєР»РёРє.
+    // H6: shared scope with SupervisorJob instead of fire-and-forget CoroutineScope() on every call.
     private val installerJob = SupervisorJob()
     private val installerScope = CoroutineScope(installerJob + Dispatchers.IO)
 
