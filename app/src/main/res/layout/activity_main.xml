@@ -252,8 +252,8 @@
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
                 android:paddingTop="4dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
                 android:paddingBottom="96dp" />
 
             <!-- Empty state: centered in list area, below INSTANCES header, never overlaps it -->
