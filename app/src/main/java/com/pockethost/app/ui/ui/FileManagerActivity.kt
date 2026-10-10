@@ -241,6 +241,9 @@ class FileManagerActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = if (selectMode) "Folder selection" else "File Manager (built-in)"
+        // Direct nav click: guarantees Up always responds even if the
+        // framework doesn't route to onSupportNavigateUp().
+        binding.toolbar.setNavigationOnClickListener { onSupportNavigateUp() }
     }
 
     private fun setupRecyclerView() {
@@ -273,8 +276,19 @@ class FileManagerActivity : AppCompatActivity() {
         val sorts = listOf("Name", "Date", "Size")
         val sortAdapter = android.widget.ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, sorts)
         binding.sortInput.setAdapter(sortAdapter)
+        // Fix: dropdown never opened — threshold filtered everything by current
+        // text ("Name"), and nothing called showDropDown(). Show full list
+        // on tap/focus, set text without filtering.
+        try { binding.sortInput.threshold = 0 } catch (_: Exception) {}
+        binding.sortInput.setText(sortMode, false)
+        binding.sortInput.setOnClickListener { try { binding.sortInput.showDropDown() } catch (_: Exception) {} }
+        binding.sortInput.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) { try { binding.sortInput.showDropDown() } catch (_: Exception) {} }
+        }
         binding.sortInput.setOnItemClickListener { _, _, position, _ ->
             sortMode = sorts[position]
+            binding.sortInput.setText(sortMode, false)
+            try { binding.sortInput.dismissDropDown() } catch (_: Exception) {}
             applyFilter()
         }
     }
@@ -549,7 +563,11 @@ class FileManagerActivity : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        return handleBack()
+        // Fix: at root handleBack() returns false (nowhere to go up),
+        // and returning false left the Up button dead. Finish instead.
+        if (handleBack()) return true
+        finish()
+        return true
     }
 
     private fun handleBack(): Boolean {

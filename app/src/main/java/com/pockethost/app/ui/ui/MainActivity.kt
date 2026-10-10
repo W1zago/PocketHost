@@ -227,7 +227,13 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             serverAdapter.submitList(list)
-            binding.emptyView.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+            val isEmpty = list.isEmpty()
+            binding.emptyView.visibility = if (isEmpty) View.VISIBLE else View.GONE
+            binding.recyclerView.visibility = if (isEmpty) View.GONE else View.VISIBLE
+            // Hide INSTANCES + sort row when there are no servers at all —
+            // otherwise it peeks from behind the empty card (see screenshot bug).
+            binding.listHeader.visibility =
+                if (fullServers.isEmpty()) View.GONE else View.VISIBLE
             updateChipCounts()
         } catch (e: Exception) {
             Log.e("MainActivity", "applyFilters failed", e)
@@ -378,6 +384,8 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         Log.e("MainActivity", "submitList failed", e)
                         binding.emptyView.visibility = View.VISIBLE
+                        binding.recyclerView.visibility = View.GONE
+                        binding.listHeader.visibility = View.GONE
                     }
                 }
             } catch (e: Exception) {

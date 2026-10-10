@@ -19,7 +19,7 @@ object UbuntuSpec {
     const val WSL_DISTRO = "Ubuntu-22.04"
 
     /** Bump to re-run the first-start provision on existing installs (same as Android). */
-    const val ESSENTIAL_PACKAGES_VERSION = "2"
+    const val ESSENTIAL_PACKAGES_VERSION = "3"
 
     /**
      * "Maximum" first-start set, mirrored from the Android port
@@ -27,6 +27,7 @@ object UbuntuSpec {
      * the console is live, never blocking start.
      */
     val ESSENTIAL_PACKAGES = listOf(
+        "sudo",
         "ca-certificates",
         "curl",
         "wget",

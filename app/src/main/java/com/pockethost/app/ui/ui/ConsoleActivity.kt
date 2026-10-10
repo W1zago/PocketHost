@@ -923,9 +923,9 @@ class ConsoleActivity : AppCompatActivity() {
         }
     }
 
-    /** Width of the fixed "HH:mm  " time column in px (hanging indent). */
+    /** Width of the fixed "HH:mm " time column in px (hanging indent). */
     private fun hangingIndentPx(): Int = try {
-        binding.logView.paint.measureText("HH:mm  ").toInt().coerceAtLeast(0)
+        binding.logView.paint.measureText("HH:mm ").toInt().coerceAtLeast(0)
     } catch (_: Exception) { 0 }
 
     private fun appendOutput(output: String) {

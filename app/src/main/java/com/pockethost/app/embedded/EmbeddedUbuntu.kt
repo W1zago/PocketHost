@@ -36,7 +36,7 @@ object EmbeddedUbuntu {
     private const val SHMEM_VERSION = "0.7"
 
     /** Bump to re-run the first-start provision on existing installs. */
-    const val ESSENTIAL_PACKAGES_VERSION = "2"
+    const val ESSENTIAL_PACKAGES_VERSION = "3"
 
     /**
      * "Maximum" first-start set (user choice): base tools + shells +
@@ -45,6 +45,7 @@ object EmbeddedUbuntu {
      * console is already live, never blocking Start.
      */
     val ESSENTIAL_PACKAGES = listOf(
+        "sudo",
         "ca-certificates",
         "curl",
         "wget",

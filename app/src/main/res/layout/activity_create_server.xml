@@ -233,7 +233,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Linux PRoot"
+                                    android:text="Linux Server"
                                     android:textSize="15sp"
                                     android:textStyle="bold"
                                     android:textColor="@color/on_surface" />
@@ -241,7 +241,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Debian • rootless sandbox"
+                                    android:text="Ubuntu 22.04 • rootless sandbox"
                                     android:textSize="11sp"
                                     android:textColor="@color/on_surface_variant" />
 

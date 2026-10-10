@@ -5,16 +5,14 @@ import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
-import android.text.style.LeadingMarginSpan
 import android.text.style.StyleSpan
 import androidx.core.content.ContextCompat
 import com.pockethost.app.R
 
 /**
- * Console log rendering per the Stitch design: timestamps are a single
- * fixed-width `HH:mm` column (no seconds, never wraps mid-timestamp),
- * the message sits in its own column, and wrapped lines indent under
- * the message (hanging indent). Level tags are color-coded inline.
+ * Console log rendering: every line starts at column 0, no paragraph indent.
+ * Timestamp (if present) stays inline as `HH:mm `, otherwise no prefix.
+ * Wrapped lines are NOT indented — flat left edge.
  *
  * Input lines are raw `server.log` rows; nothing is dropped or reordered.
  */
@@ -50,9 +48,9 @@ object ConsoleLogFormat {
     }
 
     /**
-     * Formats lines into a single [Spanned] with per-line timestamp, level and
-     * hanging-indent spans. [hangingIndentPx] must equal the rendered width of
-     * the 6-char time column (measure `"HH:mm  "` with the console paint).
+     * Formats lines into a single [Spanned] with inline timestamp and level
+     * coloring. [hangingIndentPx] is kept for API compat but ignored —
+     * no hanging indent by design (flat left edge).
      */
     fun formatLines(context: Context, lines: List<String>, hangingIndentPx: Int): Spanned {
         val out = SpannableStringBuilder()
@@ -65,14 +63,17 @@ object ConsoleLogFormat {
             if (index > 0) out.append("\n")
             val lineStart = out.length
             val (time, message) = splitTime(raw)
-            val prefix = (if (time.isEmpty()) "     " else time) + " "
+            // No paragraph indent: time inline or nothing.
+            val prefix = if (time.isEmpty()) "" else "$time "
             out.append(prefix)
-            out.setSpan(
-                ForegroundColorSpan(tsColor), lineStart, lineStart + prefix.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
+            if (prefix.isNotEmpty()) {
+                out.setSpan(
+                    ForegroundColorSpan(tsColor), lineStart, lineStart + prefix.length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
             val msgStart = out.length
-            out.append(if (message.isEmpty()) " " else message)
+            out.append(if (message.isEmpty()) " " else withBreakOpportunities(message))
             out.setSpan(
                 ForegroundColorSpan(bodyColor), msgStart, out.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -83,18 +84,36 @@ object ConsoleLogFormat {
                 else -> infoColor
             }
             // Color only the inline level tag; the rest of the message stays neutral.
-            LEVEL_TOKEN.find(message)?.let { token ->
+            // NOTE: search in the displayed text (with break opportunities),
+            // not the raw message, so spans land on the right offsets.
+            val displayed = out.substring(msgStart, out.length)
+            LEVEL_TOKEN.find(displayed)?.let { token ->
                 val s = msgStart + token.range.first
                 val e = msgStart + token.range.last + 1
                 out.setSpan(ForegroundColorSpan(levelColor), s, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 out.setSpan(StyleSpan(Typeface.BOLD), s, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            // Wrapped lines indent under the message, not under the timestamp.
-            out.setSpan(
-                LeadingMarginSpan.Standard(0, hangingIndentPx), lineStart, out.length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
+            // No hanging indent — wrapped lines start at column 0 (flat left edge).
         }
         return out
+    }
+
+    /**
+     * Invisible break opportunities after '/', '=' and ':' so long paths
+     * (e.g. /data/user/0/.../libproot_loader.so) wrap at boundaries
+     * instead of mid-token. Raw log in the buffer stays untouched —
+     * this affects only the displayed span, copy/share keep the original.
+     */
+    private fun withBreakOpportunities(message: String): String {
+        if (message.length < 40) return message
+        if (message.indexOf('/') < 0 && message.indexOf('=') < 0 && message.indexOf(':') < 0) {
+            return message
+        }
+        val sb = StringBuilder(message.length + 16)
+        for (c in message) {
+            sb.append(c)
+            if (c == '/' || c == '=' || c == ':') sb.append('\u200B')
+        }
+        return sb.toString()
     }
 }

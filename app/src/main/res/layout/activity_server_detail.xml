@@ -215,15 +215,15 @@
                             android:orientation="horizontal"
                             android:gravity="center_vertical"
                             android:background="@drawable/bg_studio_pill"
-                            android:paddingStart="10dp"
+                            android:paddingStart="8dp"
                             android:paddingTop="4dp"
                             android:paddingBottom="4dp"
                             android:paddingEnd="4dp"
                             android:minHeight="48dp">
 
                             <ImageView
-                                android:layout_width="18dp"
-                                android:layout_height="18dp"
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
                                 android:src="@drawable/ic_wifi"
                                 app:tint="@color/secondary"
                                 android:importantForAccessibility="no" />
@@ -232,7 +232,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:layout_marginStart="8dp"
+                                android:layout_marginStart="6dp"
                                 android:orientation="vertical">
 
                                 <TextView
@@ -249,87 +249,32 @@
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="2dp"
                                     android:text="…"
-                                    android:textSize="12sp"
+                                    android:textSize="11sp"
                                     android:textStyle="bold"
                                     android:textColor="@color/on_surface"
                                     android:fontFamily="@font/jetbrains_mono_family"
                                     android:fontFeatureSettings="tnum"
-                                    android:ellipsize="middle"
+                                    android:ellipsize="end"
+                                    android:singleLine="true"
                                     android:maxLines="1"
                                     android:textIsSelectable="true" />
 
                             </LinearLayout>
 
-                            <com.google.android.material.button.MaterialButton
+                            <ImageView
                                 android:id="@+id/btnCopyAddress"
-                                android:layout_width="48dp"
-                                android:layout_height="48dp"
-                                android:insetTop="0dp"
-                                android:insetBottom="0dp"
-                                android:insetLeft="0dp"
-                                android:insetRight="0dp"
-                                android:contentDescription="Copy address"
-                                app:cornerRadius="8dp"
-                                app:icon="@drawable/ic_content_copy"
-                                app:iconGravity="textStart"
-                                app:iconPadding="0dp"
-                                app:iconSize="16dp"
-                                app:iconTint="@color/primary"
-                                style="@style/PocketHost.Button.Tonal" />
+                                android:layout_width="32dp"
+                                android:layout_height="32dp"
+                                android:layout_marginStart="2dp"
+                                android:padding="8dp"
+                                android:src="@drawable/ic_content_copy"
+                                app:tint="@color/primary"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:contentDescription="Copy address" />
 
                         </LinearLayout>
-
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:background="@drawable/bg_studio_tile"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="8dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:minHeight="48dp">
-
-                        <ImageView
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
-                            android:src="@drawable/ic_folder"
-                            app:tint="@color/primary"
-                            android:importantForAccessibility="no" />
-
-                        <TextView
-                            android:id="@+id/serverFolderPath"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginStart="8dp"
-                            android:text="…"
-                            android:textSize="11sp"
-                            android:textColor="@color/on_surface"
-                            android:fontFamily="@font/jetbrains_mono_family"
-                            android:ellipsize="middle"
-                            android:maxLines="1"
-                            android:textIsSelectable="true" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btnCopyPath"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:layout_marginStart="8dp"
-                            android:text="Copy"
-                            android:textSize="10sp"
-                            android:fontFamily="@font/jetbrains_mono_family"
-                            app:cornerRadius="8dp"
-                            app:icon="@drawable/ic_content_copy"
-                            app:iconSize="13dp"
-                            app:iconTint="@color/primary"
-                            android:textColor="@color/primary"
-                            style="@style/PocketHost.Button.Tonal" />
 
                     </LinearLayout>
 
@@ -346,40 +291,19 @@
 
                 </LinearLayout>
 
-                <!-- Section tabs: real navigation (scroll or open screen) -->
-                <HorizontalScrollView
+                <!-- Section tabs: stretched full width, no side gaps -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:scrollbars="none"
-                    android:clipToPadding="false"
-                    android:paddingEnd="16dp">
-
-                    <LinearLayout
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:paddingEnd="8dp">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/tabOverview"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:text="Overview"
-                            android:textSize="12sp"
-                            android:fontFamily="@font/jetbrains_mono_family"
-                            app:icon="@drawable/ic_dashboard"
-                            app:iconSize="16dp"
-                            app:iconTint="@color/on_surface_variant"
-                            style="@style/PocketHost.Button.Tonal" />
+                    android:orientation="horizontal">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/tabConsole"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:minHeight="48dp"
-                            android:layout_marginStart="8dp"
                             android:text="Console"
                             android:textSize="12sp"
                             android:fontFamily="@font/jetbrains_mono_family"
@@ -390,8 +314,9 @@
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/tabFiles"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:minHeight="48dp"
                             android:layout_marginStart="8dp"
                             android:text="Files"
@@ -403,23 +328,10 @@
                             style="@style/PocketHost.Button.Tonal" />
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/tabTelemetry"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:layout_marginStart="8dp"
-                            android:text="Telemetry"
-                            android:textSize="12sp"
-                            android:fontFamily="@font/jetbrains_mono_family"
-                            app:icon="@drawable/ic_monitoring"
-                            app:iconSize="16dp"
-                            app:iconTint="@color/on_surface_variant"
-                            style="@style/PocketHost.Button.Tonal" />
-
-                        <com.google.android.material.button.MaterialButton
                             android:id="@+id/tabConfig"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:minHeight="48dp"
                             android:layout_marginStart="8dp"
                             android:text="Config"
@@ -430,9 +342,7 @@
                             app:iconTint="@color/on_surface_variant"
                             style="@style/PocketHost.Button.Tonal" />
 
-                    </LinearLayout>
-
-                </HorizontalScrollView>
+                </LinearLayout>
 
                 <!-- Live telemetry bento (device-real values, 2s poll) -->
                 <LinearLayout
@@ -500,14 +410,16 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
+                        android:baselineAligned="false"
                         android:layout_marginTop="12dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:orientation="vertical"
                             android:background="@drawable/bg_studio_tile"
+                            android:minHeight="108dp"
                             android:padding="12dp">
 
                             <LinearLayout
@@ -541,7 +453,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="8dp"
                                 android:text="—"
-                                android:textSize="17sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface"
                                 android:fontFamily="@font/jetbrains_mono_family"
@@ -551,11 +463,12 @@
 
                         <LinearLayout
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
                             android:orientation="vertical"
                             android:background="@drawable/bg_studio_tile"
+                            android:minHeight="108dp"
                             android:padding="12dp">
 
                             <LinearLayout
@@ -591,9 +504,9 @@
                                 android:id="@+id/tileMemory"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp"
+                                android:layout_marginTop="8dp"
                                 android:text="—"
-                                android:textSize="15sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface"
                                 android:fontFamily="@font/jetbrains_mono_family"
@@ -617,14 +530,16 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
+                        android:baselineAligned="false"
                         android:layout_marginTop="8dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:orientation="vertical"
                             android:background="@drawable/bg_studio_tile"
+                            android:minHeight="108dp"
                             android:padding="12dp">
 
                             <TextView
@@ -640,9 +555,9 @@
                                 android:id="@+id/tileCores"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp"
+                                android:layout_marginTop="8dp"
                                 android:text="—"
-                                android:textSize="17sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface"
                                 android:fontFamily="@font/jetbrains_mono_family"
@@ -652,11 +567,12 @@
 
                         <LinearLayout
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
+                            android:layout_height="match_parent"
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
                             android:orientation="vertical"
                             android:background="@drawable/bg_studio_tile"
+                            android:minHeight="108dp"
                             android:padding="12dp">
 
                             <TextView
@@ -672,9 +588,9 @@
                                 android:id="@+id/tileDisk"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp"
+                                android:layout_marginTop="8dp"
                                 android:text="—"
-                                android:textSize="15sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 android:textColor="@color/on_surface"
                                 android:fontFamily="@font/jetbrains_mono_family"
@@ -684,7 +600,9 @@
                                 android:id="@+id/tileDiskSub"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text=""
+                                android:text=" "
+                                android:minLines="1"
+                                android:maxLines="1"
                                 android:textSize="10sp"
                                 android:textColor="@color/studio_variant"
                                 android:fontFamily="@font/jetbrains_mono_family" />
@@ -1044,11 +962,21 @@
                         android:minHeight="48dp"
                         android:layout_weight="1"
                         android:text="@string/start"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:fontFamily="@font/jetbrains_mono_family"
                         android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
                         app:icon="@drawable/ic_play_arrow"
-                        app:iconSize="20dp"
+                        app:iconSize="18dp"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
                         app:iconTint="@color/on_primary"
                         style="@style/PocketHost.Button.Start" />
 
@@ -1060,11 +988,21 @@
                         android:layout_weight="1"
                         android:layout_marginStart="8dp"
                         android:text="@string/stop"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:fontFamily="@font/jetbrains_mono_family"
                         android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
                         app:icon="@drawable/ic_stop"
-                        app:iconSize="20dp"
+                        app:iconSize="18dp"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
                         app:iconTint="@color/error"
                         style="@style/PocketHost.Button.Destructive" />
 
@@ -1076,11 +1014,21 @@
                         android:layout_weight="1"
                         android:layout_marginStart="8dp"
                         android:text="@string/restart"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:fontFamily="@font/jetbrains_mono_family"
                         android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
                         app:icon="@drawable/ic_restart"
-                        app:iconSize="20dp"
+                        app:iconSize="18dp"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
                         app:iconTint="@color/primary"
                         style="@style/PocketHost.Button.Tonal" />
 
@@ -1096,14 +1044,24 @@
                         android:id="@+id/btnConsole"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:minHeight="48dp"
                         android:layout_weight="1"
+                        android:minHeight="48dp"
                         android:text="@string/console"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:fontFamily="@font/jetbrains_mono_family"
                         android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
                         app:icon="@drawable/ic_terminal"
-                        app:iconSize="20dp"
+                        app:iconSize="18dp"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
                         app:iconTint="@color/secondary"
                         style="@style/PocketHost.Button.Tonal" />
 
@@ -1111,15 +1069,25 @@
                         android:id="@+id/btnFiles"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:minHeight="48dp"
                         android:layout_weight="1"
+                        android:minHeight="48dp"
                         android:layout_marginStart="8dp"
                         android:text="@string/files"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:fontFamily="@font/jetbrains_mono_family"
                         android:textAllCaps="false"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:gravity="center"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
                         app:icon="@drawable/ic_folder"
-                        app:iconSize="20dp"
+                        app:iconSize="18dp"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
                         app:iconTint="@color/tertiary"
                         style="@style/PocketHost.Button.Tonal" />
 

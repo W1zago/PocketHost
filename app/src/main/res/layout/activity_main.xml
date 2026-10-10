@@ -188,6 +188,7 @@
             </HorizontalScrollView>
 
             <LinearLayout
+                android:id="@+id/listHeader"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
@@ -229,72 +230,81 @@
 
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recyclerView"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:clipToPadding="false"
-            android:paddingTop="4dp"
-            android:paddingBottom="96dp" />
+            android:clipChildren="false">
 
-    </LinearLayout>
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingTop="4dp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="96dp" />
 
-    <!-- Empty state (design card; own space above FAB/sticky buttons) -->
-    <LinearLayout
-        android:id="@+id/emptyView"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="96dp"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:background="@drawable/bg_empty_card"
-        android:padding="16dp"
-        android:visibility="gone">
+            <!-- Empty state: centered in list area, below INSTANCES header, never overlaps it -->
+            <LinearLayout
+                android:id="@+id/emptyView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="48dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/bg_empty_card"
+                android:padding="16dp"
+                android:visibility="gone">
 
-        <ImageView
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="@drawable/bg_empty_icon"
-            android:src="@drawable/ic_dns"
-            android:scaleType="center"
-            app:tint="@color/outline"
-            android:importantForAccessibility="no" />
+                <ImageView
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/bg_empty_icon"
+                    android:src="@drawable/ic_dns"
+                    android:scaleType="center"
+                    app:tint="@color/outline"
+                    android:importantForAccessibility="no" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="No servers yet in this group?"
-            android:textAlignment="center"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:textColor="@color/on_surface" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="No servers yet in this group?"
+                    android:textAlignment="center"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/on_surface" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Tap + to create one, or link your existing directories."
-            android:textAlignment="center"
-            android:textSize="12sp"
-            android:textColor="@color/on_surface_variant" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Tap + to create one, or link your existing directories."
+                    android:textAlignment="center"
+                    android:textSize="12sp"
+                    android:textColor="@color/on_surface_variant" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnEmptyScan"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:minHeight="48dp"
-            android:text="Already have a server? Scan device"
-            android:textSize="12sp"
-            android:textColor="@color/secondary"
-            app:icon="@drawable/ic_folder_open"
-            app:iconTint="@color/secondary"
-            style="@style/PocketHost.Button.Tonal" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnEmptyScan"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:minHeight="48dp"
+                    android:text="Already have a server? Scan device"
+                    android:textSize="12sp"
+                    android:textColor="@color/secondary"
+                    app:icon="@drawable/ic_folder_open"
+                    app:iconTint="@color/secondary"
+                    style="@style/PocketHost.Button.Tonal" />
+
+            </LinearLayout>
+
+        </FrameLayout>
 
     </LinearLayout>
 

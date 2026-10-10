@@ -39,6 +39,7 @@ class UbuntuSpecTest {
     fun essentialPackagesStayInSyncWithAndroid() {
         // Mirrors EmbeddedUbuntu.ESSENTIAL_PACKAGES (maximum set).
         val expected = listOf(
+            "sudo",
             "ca-certificates", "curl", "wget", "git", "nano", "vim",
             "iputils-ping", "htop", "python3", "python3-pip",
             "openssh-client", "openssh-server", "nodejs", "npm"

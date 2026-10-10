@@ -101,20 +101,10 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
         binding.btnCopyGateway.setOnClickListener { copyBindAddress() }
-        binding.btnCopyPath.setOnClickListener { copyWorkDirPath() }
         binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
         // Section tabs: real navigation (scroll within screen or open screen).
-        setActiveTab(binding.tabOverview)
-        binding.tabOverview.setOnClickListener {
-            setActiveTab(binding.tabOverview)
-            binding.scrollView.smoothScrollTo(0, 0)
-        }
         binding.tabConsole.setOnClickListener { openConsole() }
         binding.tabFiles.setOnClickListener { openFileManager() }
-        binding.tabTelemetry.setOnClickListener {
-            setActiveTab(binding.tabTelemetry)
-            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.resourcesCard.top) }
-        }
         binding.tabConfig.setOnClickListener {
             setActiveTab(binding.tabConfig)
             binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
@@ -125,8 +115,8 @@ class ServerDetailActivity : AppCompatActivity() {
     private fun setActiveTab(active: View) {
         try {
             val tabs = listOf(
-                binding.tabOverview, binding.tabConsole, binding.tabFiles,
-                binding.tabTelemetry, binding.tabConfig
+                binding.tabConsole, binding.tabFiles,
+                binding.tabConfig
             )
             val onBg = ContextCompat.getColor(this, R.color.primary_container)
             val onFg = ContextCompat.getColor(this, R.color.on_primary_container)
@@ -161,21 +151,6 @@ class ServerDetailActivity : AppCompatActivity() {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("server address", text))
             Toast.makeText(this, "Copied: $text", Toast.LENGTH_SHORT).show()
-        } catch (_: Exception) {}
-    }
-
-    private fun copyWorkDirPath() {
-        val server = currentServer ?: return
-        val path = try {
-            EmbeddedPaths.resolveWorkDir(
-                this, server.id,
-                server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-            ).absolutePath
-        } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
-        try {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("server path", path))
-            Toast.makeText(this, "Copied path", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {}
     }
 
@@ -393,16 +368,8 @@ class ServerDetailActivity : AppCompatActivity() {
             btnStart.isEnabled = server.status == ServerStatus.STOPPED || server.status == ServerStatus.ERROR
             btnStop.isEnabled = server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING
             btnRestart.isEnabled = server.status == ServerStatus.RUNNING
-            // Built-in path instead of SAF
-            val workDirStr = try {
-                EmbeddedPaths.resolveWorkDir(
-                    this@ServerDetailActivity, server.id,
-                    server.effectiveWorkDirUri.ifEmpty { server.workingDirectory }
-                ).absolutePath
-            } catch (_: Exception) { server.displayPath.ifEmpty { server.effectiveWorkDirUri } }
-            // IP -> IP view (serverIpAddress + tvBindAddress), folder -> folder view.
+            // IP -> IP view (serverIpAddress + tvBindAddress).
             serverIpAddress.text = "$deviceIp:${server.port}"
-            serverFolderPath.text = workDirStr
             // LAN bind line uses the real device IP + this server's port.
             tvBindAddress.text = "$deviceIp:${server.port}"
             // Bound socket row: real wildcard bind + port (TCP).
@@ -667,7 +634,7 @@ class ServerDetailActivity : AppCompatActivity() {
         try {
             val port = currentServer?.port
             binding.tvBindAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
-            // Hero row serverIpAddress is also IP (folder lives in serverFolderPath).
+            // Hero row serverIpAddress is also IP.
             binding.serverIpAddress.text = if (port != null) "$ipAddress:$port" else ipAddress
             if (port != null) binding.tvBoundSocket.text = "0.0.0.0:$port [TCP/UDP]"
         } catch (_: Exception) {}
