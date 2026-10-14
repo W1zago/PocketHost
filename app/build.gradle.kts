@@ -20,9 +20,10 @@ android {
         // no longer stripped, so the Ukrainian UI is not lost.
         resourceConfigurations += listOf("en", "uk")
 
-        // Universal APK: no `splits` block on purpose — one APK carries
-        // arm64-v8a + armeabi-v7a + x86_64. The in-app updater looks for
-        // a single `*universal*.apk` asset in GitHub Releases.
+        // Per-ABI APKs for GitHub Releases:
+        // PocketHost-v1.0.0-arm64-v8a.apk, -armeabi-v7a.apk, -x86_64.apk.
+        // The in-app updater picks the asset matching Build.SUPPORTED_ABIS
+        // (universal `*universal*.apk` also accepted as fallback).
         // In-process JVM launcher (порт Mojo jre_launcher): збірка libpockethost_jvm.so
         externalNativeBuild {
             cmake {
@@ -40,6 +41,15 @@ android {
         }
     }
 
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -48,6 +58,12 @@ android {
 
     buildTypes {
         release {
+            // Sideload distribution without a private key yet: sign with the
+            // local debug key so the APK is installable. All assets of one
+            // release must be built on the SAME machine (same debug key),
+            // otherwise updates fail with a signature mismatch.
+            // TODO: replace with a real release keystore before Play Store.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

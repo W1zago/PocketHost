@@ -16,12 +16,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Optional in-app updater (universal APK only, never forced).
+ * Optional in-app updater (per-ABI APKs, never forced).
  *
  * Source: GitHub Releases `latest` of W1zago/PocketHost.
- * Expected asset name: `PocketHost-vX.Y.Z-universal.apk` (single APK with
- * all ABIs: arm64-v8a + armeabi-v7a + x86_64). If no `*universal*.apk`
- * asset is found, the first `*.apk` asset is used as fallback.
+ * Expected assets: `PocketHost-vX.Y.Z-<abi>.apk` where <abi> is one of
+ * Build.SUPPORTED_ABIS (e.g. arm64-v8a, armeabi-v7a, x86_64).
+ * A single `*universal*.apk` asset is also accepted as fallback.
+ * If neither matches, the first `*.apk` asset is used as last resort.
  *
  * Install goes through PackageInstaller Session API (no ACTION_VIEW),
  * so the user always sees the system install consent dialog.
@@ -64,9 +65,18 @@ object AppUpdater {
             var pickUrl = ""
             var pickName = ""
             var pickSize = 0L
+            var universalUrl = ""
+            var universalName = ""
+            var universalSize = 0L
             var fallbackUrl = ""
             var fallbackName = ""
             var fallbackSize = 0L
+            // Device ABIs in preference order, e.g. [arm64-v8a, armeabi-v7a, ...].
+            val deviceAbis: List<String> = try {
+                Build.SUPPORTED_ABIS.toList()
+            } catch (_: Exception) { emptyList() }
+            // Per-ABI candidates ranked by device preference.
+            val abiCandidates = mutableMapOf<String, Triple<String, String, Long>>()
             for (i in 0 until assets.length()) {
                 val a = assets.optJSONObject(i) ?: continue
                 val name = a.optString("name", "")
@@ -77,14 +87,33 @@ object AppUpdater {
                 if (fallbackUrl.isEmpty()) {
                     fallbackUrl = url; fallbackName = name; fallbackSize = size
                 }
-                if (name.contains("universal", ignoreCase = true) && pickUrl.isEmpty()) {
-                    pickUrl = url; pickName = name; pickSize = size
+                if (name.contains("universal", ignoreCase = true) && universalUrl.isEmpty()) {
+                    universalUrl = url; universalName = name; universalSize = size
+                }
+                val lower = name.lowercase()
+                for (abi in deviceAbis) {
+                    if (lower.contains(abi.lowercase()) && !abiCandidates.containsKey(abi)) {
+                        abiCandidates[abi] = Triple(url, name, size)
+                    }
                 }
             }
-            val url = pickUrl.ifEmpty { fallbackUrl }
+            // 1) Exact ABI match in device preference order.
+            for (abi in deviceAbis) {
+                val c = abiCandidates[abi]
+                if (c != null) {
+                    pickUrl = c.first; pickName = c.second; pickSize = c.third
+                    break
+                }
+            }
+            // 2) Universal fallback. 3) First APK as last resort.
+            val url = pickUrl.ifEmpty { universalUrl.ifEmpty { fallbackUrl } }
             if (url.isEmpty()) return@withContext null
-            val remoteName = pickName.ifEmpty { fallbackName }
-            val remoteSize = if (pickUrl.isNotEmpty()) pickSize else fallbackSize
+            val remoteName = pickName.ifEmpty { universalName.ifEmpty { fallbackName } }
+            val remoteSize = when {
+                pickUrl.isNotEmpty() -> pickSize
+                universalUrl.isNotEmpty() -> universalSize
+                else -> fallbackSize
+            }
 
             val remoteVersion = tag.trimStart('v', 'V')
             return@withContext if (isNewer(remoteVersion, currentVersionName())) {
