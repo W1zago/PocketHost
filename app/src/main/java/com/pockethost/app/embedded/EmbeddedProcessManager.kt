@@ -555,13 +555,17 @@ object EmbeddedProcessManager {
         // Android 14+ MTE fix (as before)
         cmd.add("-XX:-UseCompressedOops")
         cmd.addAll(extraArgs)
-        cmd.addAll(listOf("-jar", jarName, "nogui"))
+        // Headless console like in-process (PocketJvm.prepare appArgs):
+        // Paperclip forwards unknown args, JLine without it reads /dev/tty
+        // and graceful "stop" via stdin hangs.
+        cmd.addAll(listOf("-jar", jarName, "nogui", "--nojline"))
         return cmd
     }
 
     fun guessJarName(loaderName: String?): String = when (loaderName) {
         "VANILLA" -> "server.jar"
-        "FORGE", "NEOFORGE" -> "forge.jar"
+        "FORGE" -> "forge.jar"
+        "NEOFORGE" -> "neoforge.jar"
         "FABRIC" -> "fabric-server-launch.jar"
         "PAPER" -> "paper.jar"
         "SPIGOT" -> "spigot.jar"
@@ -571,7 +575,7 @@ object EmbeddedProcessManager {
     }
 
     fun findExistingJar(workDir: File, preferred: String): String? {
-        val candidates = listOf(preferred, "server.jar", "paper.jar", "purpur.jar", "fabric-server-launch.jar", "forge.jar", "spigot.jar", "craftbukkit.jar")
+        val candidates = listOf(preferred, "server.jar", "paper.jar", "purpur.jar", "fabric-server-launch.jar", "neoforge.jar", "forge.jar", "spigot.jar", "craftbukkit.jar")
         for (c in candidates) {
             if (File(workDir, c).exists()) return c
         }

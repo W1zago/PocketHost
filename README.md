@@ -13,7 +13,7 @@ The goal is convenient, isolated self-hosting on mobile hardware without root ac
 ### What the app actually does today
 
 - **Two server types** (`ServerType` in `core/src/main/java/com/pockethost/core/model/Server.kt`):
-  - `MINECRAFT` — Paper / Spigot / Vanilla / Fabric / Forge / NeoForge / Bukkit / Purpur jars, provisioned automatically by `:plugins:minecraft`.
+  - `MINECRAFT` — Paper / Vanilla / Purpur / Fabric jars download automatically via `:plugins:minecraft`. Spigot / Forge / NeoForge / Bukkit have no direct download (BuildTools/installer required) — drop the jar manually via Files (`spigot.jar` / `forge.jar` / `neoforge.jar` / `craftbukkit.jar`) after creation.
   - `UBUNTU_SERVER` — full Ubuntu 22.04 rootfs via PRoot, with fallback to the built-in `sh -i` shell when Ubuntu is not installed.
 - **In-process JVM** (`app/src/main/cpp/jvm_launcher.c` → `libpockethost_jvm.so`, Kotlin layer `app/.../jvm/PocketJvm.kt` + `InProcessServer.kt`, ported from MojoLauncher/PojavLauncher): headless server launch via `dlopen libjvm.so`, no `exec` — this bypasses the Android 10+ W^X `error=13` ban on executing binaries from the app dir.
 - **Bundled runtimes, downloaded on demand** (`app/.../embedded/EmbeddedBootstrap.kt`):
@@ -141,7 +141,7 @@ PocketHost/
 ├── core/                       # :core Android library — Server/ServerConfig/ServerType,
 │                               # ServerRepository, JavaUtils, FileUtils, NetworkUtils
 ├── plugins/minecraft/          # :plugins:minecraft — MinecraftServerManager
-│                               # (Paper/Spigot/Vanilla/Fabric/Forge/NeoForge/Purpur download)
+│                               # (Paper/Vanilla/Purpur/Fabric auto-download; Spigot/Forge/NeoForge/Bukkit manual)
 ├── jvm-host/                   # :jvm-host pure-JVM desktop mirror (no Android APIs):
 │                               # UbuntuServer, BridgeServer (LAN :8765), LocalProcessManager
 └── BUILD.md / JAVA_SETUP.md / jvm-host/README.md   # build, JRE setup, desktop module docs
@@ -193,7 +193,7 @@ Full steps: [`BUILD.md`](BUILD.md). JRE provisioning details: [`JAVA_SETUP.md`](
 
 1. **Launch PocketHost** on the device (grant storage / all-files access only if you use a custom server folder outside app storage).
 2. **Create a server** (`+`):
-   - **Minecraft**: pick loader (Paper recommended; Vanilla/Spigot/Bukkit/Purpur/Fabric/Forge/NeoForge), version (≤ 1.20.4 runs on bundled JRE 17; 1.20.5+ needs manual JRE 21 in `tools/jre21/`), port, RAM (128–3072 MB sliders), `online-mode`, `view-distance`. JAR (~50–100 MB) downloads on first start; `eula.txt` is auto-accepted and `server.properties` patched on every start.
+   - **Minecraft**: pick loader (Paper recommended; Vanilla/Purpur/Fabric auto-download, Spigot/Forge/NeoForge/Bukkit manual jar via Files), version (≤ 1.20.4 runs on bundled JRE 17; 1.20.5+ labelled "needs JRE 21" and needs manual JRE 21 in `tools/jre21/`), port, RAM (128–3072 MB, capped), `online-mode` (offline also turns off `enforce-secure-profile` for chat), `view-distance`. JAR (~50–100 MB, Fabric ~180 KB launcher) downloads on first start; `eula.txt` is auto-accepted and `server.properties` patched on every start (`--nojline` is always passed so console `stop` reaches stdin).
    - **Ubuntu**: starts the built-in shell immediately; full Ubuntu 22.04 (~30 MB) downloads on first start or from settings, then runs `bash --login` under PRoot with the server folder at `/root/server`. Essential packages install in background; SSH via `/usr/sbin/sshd -p 2222` after `passwd`.
 3. **Control & interact**:
    - **Start/Stop** from the dashboard or detail screen (graceful `stop`/`exit` via stdin, up to 60 s grace; max 2 servers, 1 in-process Minecraft at a time).

@@ -15,7 +15,9 @@ object MinecraftProvisioner {
     ): Boolean {
         if (server.type != ServerType.MINECRAFT) return true
         // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4.
-        val version = server.config.minecraftVersion ?: "1.20.4"
+        // Strip UI suffixes ("1.21.4 (needs JRE 21)" -> "1.21.4") for old saves.
+        val rawVersion = server.config.minecraftVersion ?: "1.20.4"
+        val version = rawVersion.substringBefore(" ").substringBefore("(").trim().ifEmpty { "1.20.4" }
         val loader = server.config.minecraftLoader
         val maxMem = server.config.maxMemory
         val minMem = server.config.minMemory
@@ -55,7 +57,7 @@ object MinecraftProvisioner {
             MinecraftLoader.FORGE -> "forge.jar"
             MinecraftLoader.PURPUR -> "purpur.jar"
             MinecraftLoader.BUKKIT -> "craftbukkit.jar"
-            MinecraftLoader.NEOFORGE -> "forge.jar"
+            MinecraftLoader.NEOFORGE -> "neoforge.jar"
             null -> "paper.jar"
         }
     }
@@ -63,7 +65,7 @@ object MinecraftProvisioner {
     fun resolveStartCommand(server: Server, workingDir: String, javaPath: String): String {
         val loader = server.config.minecraftLoader
         val jarName = getExpectedJarName(loader)
-        val candidates = listOf(jarName, "server.jar", "paper.jar", "purpur.jar")
+        val candidates = listOf(jarName, "server.jar", "paper.jar", "purpur.jar", "fabric-server-launch.jar", "neoforge.jar", "forge.jar", "spigot.jar", "craftbukkit.jar")
         var effectiveJar: String? = null
         for (c in candidates) {
             if (File(workingDir, c).exists()) {
@@ -74,8 +76,9 @@ object MinecraftProvisioner {
         if (effectiveJar == null) effectiveJar = jarName
         val maxMem = server.config.maxMemory
         val minMem = server.config.minMemory
-        // Android 14+ MTE: disable compressed oops to avoid "Pointer tag was truncated" hang
-        return "$javaPath -Xmx${maxMem}M -Xms${minMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $effectiveJar nogui"
+        // Android 14+ MTE: disable compressed oops to avoid "Pointer tag was truncated" hang.
+        // --nojline like in-process: JLine would read /dev/tty instead of stdin pipe.
+        return "$javaPath -Xmx${maxMem}M -Xms${minMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $effectiveJar nogui --nojline"
     }
 }
 

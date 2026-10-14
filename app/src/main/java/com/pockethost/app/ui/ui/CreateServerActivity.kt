@@ -122,9 +122,11 @@ class CreateServerActivity : AppCompatActivity() {
             selectRuntime(selectedServerType)
         }
 
-        // Built-in terminal generates the command itself
+        // Built-in terminal generates the command itself - use text (not hint)
+        // to avoid overlap of TextInputLayout hint ("Start Command")
+        // with EditText hint inside the same layout.
         binding.etStartCommand.isEnabled = false
-        binding.etStartCommand.hint = "Generated automatically (built-in terminal)"
+        binding.etStartCommand.setText("Generated automatically (built-in terminal)")
     }
 
     private fun setupToolbar() {
@@ -169,8 +171,8 @@ class CreateServerActivity : AppCompatActivity() {
 
     private fun setupMinecraftSettings() {
         val versions = listOf(
-            "1.21.4", "1.21.3", "1.21.1", "1.21",
-            "1.20.6", "1.20.4", "1.20.2", "1.20.1", "1.20",
+            "1.21.4 (needs JRE 21)", "1.21.3 (needs JRE 21)", "1.21.1 (needs JRE 21)", "1.21 (needs JRE 21)",
+            "1.20.6 (needs JRE 21)", "1.20.4", "1.20.2", "1.20.1", "1.20",
             "1.19.4", "1.19.3", "1.19.2", "1.19",
             "1.18.2", "1.18.1", "1.18",
             "1.17.1", "1.17",
@@ -179,8 +181,9 @@ class CreateServerActivity : AppCompatActivity() {
         val verAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, versions)
         binding.spinnerMinecraftVersion.setAdapter(verAdapter)
         // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4
-        // (1.20.5+ needs Java 21). Keep the list full - for 1.21.x
-        // start honestly refuses with a JRE 21 hint.
+        // (1.20.5+ needs Java 21 - manual import into tools/jre21/).
+        // Versions needing JRE21 stay selectable but are labelled,
+        // and create-time warns when JRE21 is missing.
         binding.spinnerMinecraftVersion.setText("1.20.4", false)
 
         val loaders = MinecraftLoader.entries.map { it.name }
@@ -218,7 +221,9 @@ class CreateServerActivity : AppCompatActivity() {
 
         binding.btnUseMaxResources.setOnClickListener {
             val total = deviceTotalMb()
-            val maxAllowed = (total * 0.5).toInt().coerceIn(512, 4096)
+            // Cap at slider max (3072): higher heaps OOM on phones
+            // (tested 2624M already triggers "Can't keep up" on 7.6GB devices).
+            val maxAllowed = (total * 0.5).toInt().coerceIn(512, 3072)
             val minAllowed = (maxAllowed * 0.5).toInt().coerceAtLeast(256)
             binding.etMaxMemory.setText(maxAllowed.toString())
             binding.etMinMemory.setText(minAllowed.toString())
@@ -564,7 +569,7 @@ class CreateServerActivity : AppCompatActivity() {
         when (selectedServerType) {
             ServerType.MINECRAFT -> {
                 if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("25565")
-                binding.etStartCommand.setText("")
+                binding.etStartCommand.setText("Generated automatically (built-in terminal)")
             }
             ServerType.UBUNTU_SERVER -> {
                 if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("22")
@@ -598,12 +603,26 @@ class CreateServerActivity : AppCompatActivity() {
         if (selectedServerType == ServerType.MINECRAFT) {
             val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
             val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
+            val rawVersion = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.20.4" }
+            val version = parseMinecraftVersion(rawVersion)
             if (loader == MinecraftLoader.SPIGOT || loader == MinecraftLoader.BUKKIT || loader == MinecraftLoader.FORGE || loader == MinecraftLoader.NEOFORGE) {
                 AlertDialog.Builder(this)
-                    .setTitle("Warning")
-                    .setMessage("The $loaderName downloader may be unsupported. PAPER, PURPUR, VANILLA or FABRIC recommended.\n\nContinue with $loaderName?")
+                    .setTitle("Manual install required")
+                    .setMessage("The $loaderName downloader is unsupported (installer/BuildTools required).\n\nYou will need to drop ${manualJarFor(loader)} manually via Files after creation.\nPAPER, PURPUR, VANILLA or FABRIC download automatically.\n\nContinue with $loaderName?")
                     .setPositiveButton("Continue") { _, _ -> proceedCreateMinecraft(name, port) }
                     .setNegativeButton("Cancel") { d, _ -> d.dismiss() }
+                    .show()
+                return
+            }
+            if (needsJava21(version)) {
+                AlertDialog.Builder(this)
+                    .setTitle("Needs Java 21")
+                    .setMessage("Minecraft $version needs Java 21+, but the bundled JRE is Java 17.\n\nOptions:\n- Pick 1.20.4 (runs on bundled JRE 17)\n- Or import JRE 21 manually into tools/jre21/ via Files, then Start.\n\nCreate $version anyway?")
+                    .setPositiveButton("Create anyway") { _, _ -> proceedCreateMinecraft(name, port) }
+                    .setNegativeButton("Pick 1.20.4") { d, _ ->
+                        d.dismiss()
+                        try { binding.spinnerMinecraftVersion.setText("1.20.4", false) } catch (_: Exception) {}
+                    }
                     .show()
                 return
             }
@@ -613,10 +632,33 @@ class CreateServerActivity : AppCompatActivity() {
         }
     }
 
+    /** Strips UI suffixes like "1.21.4 (needs JRE 21)" -> "1.21.4". */
+    private fun parseMinecraftVersion(raw: String): String =
+        raw.substringBefore(" ").substringBefore("(").trim().ifEmpty { "1.20.4" }
+
+    private fun needsJava21(version: String): Boolean {
+        return try {
+            val v = version.trim().removePrefix("v")
+            val parts = v.split(".", "-", "_")
+            val major = parts.getOrNull(0)?.toIntOrNull() ?: return false
+            val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+            if (major > 1) true else if (minor > 20) true else minor == 20 && patch >= 5
+        } catch (_: Exception) { false }
+    }
+
+    private fun manualJarFor(loader: MinecraftLoader): String = when (loader) {
+        MinecraftLoader.SPIGOT -> "spigot.jar"
+        MinecraftLoader.BUKKIT -> "craftbukkit.jar"
+        MinecraftLoader.FORGE -> "forge.jar"
+        MinecraftLoader.NEOFORGE -> "neoforge.jar"
+        else -> "server.jar"
+    }
+
     private fun proceedCreateMinecraft(name: String, port: Int) {
-        val maxMemory = binding.etMaxMemory.text.toString().toIntOrNull() ?: 1024
-        val minMemory = binding.etMinMemory.text.toString().toIntOrNull() ?: 512
-        val version = try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.20.4" }
+        val maxMemory = binding.etMaxMemory.text.toString().toIntOrNull()?.coerceIn(128, 3072) ?: 1024
+        val minMemory = binding.etMinMemory.text.toString().toIntOrNull()?.coerceIn(128, 3072) ?: 512
+        val version = parseMinecraftVersion(try { binding.spinnerMinecraftVersion.text.toString() } catch (_: Exception) { "1.20.4" })
         val loaderName = try { binding.spinnerMinecraftLoader.text.toString() } catch (_: Exception) { "PAPER" }
         val loader = try { MinecraftLoader.valueOf(loaderName) } catch (_: Exception) { MinecraftLoader.PAPER }
 
@@ -660,15 +702,18 @@ class CreateServerActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 File(dir, "eula.txt").writeText("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://account.mojang.com/documents/minecraft_eula).\neula=true")
+                val online = !allowPirate
                 val props = """
                     server-port=$port
                     max-players=20
                     gamemode=survival
                     difficulty=normal
                     pvp=true
-                    online-mode=${!allowPirate}
+                    online-mode=$online
+                    enforce-secure-profile=$online
                     motd=A Minecraft Server - $name
                     view-distance=$viewDistance
+                    simulation-distance=$viewDistance
                     spawn-protection=16
                     enable-command-block=false
                     allow-flight=false
@@ -747,7 +792,8 @@ class CreateServerActivity : AppCompatActivity() {
 
     private suspend fun provisionInternal(server: Server, dir: File, log: (String) -> Unit): Boolean {
         return try {
-            val version = server.config.minecraftVersion ?: "1.20.4"
+            val rawVersion = server.config.minecraftVersion ?: "1.20.4"
+            val version = rawVersion.substringBefore(" ").substringBefore("(").trim().ifEmpty { "1.20.4" }
             val loader = server.config.minecraftLoader ?: MinecraftLoader.PAPER
             val manager = com.pockethost.plugins.minecraft.MinecraftServerManager(dir.parent ?: dir.absolutePath)
             manager.provisionIfNeeded(dir.absolutePath, version, loader, server.config.maxMemory, server.config.minMemory, server.port, log)

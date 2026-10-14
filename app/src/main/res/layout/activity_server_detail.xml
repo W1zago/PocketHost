@@ -305,10 +305,21 @@
                             android:layout_weight="1"
                             android:minHeight="48dp"
                             android:text="Console"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:maxLines="1"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:gravity="center"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp"
                             android:fontFamily="@font/jetbrains_mono_family"
                             app:icon="@drawable/ic_terminal"
-                            app:iconSize="16dp"
+                            app:iconSize="14dp"
+                            app:iconPadding="4dp"
+                            app:iconGravity="textStart"
                             app:iconTint="@color/on_surface_variant"
                             style="@style/PocketHost.Button.Tonal" />
 
@@ -320,25 +331,21 @@
                             android:minHeight="48dp"
                             android:layout_marginStart="8dp"
                             android:text="Files"
-                            android:textSize="12sp"
+                            android:textSize="11sp"
+                            android:textAllCaps="false"
+                            android:maxLines="1"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:gravity="center"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingStart="4dp"
+                            android:paddingEnd="4dp"
                             android:fontFamily="@font/jetbrains_mono_family"
                             app:icon="@drawable/ic_folder_open"
-                            app:iconSize="16dp"
-                            app:iconTint="@color/on_surface_variant"
-                            style="@style/PocketHost.Button.Tonal" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/tabConfig"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:minHeight="48dp"
-                            android:layout_marginStart="8dp"
-                            android:text="Config"
-                            android:textSize="12sp"
-                            android:fontFamily="@font/jetbrains_mono_family"
-                            app:icon="@drawable/ic_tune"
-                            app:iconSize="16dp"
+                            app:iconSize="14dp"
+                            app:iconPadding="4dp"
+                            app:iconGravity="textStart"
                             app:iconTint="@color/on_surface_variant"
                             style="@style/PocketHost.Button.Tonal" />
 
@@ -770,75 +777,6 @@
                             android:maxLines="1" />
 
                     </LinearLayout>
-
-                </LinearLayout>
-
-                <!-- Console stream preview (real tail of server.log) -->
-                <LinearLayout
-                    android:id="@+id/logCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:layout_marginTop="12dp"
-                    android:background="@drawable/bg_studio_card"
-                    android:padding="16dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="CONSOLE STREAM"
-                            android:textSize="11sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/on_surface_variant"
-                            android:fontFamily="@font/jetbrains_mono_family" />
-
-                        <TextView
-                            android:id="@+id/tvLogLive"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="● LIVE"
-                            android:textSize="10sp"
-                            android:textStyle="bold"
-                            android:textColor="@color/tertiary"
-                            android:fontFamily="@font/jetbrains_mono_family" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvLogPreview"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:background="@drawable/bg_console_view"
-                        android:padding="10dp"
-                        android:text="Waiting for log…"
-                        android:textSize="11sp"
-                        android:textColor="@color/on_surface"
-                        android:fontFamily="@font/jetbrains_mono_family"
-                        android:maxLines="10"
-                        android:ellipsize="end" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnOpenTerminal"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Open Interactive Terminal"
-                        android:textSize="12sp"
-                        android:fontFamily="@font/jetbrains_mono_family"
-                        app:cornerRadius="12dp"
-                        app:icon="@drawable/ic_terminal"
-                        app:iconSize="18dp"
-                        app:iconTint="@color/primary"
-                        android:textColor="@color/primary"
-                        style="@style/PocketHost.Button.Tonal" />
 
                 </LinearLayout>
 

@@ -27,6 +27,7 @@ enum class MinecraftServerSoftware {
     SPIGOT,
     FABRIC,
     FORGE,
+    NEOFORGE,
     PURPUR,
     BUKKIT
 }

@@ -273,25 +273,46 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restartServer(serverId: String) {
+        Toast.makeText(this, "Restarting...", Toast.LENGTH_SHORT).show()
         val stop = Intent(this, ServerService::class.java).apply {
             action = "com.pockethost.app.STOP_SERVER"
             putExtra("server_id", serverId)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(stop) else startService(stop)
         lifecycleScope.launch {
+            // Same fix as ServerDetail: wait for STOPPED + !isRunning up to 60s,
+            // start only when truly stopped - otherwise service refuses start
+            // as "already running" and Restart looks like Stop.
+            var stopped = false
             var waited = 0
-            while (waited < 15000) {
+            while (waited < 60_000) {
                 delay(1000)
                 waited += 1000
                 try {
-                    if (!EmbeddedProcessManager.isRunning(serverId)) break
-                } catch (_: Exception) { break }
+                    val s = repository.getServer(serverId).first()
+                    val running = try {
+                        EmbeddedProcessManager.isRunning(serverId)
+                    } catch (_: Exception) { true }
+                    if ((s?.status == ServerStatus.STOPPED || s?.status == ServerStatus.ERROR) && !running) {
+                        stopped = true
+                        break
+                    }
+                } catch (_: Exception) {}
             }
-            val start = Intent(this@MainActivity, ServerService::class.java).apply {
-                action = "com.pockethost.app.START_SERVER"
-                putExtra("server_id", serverId)
+            if (stopped) {
+                delay(2000)
+                val start = Intent(this@MainActivity, ServerService::class.java).apply {
+                    action = "com.pockethost.app.START_SERVER"
+                    putExtra("server_id", serverId)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(start) else startService(start)
+            } else {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Still stopping (world save). Press Start when Stopped.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(start) else startService(start)
         }
     }
 

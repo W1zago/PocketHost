@@ -63,6 +63,10 @@ class ServerDetailActivity : AppCompatActivity() {
     private var deviceIp: String = "…"
     // Blocks settings save while controls are filled programmatically in updateUI
     private var suppressSettingsSave = false
+    // True while the user drags the view-distance thumb: updateUI must not
+    // overwrite slider.value mid-drag, otherwise the thumb snaps back to the
+    // old value and the slider feels "not working".
+    private var viewDistanceDragging = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,25 +102,19 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnConsole.setOnClickListener { openConsole() }
         binding.btnFiles.setOnClickListener { openFileManager() }
         binding.btnDelete.setOnClickListener { deleteServer() }
-        binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
         binding.btnCopyGateway.setOnClickListener { copyBindAddress() }
         binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
-        // Section tabs: real navigation (scroll within screen or open screen).
+        // Section tabs: real navigation (open screen).
         binding.tabConsole.setOnClickListener { openConsole() }
         binding.tabFiles.setOnClickListener { openFileManager() }
-        binding.tabConfig.setOnClickListener {
-            setActiveTab(binding.tabConfig)
-            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
-        }
     }
 
     /** Active tab pill (design: primary-container) vs idle tabs. */
     private fun setActiveTab(active: View) {
         try {
             val tabs = listOf(
-                binding.tabConsole, binding.tabFiles,
-                binding.tabConfig
+                binding.tabConsole, binding.tabFiles
             )
             val onBg = ContextCompat.getColor(this, R.color.primary_container)
             val onFg = ContextCompat.getColor(this, R.color.on_primary_container)
@@ -165,8 +163,11 @@ class ServerDetailActivity : AppCompatActivity() {
         // Save only when the thumb is released, not on every tick
         binding.mcSettings.sliderViewDistance.addOnSliderTouchListener(
             object : Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: Slider) {}
+                override fun onStartTrackingTouch(slider: Slider) {
+                    viewDistanceDragging = true
+                }
                 override fun onStopTrackingTouch(slider: Slider) {
+                    viewDistanceDragging = false
                     if (suppressSettingsSave) return
                     saveMinecraftSettings()
                 }
@@ -215,9 +216,14 @@ class ServerDetailActivity : AppCompatActivity() {
                             viewDistance,
                             server.name
                         )
+                        // Read-back proof: the toast shows what is really in the
+                        // file, not just what the slider sent.
+                        val applied = ServerProperties.readViewDistance(workDir)
+                        val appliedSim = ServerProperties.readSimulationDistance(workDir)
                         Toast.makeText(
                             this@ServerDetailActivity,
-                            "Saved and applied.",
+                            if (applied != null) "Saved and applied: view-distance=$applied, simulation-distance=${appliedSim ?: applied}."
+                            else "Saved and applied.",
                             Toast.LENGTH_SHORT
                         ).show()
                     } catch (e: Exception) {
@@ -283,14 +289,6 @@ class ServerDetailActivity : AppCompatActivity() {
                                         it.contains("Error", ignoreCase = true) || it.contains("Failed", ignoreCase = true)
                                     } ?: ""
                                     binding.tvErrorMessage.visibility = View.VISIBLE
-                                }
-                            }
-                            // Console stream preview: real tail of server.log (last 8 lines).
-                            val tail = newContent.lines().filter { it.isNotBlank() }.takeLast(8).joinToString("\n")
-                            if (tail.isNotBlank()) {
-                                runOnUiThread {
-                                    binding.tvLogPreview.text = tail.take(1200)
-                                    binding.tvLogLive.text = "● LIVE"
                                 }
                             }
                             offset = currentLength
@@ -377,25 +375,30 @@ class ServerDetailActivity : AppCompatActivity() {
             // LAN bind line uses the real device IP + this server port.
             if (server.type == ServerType.MINECRAFT) {
                 minecraftSettingsCard.visibility = View.VISIBLE
-                tabConfig.visibility = View.VISIBLE
                 ubuntuSettingsCard.visibility = View.GONE
                 suppressSettingsSave = true
                 try {
                     mcSettings.switchPirate.isChecked = !server.config.effectiveOnlineMode
-                    try {
-                        mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
-                    } catch (e: IllegalStateException) {
-                        Log.w(TAG, "snap viewDistance fallback", e)
+                    // Do not fight the user: while the thumb is dragged, keep
+                    // the in-progress value, only refresh the caption.
+                    // Otherwise any Flow emission (status change, our own save)
+                    // snaps the slider back to the old value mid-drag.
+                    if (!viewDistanceDragging) {
+                        try {
+                            mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
+                        } catch (e: IllegalStateException) {
+                            Log.w(TAG, "snap viewDistance fallback", e)
+                        }
                     }
                     mcSettings.tvViewDistance.text =
-                        "${server.config.effectiveViewDistance} chunks"
+                        if (viewDistanceDragging) "${mcSettings.sliderViewDistance.value.toInt()} chunks"
+                        else "${server.config.effectiveViewDistance} chunks"
                 } catch (_: Exception) {
                 } finally {
                     suppressSettingsSave = false
                 }
             } else {
                 minecraftSettingsCard.visibility = View.GONE
-                tabConfig.visibility = View.GONE
                 ubuntuSettingsCard.visibility = View.VISIBLE
                 refreshUbuntuCard()
             }
@@ -432,22 +435,55 @@ class ServerDetailActivity : AppCompatActivity() {
         }
     }
 
+    private var restarting = false
+
     private fun restartServer() {
+        val id = serverId ?: return
+        if (restarting) return
+        restarting = true
+        binding.btnRestart.isEnabled = false
+        try { binding.btnRestart.text = "Restarting..." } catch (_: Exception) {}
+        Toast.makeText(this, "Restarting...", Toast.LENGTH_SHORT).show()
         stopServer()
         lifecycleScope.launch {
-            // FAIL 17:44: restart after 1s hit reserve "Server already
-            // running" (parked future). Wait for real death by
-            // facts (new isRunning without fast-path) up to 15s, then start.
+            // Old code waited only isRunning up to 15s and always called
+            // startServer() - even when stop was still in progress (world save
+            // up to 60s). Service then refused start as "already running"
+            // (status RUNNING/STARTING or isRunning true), so Restart looked
+            // like Stop. Now wait for BOTH: status STOPPED/ERROR + !isRunning,
+            // up to 60s, and start only when truly stopped.
+            var stopped = false
             var waited = 0
-            while (waited < 15000) {
+            while (waited < 60_000) {
                 delay(1000)
                 waited += 1000
                 try {
-                    val id = serverId ?: break
-                    if (!EmbeddedProcessManager.isRunning(id)) break
-                } catch (_: Exception) { break }
+                    val s = repository.getServer(id).first()
+                    val running = try {
+                        EmbeddedProcessManager.isRunning(id)
+                    } catch (_: Exception) { true }
+                    if ((s?.status == ServerStatus.STOPPED || s?.status == ServerStatus.ERROR) && !running) {
+                        stopped = true
+                        break
+                    }
+                } catch (_: Exception) {}
             }
-            startServer()
+            if (stopped) {
+                // Let session.lock / static state settle before same-JVM start.
+                delay(2000)
+                startServer()
+            } else {
+                Toast.makeText(
+                    this@ServerDetailActivity,
+                    "Still stopping (world save). Press Start when Stopped.",
+                    Toast.LENGTH_LONG
+                ).show()
+                try { repository.getServer(id).first()?.let { updateUI(it) } } catch (_: Exception) {}
+            }
+            restarting = false
+            try { binding.btnRestart.text = getString(R.string.restart) } catch (_: Exception) {
+                try { binding.btnRestart.text = "Restart" } catch (_: Exception) {}
+            }
         }
     }
 

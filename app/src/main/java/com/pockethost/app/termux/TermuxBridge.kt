@@ -28,7 +28,7 @@ object TermuxBridge {
         val jarName = guessJarName(server)
         val maxM = server.config.maxMemory
         val minM = server.config.minMemory
-        return "java -Xmx${maxM}M -Xms${minM}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar \"$jarName\" nogui"
+        return "java -Xmx${maxM}M -Xms${minM}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar \"$jarName\" nogui --nojline"
     }
 
     fun buildUbuntuCommand(termuxPath: String): String = "sh -i"
@@ -41,7 +41,7 @@ object TermuxBridge {
             com.pockethost.core.model.MinecraftLoader.VANILLA -> "server.jar"
             com.pockethost.core.model.MinecraftLoader.FORGE -> "forge.jar"
             com.pockethost.core.model.MinecraftLoader.FABRIC -> "fabric-server-launch.jar"
-            com.pockethost.core.model.MinecraftLoader.NEOFORGE -> "forge.jar"
+            com.pockethost.core.model.MinecraftLoader.NEOFORGE -> "neoforge.jar"
             com.pockethost.core.model.MinecraftLoader.PAPER -> "paper.jar"
             com.pockethost.core.model.MinecraftLoader.SPIGOT -> "spigot.jar"
             com.pockethost.core.model.MinecraftLoader.BUKKIT -> "craftbukkit.jar"
