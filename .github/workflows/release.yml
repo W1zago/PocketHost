@@ -1,9 +1,9 @@
 name: Release per-ABI APKs
 
+# Manual releases: APKs are built locally (stable debug signature for updates)
+# and uploaded by hand. Tag pushes do NOT trigger this workflow.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch
 
 permissions:
   contents: write
