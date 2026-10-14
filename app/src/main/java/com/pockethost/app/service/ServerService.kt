@@ -105,7 +105,8 @@ class ServerService : Service() {
                         Log.e("ServerService", "Server not found $serverId")
                         return@withLock null
                     }
-                    if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING) {
+                    if (server.status == ServerStatus.RUNNING || server.status == ServerStatus.STARTING ||
+                        server.status == ServerStatus.STOPPING) {
                         log(serverId, "Server already running")
                         return@withLock null
                     }
@@ -269,11 +270,25 @@ class ServerService : Service() {
                 log(serverId, "NOTE: offline (pirate) mode is ON - the 'SERVER IS RUNNING IN OFFLINE/INSECURE MODE' warning is expected. Turn pirate OFF to silence it.")
             }
         } catch (_: Exception) {}
+        // View-distance slider proof: spigot.yml / purpur.yml numeric overrides
+        // would shadow server.properties, so reset view/simulation-distance to
+        // 'default' (follow server.properties), then read back what the server
+        // will actually boot with.
+        try {
+            com.pockethost.app.util.SpigotConfig.ensureFollowsServerProperties(workDir) { msg -> log(serverId, msg) }
+        } catch (_: Exception) {}
+        try {
+            val appliedVd = com.pockethost.app.util.ServerProperties.readViewDistance(workDir)
+            val appliedSim = com.pockethost.app.util.ServerProperties.readSimulationDistance(workDir)
+            if (appliedVd != null) log(serverId, "server.properties: view-distance=$appliedVd, simulation-distance=${appliedSim ?: appliedVd} (slider ${server.config.effectiveViewDistance})")
+        } catch (_: Exception) {}
 
         // Provision jar into the internal folder (plain File I/O, no SAF)
         // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4
         // (1.20.5+ needs Java 21 - see advisory below).
-        val version = server.config.minecraftVersion ?: "1.20.4"
+        // Strip old UI suffixes ("1.21.4 (needs JRE 21)" -> "1.21.4").
+        val rawVersion = server.config.minecraftVersion ?: "1.20.4"
+        val version = rawVersion.substringBefore(" ").substringBefore("(").trim().ifEmpty { "1.20.4" }
         val loader = server.config.minecraftLoader
         if (EmbeddedJava.minJavaForMinecraft(version) > 17) {
             log(serverId, "WARNING: $version needs Java 21+, but bundled JRE is Java 17. Start will fail anyway; 1.20.4 recommended (or import JRE 21 manually into tools/jre21/ via Files).")
@@ -684,6 +699,11 @@ class ServerService : Service() {
             // otherwise the console refused in the Paperclip window.
             val wasRunning = EmbeddedProcessManager.isRunning(serverId)
             if (wasRunning) {
+                // Show STOPPING at once (was: RUNNING during the whole world-save,
+                // then a jump to STOPPED/ERROR). Buttons follow: Start/Stop disabled
+                // while stopping, restart waits for STOPPED.
+                try { repository.updateServerStatus(serverId, ServerStatus.STOPPING) } catch (_: Exception) {}
+                try { log(serverId, "Server stopping...") } catch (_: Exception) {}
                 try {
                     Log.i(
                         "ServerService",
@@ -779,28 +799,26 @@ class ServerService : Service() {
                 try {
                     Log.d("ServerService", "stopServer embedded $serverId")
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
-                        // A parked worker thread (future !done / fake-done) with
-                        // dead facts still blocks the next Start ("thread still
-                        // alive" refusal) - never report a clean STOPPED then.
-                        // That state needs an app restart (one JVM per process).
+                        // A parked mc worker (future !done, thread alive) with dead facts
+                        // (free port + Closing after Done) means the world IS saved -
+                        // Stop must end in STOPPED, never ERROR. The lingering chunk
+                        // workers settle in background; next Start waits up to 12s
+                        // for thread death. An ERROR badge here only scares the user
+                        // after a clean manual Stop.
                         val workerAlive = try { InProcessServer.isWorkerAlive() } catch (_: Exception) { false }
                         if (wasRunning && workerAlive) {
-                            log(serverId, "Server console stopped, but the worker thread is still alive - next Start will refuse. Restart the app to clear it (one JVM per process).")
-                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
-                            return@withLock
-                        }
-                        // Here we land after a polite stop in phase1 too
-                        // (free port + Closing): success, not "not running".
-                        if (wasRunning) {
+                            log(serverId, "Server stopped (worker thread settling in background - if next Start says 'still finishing', wait a few seconds or restart the app).")
+                        } else if (wasRunning) {
                             log(serverId, "Server stopped")
                         } else {
                             log(serverId, "Server not running")
                         }
+                        try { repository.updateTermuxExecutionId(serverId, null) } catch (_: Exception) {}
                         repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                         return@withLock
                     }
                     repository.updateServerStatus(serverId, ServerStatus.STOPPING)
-                    log(serverId, "Server stopping...")
+                    log(serverId, "Server still stopping, forcing...")
                     EmbeddedProcessManager.stop(serverId)
                     repository.updateTermuxExecutionId(serverId, null)
                     repository.updateServerStatus(serverId, ServerStatus.STOPPED)

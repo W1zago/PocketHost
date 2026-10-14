@@ -63,6 +63,10 @@ class ServerDetailActivity : AppCompatActivity() {
     private var deviceIp: String = "…"
     // Blocks settings save while controls are filled programmatically in updateUI
     private var suppressSettingsSave = false
+    // True while the user drags the view-distance thumb: updateUI must not
+    // overwrite slider.value mid-drag, otherwise the thumb snaps back to the
+    // old value and the slider feels "not working".
+    private var viewDistanceDragging = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -159,8 +163,11 @@ class ServerDetailActivity : AppCompatActivity() {
         // Save only when the thumb is released, not on every tick
         binding.mcSettings.sliderViewDistance.addOnSliderTouchListener(
             object : Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: Slider) {}
+                override fun onStartTrackingTouch(slider: Slider) {
+                    viewDistanceDragging = true
+                }
                 override fun onStopTrackingTouch(slider: Slider) {
+                    viewDistanceDragging = false
                     if (suppressSettingsSave) return
                     saveMinecraftSettings()
                 }
@@ -209,9 +216,14 @@ class ServerDetailActivity : AppCompatActivity() {
                             viewDistance,
                             server.name
                         )
+                        // Read-back proof: the toast shows what is really in the
+                        // file, not just what the slider sent.
+                        val applied = ServerProperties.readViewDistance(workDir)
+                        val appliedSim = ServerProperties.readSimulationDistance(workDir)
                         Toast.makeText(
                             this@ServerDetailActivity,
-                            "Saved and applied.",
+                            if (applied != null) "Saved and applied: view-distance=$applied, simulation-distance=${appliedSim ?: applied}."
+                            else "Saved and applied.",
                             Toast.LENGTH_SHORT
                         ).show()
                     } catch (e: Exception) {
@@ -367,13 +379,20 @@ class ServerDetailActivity : AppCompatActivity() {
                 suppressSettingsSave = true
                 try {
                     mcSettings.switchPirate.isChecked = !server.config.effectiveOnlineMode
-                    try {
-                        mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
-                    } catch (e: IllegalStateException) {
-                        Log.w(TAG, "snap viewDistance fallback", e)
+                    // Do not fight the user: while the thumb is dragged, keep
+                    // the in-progress value, only refresh the caption.
+                    // Otherwise any Flow emission (status change, our own save)
+                    // snaps the slider back to the old value mid-drag.
+                    if (!viewDistanceDragging) {
+                        try {
+                            mcSettings.sliderViewDistance.value = server.config.effectiveViewDistance.toFloat().coerceIn(2f, 32f)
+                        } catch (e: IllegalStateException) {
+                            Log.w(TAG, "snap viewDistance fallback", e)
+                        }
                     }
                     mcSettings.tvViewDistance.text =
-                        "${server.config.effectiveViewDistance} chunks"
+                        if (viewDistanceDragging) "${mcSettings.sliderViewDistance.value.toInt()} chunks"
+                        else "${server.config.effectiveViewDistance} chunks"
                 } catch (_: Exception) {
                 } finally {
                     suppressSettingsSave = false

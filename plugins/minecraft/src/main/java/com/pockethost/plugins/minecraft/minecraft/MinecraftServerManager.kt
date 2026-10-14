@@ -113,7 +113,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             val jarFile = File("$serverDir/$jarName")
             // Also check generic server.jar for backward compat
             val genericJar = File("$serverDir/server.jar")
-            // Broken/truncated jar (>1MB but not zip) would masquerade as ready and kill
+            // Broken/truncated jar (small garbage, not zip) would masquerade as ready and kill
             // start later with "no Main-Class". Verify integrity at once:
             // delete invalid so the next step downloads fresh.
             for (candidate in listOf(jarFile, genericJar)) {
@@ -127,8 +127,10 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 log("Minecraft jar not found, downloading $software $version...")
                 val downloaded = downloadServerJar(serverDir, version, software, log)
                 if (downloaded == null) {
-                    if (software == MinecraftServerSoftware.SPIGOT || software == MinecraftServerSoftware.FORGE || software == MinecraftServerSoftware.BUKKIT) {
-                        log("ERROR: $software has no direct download. Drop the jar manually via Files (${getJarName(software)}) or pick PAPER/PURPUR/VANILLA/FABRIC.")
+                    if (software == MinecraftServerSoftware.SPIGOT || software == MinecraftServerSoftware.BUKKIT) {
+                        log("ERROR: $software has no direct download (BuildTools must run on PC). Build spigot/craftbukkit on PC, then drop ${getJarName(software)} manually via Files - or pick PAPER/PURPUR/VANILLA/FABRIC.")
+                    } else if (software == MinecraftServerSoftware.FORGE || software == MinecraftServerSoftware.NEOFORGE) {
+                        log("ERROR: $software has no direct server jar (installer with libraries/ + unix_args.txt required). Run the Forge/NeoForge installer on PC with --installServer, copy the full server folder (jar + libraries/) into Files as ${getJarName(software)} - or pick PAPER/PURPUR/VANILLA/FABRIC.")
                     } else {
                         log("ERROR: Download failed for $software $version. See the cause above (HTTP code). With internet on - try VANILLA/PURPUR/FABRIC.")
                     }
@@ -171,6 +173,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             MinecraftServerSoftware.SPIGOT -> "spigot.jar"
             MinecraftServerSoftware.FABRIC -> "fabric-server-launch.jar"
             MinecraftServerSoftware.FORGE -> "forge.jar"
+            MinecraftServerSoftware.NEOFORGE -> "neoforge.jar"
             MinecraftServerSoftware.PURPUR -> "purpur.jar"
             MinecraftServerSoftware.BUKKIT -> "craftbukkit.jar"
         }
@@ -178,7 +181,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
 
     fun getStartCommand(jarName: String, maxMem: Int, minMem: Int): String {
         val javaPath = "java"
-        return "$javaPath -Xmx${maxMem}M -Xms${minMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $jarName nogui"
+        return "$javaPath -Xmx${maxMem}M -Xms${minMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $jarName nogui --nojline"
     }
 
     private fun mapToLoader(software: MinecraftServerSoftware): MinecraftLoader {
@@ -188,6 +191,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             MinecraftServerSoftware.SPIGOT -> MinecraftLoader.SPIGOT
             MinecraftServerSoftware.FABRIC -> MinecraftLoader.FABRIC
             MinecraftServerSoftware.FORGE -> MinecraftLoader.FORGE
+            MinecraftServerSoftware.NEOFORGE -> MinecraftLoader.NEOFORGE
             MinecraftServerSoftware.PURPUR -> MinecraftLoader.PURPUR
             MinecraftServerSoftware.BUKKIT -> MinecraftLoader.BUKKIT
         }
@@ -203,7 +207,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             MinecraftLoader.FORGE -> MinecraftServerSoftware.FORGE
             MinecraftLoader.PURPUR -> MinecraftServerSoftware.PURPUR
             MinecraftLoader.BUKKIT -> MinecraftServerSoftware.BUKKIT
-            MinecraftLoader.NEOFORGE -> MinecraftServerSoftware.FORGE
+            MinecraftLoader.NEOFORGE -> MinecraftServerSoftware.NEOFORGE
         }
     }
 
@@ -219,7 +223,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
 
             val downloadUrl = getDownloadUrl(version, software, log)
             if (downloadUrl == null) {
-                log?.invoke("No download URL for $software $version. Try Paper or Vanilla. Spigot/Forge require manual install.")
+                log?.invoke("No download URL for $software $version. Try Paper, Vanilla, Purpur or Fabric. Spigot/Forge/NeoForge/Bukkit require manual install (installer/BuildTools).")
                 return@withContext null
             }
 
@@ -228,13 +232,13 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 downloadFile(downloadUrl, File(jarPath), log)
             } catch (e: Exception) {
                 log?.invoke("Download error: ${e.message}. Check internet, a VPN/provider may have blocked $downloadUrl")
-                try { File(jarPath).takeIf { it.exists() && it.length() < 1024 * 1024 }?.delete() } catch (_: Exception) {}
+                try { File(jarPath).takeIf { it.exists() && it.length() < MIN_JAR_BYTES }?.delete() } catch (_: Exception) {}
                 throw e
             }
 
             val len = File(jarPath).length()
             if (!isValidServerJar(File(jarPath))) {
-                log?.invoke("Downloaded file invalid (${len / 1024} KB or broken zip). Possible connection cut - retry or use VANILLA/PURPUR.")
+                log?.invoke("Downloaded file invalid (${len / 1024} KB or broken zip). Possible connection cut - retry or use VANILLA/PURPUR/FABRIC.")
                 try { File(jarPath).takeIf { it.exists() }?.delete() } catch (_: Exception) {}
                 return@withContext null
             }
@@ -255,6 +259,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
             MinecraftServerSoftware.FABRIC -> getFabricUrl(version, log)
             MinecraftServerSoftware.SPIGOT -> null
             MinecraftServerSoftware.FORGE -> null
+            MinecraftServerSoftware.NEOFORGE -> null
             MinecraftServerSoftware.BUKKIT -> null
         }
     }
@@ -302,32 +307,23 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 }
             }
             if (versionUrl == null) {
-                log?.invoke("Version $version not found in manifest, trying latest release")
-                // fallback to latest release
-                val latest = manifest.getJSONObject("latest")
-                val release = latest.getString("release")
-                for (i in 0 until versions.length()) {
-                    val obj = versions.getJSONObject(i)
-                    if (obj.getString("id") == release) {
-                        versionUrl = obj.getString("url")
-                        break
-                    }
-                }
+                log?.invoke("ERROR: Version $version not found in Mojang manifest. Check the version string (e.g. 1.20.4, 1.20.1, 1.19.4) - refusing instead of downloading a different version.")
+                return null
             }
-            if (versionUrl == null) return null
-            log?.invoke("Fetching version meta: $versionUrl")
+            val resolvedVersionUrl: String = versionUrl
+            log?.invoke("Fetching version meta: $resolvedVersionUrl")
             var versionMetaJson: String? = null
             repeat(3) { attempt ->
                 try {
-                    versionMetaJson = httpGet(versionUrl)
+                    versionMetaJson = httpGet(resolvedVersionUrl)
                     if (versionMetaJson != null) return@repeat
                 } catch (e: Exception) {
                     log?.invoke("Version meta attempt ${attempt+1} failed: ${e.message}")
                 }
                 if (versionMetaJson == null && attempt < 2) delay(2000)
             }
-            if (versionMetaJson == null) return null
-            val versionMeta = JSONObject(versionMetaJson)
+            val resolvedMetaJson: String = versionMetaJson ?: return null
+            val versionMeta = JSONObject(resolvedMetaJson)
             val downloads = versionMeta.getJSONObject("downloads")
             val server = downloads.getJSONObject("server")
             val url = server.getString("url")
@@ -365,7 +361,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                         downloads.has("application") -> downloads.getJSONObject("application")
                         else -> null
                     }
-                    val url = downloadObj?.optString("url", null)
+                    val url = downloadObj?.optString("url", "")?.takeIf { it.isNotEmpty() }
                     if (!url.isNullOrEmpty()) {
                         // latest may be ALPHA/EXPERIMENTAL (e.g. 1.21.9-47):
                         // unstable is taken only when no STABLE exists below.
@@ -396,7 +392,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
                             downloads.has("application") -> downloads.optJSONObject("application")
                             else -> null
                         }
-                        return Pair(downloadObj?.optString("url", null)?.takeIf { it.isNotEmpty() }, channel)
+                        return Pair(downloadObj?.optString("url", "")?.takeIf { it.isNotEmpty() }, channel)
                     }
                     for (i in 0 until arr.length()) {
                         val buildObj = arr.getJSONObject(i)
@@ -460,7 +456,10 @@ class MinecraftServerManager(private val baseDirectory: String) {
                     val loader = latest.getJSONObject("loader")
                     val loaderVersion = loader.getString("version")
                     log?.invoke("Fabric loader $loaderVersion for $version")
-                    val url = "https://meta.fabricmc.net/v2/versions/loader/$version/$loaderVersion/server/jar"
+                    // Server jar needs installer version too:
+                    // /v2/versions/loader/<mc>/<loader>/<installer>/server/jar
+                    val installerVersion = getFabricInstallerVersion(log) ?: "1.1.2"
+                    val url = "https://meta.fabricmc.net/v2/versions/loader/$version/$loaderVersion/$installerVersion/server/jar"
                     log?.invoke("Fabric URL: $url")
                     return url
                 }
@@ -471,7 +470,8 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 val arr = org.json.JSONArray(globalLoaders)
                 if (arr.length() > 0) {
                     val loaderVersion = arr.getJSONObject(0).getString("version")
-                    val url = "https://meta.fabricmc.net/v2/versions/loader/$version/$loaderVersion/server/jar"
+                    val installerVersion = getFabricInstallerVersion(log) ?: "1.1.2"
+                    val url = "https://meta.fabricmc.net/v2/versions/loader/$version/$loaderVersion/$installerVersion/server/jar"
                     return url
                 }
             }
@@ -483,20 +483,36 @@ class MinecraftServerManager(private val baseDirectory: String) {
         }
     }
 
+    private fun getFabricInstallerVersion(log: ((String) -> Unit)?): String? {
+        return try {
+            val json = httpGet("https://meta.fabricmc.net/v2/versions/installer")
+            if (json == null) return null
+            val arr = org.json.JSONArray(json)
+            if (arr.length() > 0) arr.getJSONObject(0).getString("version") else null
+        } catch (e: Exception) {
+            Log.w(TAG, "fabric installer resolve failed", e)
+            log?.invoke("Fabric installer resolve failed: ${e.message}, using fallback 1.1.2")
+            null
+        }
+    }
+
     companion object {
         private const val TAG = "MinecraftServerManager"
         // Fill v3 requires an identifying User-Agent with contact, otherwise 403/rate-limit.
         // https://docs.papermc.io/misc/downloads-service/
         private const val USER_AGENT = "PocketHost/1.0 (Android; +https://github.com/PocketHost/pockethost)"
+        // Fabric server launcher is tiny (~180KB), so the floor is 50KB, not 1MB.
+        // Anything smaller is a truncated HTML error page; zip integrity is still verified.
+        private const val MIN_JAR_BYTES = 50L * 1024
 
         /**
          * Minimal server-jar integrity: size + valid zip central directory.
-         * An interrupted download (>1MB of garbage) fails ZipFile open - such a file
+         * An interrupted download (garbage) fails ZipFile open - such a file
          * must be deleted and downloaded again, not taken to JVM start.
          */
         fun isValidServerJar(f: File): Boolean {
             return try {
-                if (!f.isFile || f.length() < 1024 * 1024) return false
+                if (!f.isFile || f.length() < MIN_JAR_BYTES) return false
                 java.util.zip.ZipFile(f).use { z -> z.size() > 0 }
                 true
             } catch (_: Exception) { false }
@@ -607,6 +623,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
         onlineMode: Boolean = true,
         viewDistance: Int = 10
     ) {
+        val vd = viewDistance.coerceIn(2, 32)
         val properties = """
             server-port=$port
             max-players=20
@@ -614,8 +631,10 @@ class MinecraftServerManager(private val baseDirectory: String) {
             difficulty=normal
             pvp=true
             online-mode=$onlineMode
+            enforce-secure-profile=$onlineMode
             motd=A Minecraft Server
-            view-distance=${viewDistance.coerceIn(2, 32)}
+            view-distance=$vd
+            simulation-distance=$vd
             spawn-protection=16
             enable-command-block=false
             allow-flight=false
@@ -635,7 +654,7 @@ class MinecraftServerManager(private val baseDirectory: String) {
         val javaPath = "java"
         val script = """
             #!/bin/sh
-            $javaPath -Xms${minMem}M -Xmx${maxMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $jarFile nogui
+            $javaPath -Xms${minMem}M -Xmx${maxMem}M -XX:+UseSerialGC -Djava.awt.headless=true -Xss256k -jar $jarFile nogui --nojline
         """.trimIndent()
 
         FileUtils.writeFile("$serverDir/start.sh", script)

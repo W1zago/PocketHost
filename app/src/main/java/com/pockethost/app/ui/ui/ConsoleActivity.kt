@@ -793,6 +793,9 @@ class ConsoleActivity : AppCompatActivity() {
                             updateStatusPill(it.status)
                         }
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Normal on close/rotate - not an error.
+                    throw e
                 } catch (e: Exception) {
                     Log.e("ConsoleActivity", "loadServerInfo", e)
                     appendOutput("ERROR loading console: ${e.message}\n")
@@ -916,6 +919,9 @@ class ConsoleActivity : AppCompatActivity() {
                             withContext(Dispatchers.Main) { appendOutput(text) }
                         }
                     }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Normal on close/rotate - not an error, just rethrow.
+                    throw e
                 } catch (e: Exception) {
                     Log.e("ConsoleActivity", "Error reading log", e)
                 }

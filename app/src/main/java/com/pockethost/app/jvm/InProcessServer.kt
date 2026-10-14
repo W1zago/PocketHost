@@ -476,8 +476,9 @@ object InProcessServer {
     }
 
     /** Is the mc-server worker thread alive (regardless of Future state).
-     * Public for ServerService stop diagnostics: STOPPED must not be reported
-     * while this is true (next Start would refuse with "thread still alive"). */
+      * Public for ServerService stop diagnostics: logged on Stop, but Stop
+      * still reports STOPPED (world is saved; the parked thread settles
+      * in background and next Start waits for it). */
     fun isWorkerAlive(): Boolean = mcThreadAlive()
 
     /** Per-start counter (for stale polls: foreign seq = newer boot). */

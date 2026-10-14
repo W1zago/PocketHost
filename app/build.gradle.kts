@@ -16,9 +16,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // English-only: strip all other locales (incl. library values-uk),
-        // so no Ukrainian strings can leak in from dependencies.
-        resourceConfigurations += "en"
+        // Keep English + Ukrainian (device locale). Library values-uk
+        // no longer stripped, so the Ukrainian UI is not lost.
+        resourceConfigurations += listOf("en", "uk")
 
         // Universal APK: no `splits` block on purpose — one APK carries
         // arm64-v8a + armeabi-v7a + x86_64. The in-app updater looks for

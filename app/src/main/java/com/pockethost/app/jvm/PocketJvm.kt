@@ -428,6 +428,9 @@ object PocketJvm {
         log("JVM: ${vmFile.absolutePath}")
         log("Main: $mainClass")
         if (cpEntries.size > 1) log("Class-Path: +${cpEntries.size - 1} entries from manifest")
+        // OSHI/JNA/udev/MacAddress warnings below are expected on Android
+        // (no udev, no stable MAC) and do not break the server.
+        log("NOTE: OSHI/JNA/udev warnings below are expected on Android, ignore them.")
         // Headless server args: nogui (no Swing) + --nojline (no JLine/Jansi
         // native terminal - the jansi-*.so in Paper is glibc-built and fails
         // on bionic with "libc.so.6 not found"). Paperclip forwards unknown

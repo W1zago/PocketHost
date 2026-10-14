@@ -16,6 +16,9 @@ object PaperConfig {
 
     fun disableTimings(workDir: File, log: (String) -> Unit = {}) {
         try {
+            // Paper 1.20.4+ stores config under config/paper-global.yml,
+            // older builds at root paper-global.yml / paper.yml.
+            patchTimingsKey(File(workDir, "config/paper-global.yml"), log)
             patchTimingsKey(File(workDir, "paper-global.yml"), log)
             patchTimingsKey(File(workDir, "paper.yml"), log)
         } catch (e: Exception) {
