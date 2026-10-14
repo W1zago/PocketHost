@@ -58,6 +58,12 @@ class ConsoleActivity : AppCompatActivity() {
     private var ctrlActive = false
     private var altActive = false
 
+    // Local input history: Up/Down recall past commands like everywhere
+    // (Termux, shells). Minecraft stdin is line-buffered and ignores ESC[A/B,
+    // so history must be local, not via escape sequences.
+    private val inputHistory = ArrayList<String>(100)
+    private var historyIndex = 0
+
     // Log buffer + follow state (all real: derived from actual backend output).
     private val logBuffer: ArrayDeque<String> = ArrayDeque()
     // Follow mode: true = live tail (new lines pin to bottom), false = paused
@@ -445,6 +451,7 @@ class ConsoleActivity : AppCompatActivity() {
         rendered.clear()
         pendingLines = 0
         followLive = true
+        historyIndex = inputHistory.size
         updateScrollOverlay()
         try {
             binding.logView.text = ""
@@ -507,13 +514,25 @@ class ConsoleActivity : AppCompatActivity() {
             } else false
         }
         // Hardware Enter / keyboards that send key events instead of actions.
+        // Hardware DPAD Up/Down: same as on-screen arrows - local history.
         binding.inputField.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == android.view.KeyEvent.KEYCODE_ENTER &&
-                event.action == android.view.KeyEvent.ACTION_DOWN
-            ) {
-                submitInput()
-                true
-            } else false
+            if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+                when (keyCode) {
+                    android.view.KeyEvent.KEYCODE_ENTER -> {
+                        submitInput()
+                        return@setOnKeyListener true
+                    }
+                    android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                        navigateHistory(up = true)
+                        return@setOnKeyListener true
+                    }
+                    android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        navigateHistory(up = false)
+                        return@setOnKeyListener true
+                    }
+                }
+            }
+            false
         }
         // Tap on empty log area focuses the input (selection still works via
         // long-press because the TextView is selectable).
@@ -597,7 +616,10 @@ class ConsoleActivity : AppCompatActivity() {
             inputProgrammatic = false
             val parts = raw.replace("\r", "").split("\n")
             for (line in parts) {
-                if (line.isNotEmpty()) sendCommand(line) else writeToProcess("\n")
+                if (line.isNotEmpty()) {
+                    pushHistory(line)
+                    sendCommand(line)
+                } else writeToProcess("\n")
             }
             // Sending means the user is at the tail: resume live follow.
             followLive = true
@@ -624,6 +646,47 @@ class ConsoleActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
+    /** Local command history (like Termux/shells): Up recalls previous,
+     * Down goes forward. Long-press still sends raw ESC for vim/htop. */
+    private fun pushHistory(cmd: String) {
+        try {
+            if (cmd.isBlank()) return
+            if (inputHistory.isNotEmpty() && inputHistory.last() == cmd) {
+                historyIndex = inputHistory.size
+                return
+            }
+            inputHistory.add(cmd)
+            if (inputHistory.size > 100) inputHistory.removeAt(0)
+            historyIndex = inputHistory.size
+        } catch (_: Exception) {}
+    }
+
+    private fun navigateHistory(up: Boolean) {
+        try {
+            if (inputHistory.isEmpty()) return
+            val field = binding.inputField
+            val current = try { field.text?.toString() ?: "" } catch (_: Exception) { "" }
+            // User typed something new manually - start browsing from the end.
+            if (historyIndex in inputHistory.indices && current != inputHistory[historyIndex]) {
+                historyIndex = inputHistory.size
+            }
+            historyIndex = if (up) (historyIndex - 1).coerceAtLeast(0)
+            else (historyIndex + 1).coerceAtMost(inputHistory.size)
+            inputProgrammatic = true
+            try {
+                if (historyIndex in inputHistory.indices) {
+                    field.setText(inputHistory[historyIndex])
+                    try { field.setSelection(field.text?.length ?: 0) } catch (_: Exception) {}
+                } else {
+                    field.text?.clear()
+                }
+            } finally {
+                inputProgrammatic = false
+            }
+            try { field.requestFocus() } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+
     private fun setupExtraKeys() {
         binding.keyEsc.setOnClickListener { sendKey(27.toChar().toString()) }
         // Printable helpers type into the input field (line-buffered);
@@ -631,7 +694,10 @@ class ConsoleActivity : AppCompatActivity() {
         binding.keySlash.setOnClickListener { insertIntoInput("/") }
         binding.keyDash.setOnClickListener { insertIntoInput("-") }
         binding.keyHome.setOnClickListener { sendKey("\u001B[H") }
-        binding.keyUp.setOnClickListener { sendKey("\u001B[A") }
+        // Tap = local history (works in Minecraft + shell), long-press = raw
+        // ESC sequence for full-screen apps (vim/htop).
+        binding.keyUp.setOnClickListener { navigateHistory(up = true) }
+        binding.keyUp.setOnLongClickListener { sendKey("\u001B[A"); true }
         binding.keyEnd.setOnClickListener { sendKey("\u001B[F") }
         // PGUP/PGDN page the viewport for convenience (tap); long-press still
         // sends the terminal sequence for full-screen apps (vim/htop).
@@ -640,7 +706,8 @@ class ConsoleActivity : AppCompatActivity() {
 
         binding.keyTab.setOnClickListener { insertIntoInput("\t") }
         binding.keyLeft.setOnClickListener { sendKey("\u001B[D") }
-        binding.keyDown.setOnClickListener { sendKey("\u001B[B") }
+        binding.keyDown.setOnClickListener { navigateHistory(up = false) }
+        binding.keyDown.setOnLongClickListener { sendKey("\u001B[B"); true }
         binding.keyRight.setOnClickListener { sendKey("\u001B[C") }
         binding.keyPgDn.setOnClickListener { scrollPage(up = false) }
         binding.keyPgDn.setOnLongClickListener { sendKey("\u001B[6~"); true }

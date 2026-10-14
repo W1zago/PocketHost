@@ -258,6 +258,18 @@ class ServerService : Service() {
             )
         } catch (_: Exception) {}
 
+        // Warning silencer: Paper timings profiler (upstream removal warning
+        // on every boot) is disabled in place; offline-mode warning is expected
+        // when the pirate switch is on - hint once instead of "fixing" it.
+        try {
+            com.pockethost.app.util.PaperConfig.disableTimings(workDir) { msg -> log(serverId, msg) }
+        } catch (_: Exception) {}
+        try {
+            if (!server.config.effectiveOnlineMode) {
+                log(serverId, "NOTE: offline (pirate) mode is ON - the 'SERVER IS RUNNING IN OFFLINE/INSECURE MODE' warning is expected. Turn pirate OFF to silence it.")
+            }
+        } catch (_: Exception) {}
+
         // Provision jar into the internal folder (plain File I/O, no SAF)
         // Default 1.20.4: bundled JRE17 runs only Minecraft <=1.20.4
         // (1.20.5+ needs Java 21 - see advisory below).
@@ -472,7 +484,20 @@ class ServerService : Service() {
                                 log(serverId, "Previous thread still finishing - press Start again.")
                                 repository.updateServerStatus(serverId, ServerStatus.STOPPED)
                             } else {
+                                // RESTART-CRASH FIX: surface the real native cause
+                                // (exit code + JVM exception text) instead of a bare
+                                // "see above" - after a same-JVM restart the cause
+                                // is typically code -10 (OverlappingFileLock on
+                                // session.lock / dirty static state) with an empty
+                                // Paper section above.
+                                val nativeErr = try { com.pockethost.app.jvm.PocketJvm.lastError() } catch (_: Exception) { "" }
+                                if (nativeErr.isNotBlank()) log(serverId, "Cause: $nativeErr")
                                 log(serverId, "Server died right after start - see the cause above (often: busy port or bad Java).")
+                                if (nativeErr.contains("OverlappingFileLock") || nativeErr.contains("session.lock") ||
+                                    nativeErr.contains("Already bootstrapped") || nativeErr.contains("code -10")
+                                ) {
+                                    log(serverId, "Looks like a same-JVM restart over a dirty world lock/static state: stop, wait 30s, Start again; if it repeats - restart the app.")
+                                }
                                 repository.updateServerStatus(serverId, ServerStatus.ERROR)
                             }
                         } else {
@@ -677,30 +702,75 @@ class ServerService : Service() {
                         "stop"
                     }
                     EmbeddedProcessManager.sendInput(serverId, stopCmd)
-                    var waited = 0
-                    while (waited < 60000 && EmbeddedProcessManager.isRunning(serverId)) {
-                        delay(1000)
-                        waited += 1000
-                        // Diagnostics every 5s (Bug B + FAIL 17:44): facts from
-                        // donePos/stopPos so Observer sees Closing after Done,
-                        // not just "alive=true".
-                        if (waited % 5000 == 0) {
+                    // STOP-DELIVERY CHECK: "stop" only works when the server
+                    // reads stdin. Boots without --nojline run JLine (jansi
+                    // terminal), which reads /dev/tty instead of our fd-0 pipe
+                    // - the command then vanishes and the worker lives forever
+                    // (exactly the "thread still alive" hang). Watch server.log
+                    // ~10s for the shutdown marker; missing = stdin not wired.
+                    try {
+                        val dir = workDirCache[serverId]
+                            ?: com.pockethost.app.embedded.EmbeddedPaths.lookupServerDir(this@ServerService, serverId)
+                        var delivered = false
+                        val t0 = System.currentTimeMillis()
+                        while (!delivered && System.currentTimeMillis() - t0 < 10_000) {
                             try {
-                                Log.i(
-                                    "ServerService",
-                                    "stopServer wait ${waited}ms $serverId alive=${EmbeddedProcessManager.isRunning(serverId)} facts=${InProcessServer.describeFacts()}"
-                                )
+                                val lf = File(dir, "server.log")
+                                if (lf.isFile && lf.length() > 0) {
+                                    val n = if (lf.length() > 32 * 1024) 32 * 1024 else lf.length().toInt()
+                                    RandomAccessFile(lf, "r").use { raf ->
+                                        raf.seek(lf.length() - n)
+                                        val b = ByteArray(n)
+                                        var t = 0
+                                        while (t < n) {
+                                            val r = raf.read(b, t, n - t)
+                                            if (r <= 0) break
+                                            t += r
+                                        }
+                                        val tail = String(b, 0, t)
+                                        if (tail.contains("Stopping the server") || tail.contains("Stopping server")) {
+                                            delivered = true
+                                        }
+                                    }
+                                }
                             } catch (_: Exception) {}
+                            if (!delivered && !EmbeddedProcessManager.isRunning(serverId)) delivered = true
+                            if (!delivered) delay(1000)
                         }
+                        if (!delivered) {
+                            log(serverId, "WARN: server did not confirm 'stop' in 10s - the command may not reach its console (old boot without --nojline runs JLine). If stop hangs: restart the app once, then Start fresh (new boots pass --nojline).")
+                        }
+                    } catch (_: Exception) {}
+                    // RESTART-CRASH FIX: wait for REAL thread completion, not just
+                    // "port free". The old `while (isRunning)` loop exited the
+                    // moment MC released the socket ("Stopping server") while
+                    // the world was still saving (Saving chunks / Closing
+                    // Server came 5s later in the reported log) - the app
+                    // printed "Server stopped" too early and the next Start
+                    // hit a half-dead JVM. awaitStop() waits for worker-thread
+                    // done + shutdown-by-log (up to 60s for world save).
+                    // awaitStop blocks without per-5s logcat facts; emit one summary.
+                    var stoppedClean = false
+                    try {
+                        stoppedClean = InProcessServer.awaitStop(60_000)
+                    } catch (_: Exception) {
+                        stoppedClean = false
                     }
-                    if (EmbeddedProcessManager.isRunning(serverId)) {
+                    // awaitStop blocks without per-5s logcat facts; emit one summary.
+                    try {
+                        Log.i(
+                            "ServerService",
+                            "stopServer wait done stoppedClean=$stoppedClean $serverId alive=${EmbeddedProcessManager.isRunning(serverId)} facts=${InProcessServer.describeFacts()}"
+                        )
+                    } catch (_: Exception) {}
+                    if (!stoppedClean && EmbeddedProcessManager.isRunning(serverId)) {
                         log(serverId, "Server did not answer stop in 60s - waiting in background (world may be saving)")
                         try {
                             Log.w("ServerService", "stopServer timeout $serverId still alive after 60s")
                         } catch (_: Exception) {}
                     } else {
                         try {
-                            Log.i("ServerService", "stopServer graceful in ${waited}ms $serverId")
+                            Log.i("ServerService", "stopServer graceful stoppedClean=$stoppedClean $serverId")
                         } catch (_: Exception) {}
                     }
                 } catch (_: Exception) {}
@@ -709,6 +779,16 @@ class ServerService : Service() {
                 try {
                     Log.d("ServerService", "stopServer embedded $serverId")
                     if (!EmbeddedProcessManager.isRunning(serverId)) {
+                        // A parked worker thread (future !done / fake-done) with
+                        // dead facts still blocks the next Start ("thread still
+                        // alive" refusal) - never report a clean STOPPED then.
+                        // That state needs an app restart (one JVM per process).
+                        val workerAlive = try { InProcessServer.isWorkerAlive() } catch (_: Exception) { false }
+                        if (wasRunning && workerAlive) {
+                            log(serverId, "Server console stopped, but the worker thread is still alive - next Start will refuse. Restart the app to clear it (one JVM per process).")
+                            repository.updateServerStatus(serverId, ServerStatus.ERROR)
+                            return@withLock
+                        }
                         // Here we land after a polite stop in phase1 too
                         // (free port + Closing): success, not "not running".
                         if (wasRunning) {

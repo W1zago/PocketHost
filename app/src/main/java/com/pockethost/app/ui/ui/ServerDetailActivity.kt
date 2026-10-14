@@ -416,22 +416,55 @@ class ServerDetailActivity : AppCompatActivity() {
         }
     }
 
+    private var restarting = false
+
     private fun restartServer() {
+        val id = serverId ?: return
+        if (restarting) return
+        restarting = true
+        binding.btnRestart.isEnabled = false
+        try { binding.btnRestart.text = "Restarting..." } catch (_: Exception) {}
+        Toast.makeText(this, "Restarting...", Toast.LENGTH_SHORT).show()
         stopServer()
         lifecycleScope.launch {
-            // FAIL 17:44: restart after 1s hit reserve "Server already
-            // running" (parked future). Wait for real death by
-            // facts (new isRunning without fast-path) up to 15s, then start.
+            // Old code waited only isRunning up to 15s and always called
+            // startServer() - even when stop was still in progress (world save
+            // up to 60s). Service then refused start as "already running"
+            // (status RUNNING/STARTING or isRunning true), so Restart looked
+            // like Stop. Now wait for BOTH: status STOPPED/ERROR + !isRunning,
+            // up to 60s, and start only when truly stopped.
+            var stopped = false
             var waited = 0
-            while (waited < 15000) {
+            while (waited < 60_000) {
                 delay(1000)
                 waited += 1000
                 try {
-                    val id = serverId ?: break
-                    if (!EmbeddedProcessManager.isRunning(id)) break
-                } catch (_: Exception) { break }
+                    val s = repository.getServer(id).first()
+                    val running = try {
+                        EmbeddedProcessManager.isRunning(id)
+                    } catch (_: Exception) { true }
+                    if ((s?.status == ServerStatus.STOPPED || s?.status == ServerStatus.ERROR) && !running) {
+                        stopped = true
+                        break
+                    }
+                } catch (_: Exception) {}
             }
-            startServer()
+            if (stopped) {
+                // Let session.lock / static state settle before same-JVM start.
+                delay(2000)
+                startServer()
+            } else {
+                Toast.makeText(
+                    this@ServerDetailActivity,
+                    "Still stopping (world save). Press Start when Stopped.",
+                    Toast.LENGTH_LONG
+                ).show()
+                try { repository.getServer(id).first()?.let { updateUI(it) } } catch (_: Exception) {}
+            }
+            restarting = false
+            try { binding.btnRestart.text = getString(R.string.restart) } catch (_: Exception) {
+                try { binding.btnRestart.text = "Restart" } catch (_: Exception) {}
+            }
         }
     }
 

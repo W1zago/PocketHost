@@ -475,6 +475,11 @@ object InProcessServer {
         else -> "see the exception/JVM ERROR line above."
     }
 
+    /** Is the mc-server worker thread alive (regardless of Future state).
+     * Public for ServerService stop diagnostics: STOPPED must not be reported
+     * while this is true (next Start would refuse with "thread still alive"). */
+    fun isWorkerAlive(): Boolean = mcThreadAlive()
+
     /** Per-start counter (for stale polls: foreign seq = newer boot). */
     fun currentSeq(): Long = try { startSeq } catch (_: Exception) { -1L }
 
@@ -538,21 +543,24 @@ object InProcessServer {
         //     (Threads_lock held by the dying Server thread) - gate BEFORE enum did
         //     not help. Native fix: after the stop latch the enum is skipped entirely.
         // Now wait for THREAD DEATH (mcThread.isAlive), not future, up to 12s
-        // (native grace 10s is enough to exit), and refuse only when facts are ALIVE.
-        // Dead by facts + live thread after 12s means abandon (new executor
-        // + seq bump so the hung worker goes stale), not eternal "restart the app".
-        fun abandonHungWorker(reason: String) {
+        // (native grace 10s is enough to exit), and refuse when the thread
+        // is still alive afterwards.
+        // RESTART-CRASH FIX: never start a second Paper over a live worker
+        // in the same JVM (the old abandonHungWorker path did exactly this:
+        // new executor + seq bump while T1 still sat in native main with
+        // g_in_server_main=1). The second main then died instantly with no
+        // Paper output - native -11 (reuse refused) or -10 (OverlappingFileLock
+        // on session.lock / dirty HotSpot static state: registries, Log4j,
+        // Netty), and the 15s poll reported the generic "died right after
+        // start". A live mcThread after 12s now refuses honestly
+        // (FAILED_DEFINITIVE = restart the app), it never launches concurrently.
+        fun refuseHungWorker(reason: String): StartResult {
             val hungId = try { "${mcThread?.name}/${mcThread?.id} alive=${mcThreadAlive()}" } catch (_: Exception) { "?" }
-            try { Log.w(TAG, "abandonHungWorker: $reason hungThread=$hungId facts=${describeFacts()}") } catch (_: Exception) {}
-            try { executor.shutdownNow() } catch (_: Exception) {}
-            executor = Executors.newSingleThreadExecutor { r ->
-                Thread(r, "mc-server").apply { isDaemon = true }
-            }
-            // When the hung worker exits native it sees a foreign seq and never wipes a new start.
-            synchronized(this) {
-                startSeq++
-                future = null
-            }
+            try { Log.e(TAG, "refusing start: $reason hungThread=$hungId facts=${describeFacts()} lastErr=${PocketJvm.lastError()}") } catch (_: Exception) {}
+            log("ERROR: previous server thread still alive after 12s ($reason).")
+            log("A second Paper in the same JVM over a live one dies instantly (world lock / native -11).")
+            log("Wait ~30s and press Start again; if it repeats - restart the app (one JVM per process).")
+            return StartResult.FAILED_DEFINITIVE
         }
         // Facts dead? (port free + not alive) - then restart is safe.
         fun deadByFactsNow(): Boolean {
@@ -572,8 +580,7 @@ object InProcessServer {
                 }
                 if (mcThreadAlive()) {
                     if (deadByFactsNow()) {
-                        log("WARN: old thread did not exit in 12s, but server is dead by facts - starting on a new thread (old one will be ignored)")
-                        abandonHungWorker("fake-done on entry, thread alive after 12s")
+                        return refuseHungWorker("fake-done on entry, thread alive after 12s")
                     } else {
                 log("Server still finishing (worker alive) - wait a few seconds and press Start again")
                         return StartResult.ALREADY_RUNNING
@@ -603,12 +610,16 @@ object InProcessServer {
             val alivePrev = try { isServerAliveByFacts() } catch (_: Exception) { true }
             Log.i(TAG, "start pre-check hung prev: portFree=$portFreePrev deadByLog=$deadByLogPrev aliveByFacts=$alivePrev facts=${describeFacts()}")
             if (portFreePrev && !alivePrev) {
-                log("WARN: previous worker hung (futureDone=false) but server is dead by facts - unblocking...")
-                try { PocketJvm.requestStop() } catch (_: Exception) {}
-                try { prevFut.cancel(true) } catch (_: Exception) {}
-                try { mcThread?.interrupt() } catch (_: Exception) {}
+                // Thread parked but facts dead: latch native stop grace and wait
+                // for THREAD DEATH. NOTE: no Future.cancel/interrupt here - a
+                // worker blocked inside nativeLoadJVM ignores both, cancel only
+                // poisons the future into fake-done (isDone=true + live thread)
+                // and a stale interrupt flag breaks the worker's later sleeps.
+                // If the thread outlives the 12s wait we refuse (no concurrent
+                // second main in one JVM) - see refuseHungWorker.
+                val hookOk = try { PocketJvm.requestStop() } catch (_: Exception) { false }
+                if (!hookOk) log("WARN: old native lib without stop hook - reinstall the APK, otherwise stop/restart hangs.")
                 // Wait for THREAD DEATH, not future: cancel makes isDone=true
-                // instantly, the old `while (!isDone)` waited 0s and refused.
                 val t0 = System.currentTimeMillis()
                 while (mcThreadAlive() && System.currentTimeMillis() - t0 < 12_000) {
                     try { Thread.sleep(500) } catch (_: Exception) { break }
@@ -619,8 +630,7 @@ object InProcessServer {
                 }
                 if (mcThreadAlive()) {
                     if (deadByFactsNow()) {
-                        log("WARN: old thread did not exit in 12s, but server is dead by facts - starting on a new thread (old one will be ignored)")
-                        abandonHungWorker("hung prev, thread alive after 12s")
+                        return refuseHungWorker("hung prev, thread alive after 12s")
                     } else {
                         // Thread alive and facts came back (port busy) - a second
                         // Paper over a live world = OverlappingFileLock.
@@ -768,6 +778,11 @@ object InProcessServer {
                 } catch (e: Exception) {
                     Log.w(TAG, "setLdLibraryPath failed", e)
                 }
+                // Per-server tmp for JNA/JLine extraction (-Djna.tmpdir points here).
+                // Shared cacheDir is cleaned by the OS mid-run and shared between
+                // servers; a stale/locked dispatch there is one more reason for
+                // "Could not initialize class com.sun.jna.Native" (OSHI warnings).
+                try { File(workDir, "tmp").mkdirs() } catch (_: Exception) {}
                 try {
                     val r = PocketJvm.nativeChdir(workDir.absolutePath)
                     if (r != 0) appendLog(logFile, "WARN: chdir failed ($r)\n")
@@ -935,8 +950,14 @@ object InProcessServer {
                 if (exitCode < 0 || exitCode > 128) {
                     // Negative codes are our internal ones (-8 main-class, -10 exception...),
                     // >128 is an emergency System.exit from the server. Explain both.
+                    // RESTART-CRASH FIX: the same text goes to the app console
+                    // via log() (timestamped [19:...] lines), not only to
+                    // server.log - otherwise the 15s poll's "see the cause
+                    // above" points at nothing the user can see.
                     appendLog(logFile, "[process exited, code $exitCode: ${describeCode(exitCode)}]\n")
                     if (nativeErr != null) appendLog(logFile, "[details: $nativeErr]\n")
+                    try { log("[process exited, code $exitCode: ${describeCode(exitCode)}]") } catch (_: Exception) {}
+                    if (nativeErr != null) try { log("[details: $nativeErr]") } catch (_: Exception) {}
                 } else {
                     appendLog(logFile, "\n[process exited, code $exitCode]\n")
                 }
@@ -987,7 +1008,10 @@ object InProcessServer {
         }
         // Wake the native parking loop (jvm_launcher.c): without this futureDone=false
         // hangs on chunk workers even after Closing + free port.
-        try { PocketJvm.requestStop() } catch (_: Exception) {}
+        try {
+            val hookOk = PocketJvm.requestStop()
+            if (!hookOk) Log.w(TAG, "requestStop($id): old native .so without stop hook - reinstall APK")
+        } catch (_: Exception) {}
         try { Log.i(TAG, "requestStop($id) latched, facts: ${describeFacts()}") } catch (_: Exception) {}
         return true
     }

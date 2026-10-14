@@ -65,13 +65,21 @@ object PocketJvm {
      */
     external fun nativeRequestStop()
 
-    /** Safe wrapper over nativeRequestStop (never throws). */
-    fun requestStop() {
-        try {
+    /** Safe wrapper over nativeRequestStop (never throws).
+     * @return true when the native stop hook exists (current .so).
+     * False = old .so without the parking watchdog: native parking has no
+     * grace and a "stop" then relies solely on the server reading stdin.
+     * Callers must surface this (reinstall APK), not swallow it. */
+    fun requestStop(): Boolean {
+        return try {
             nativeRequestStop()
+            true
         } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "nativeRequestStop missing (old .so?)", e)
-        } catch (_: Exception) {}
+            Log.w(TAG, "nativeRequestStop missing (old .so - reinstall APK)", e)
+            false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /** Text of the last native error (empty when none). No exceptions. */
@@ -280,6 +288,20 @@ object PocketJvm {
             "-Djava.awt.headless=true",
             "-Dlog4j2.formatMsgNoLookups=true", // Log4Shell mitigation, like Mojo
             "-Djdk.lang.Process.launchMechanism=FORK", // POSIX_SPAWN needs jspawnhelper, absent on Android
+            // Headless Android console: no JLine/Jansi native terminal.
+            // Without this Paper loads jansi-*.so built for glibc
+            // (dlopen fails with "libc.so.6 not found" on bionic) and logs
+            // "Advanced terminal features are not available". --nojline app
+            // arg (see prepare) disables JLine; these props are the second
+            // gate for JLine3/Log4j2/Jansi probing.
+            "-Djline.terminal=jline.UnsupportedTerminal",
+            "-Dterminal.jline=false",
+            "-Dterminal.ansi=false",
+            "-Dlog4j.skipJansi=true",
+            // JNA (used by OSHI hardware report in CrashReport preload):
+            // prefer bundled dispatch, extract per-server (not shared cache).
+            "-Djna.nosys=true",
+            "-Djna.tmpdir=" + File(workDir, "tmp").absolutePath,
             // Bundled JRE is an adhoc Pojav build, reports "17-internal":
             // Paper gate (contains("-") -> pre-release -> return) kills the start.
             // Official bypass (docs.papermc.io: Paper.IgnoreJavaVersion).
@@ -406,6 +428,10 @@ object PocketJvm {
         log("JVM: ${vmFile.absolutePath}")
         log("Main: $mainClass")
         if (cpEntries.size > 1) log("Class-Path: +${cpEntries.size - 1} entries from manifest")
-        return StartParams(vmFile, runtimeHome, jvmArgs, mainClass, listOf("nogui"), classpath)
+        // Headless server args: nogui (no Swing) + --nojline (no JLine/Jansi
+        // native terminal - the jansi-*.so in Paper is glibc-built and fails
+        // on bionic with "libc.so.6 not found"). Paperclip forwards unknown
+        // args to the patched server main; Vanilla/Paper/CraftBukkit accept it.
+        return StartParams(vmFile, runtimeHome, jvmArgs, mainClass, listOf("nogui", "--nojline"), classpath)
     }
 }

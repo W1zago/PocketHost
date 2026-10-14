@@ -67,7 +67,10 @@ class MinecraftServerManager(private val baseDirectory: String) {
                 stopCommand = "stop",
                 maxMemory = maxMemory,
                 minMemory = minMemory,
-                javaArgs = listOf("-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled"),
+                // No forced GC here: PocketJvm forces UseSerialGC for mobile
+                // (sanitizeUserArgs strips competing collectors - G1GC/Parallel
+                // would only confuse the log, not the JVM).
+                javaArgs = emptyList(),
                 minecraftVersion = version,
                 minecraftLoader = mapToLoader(software),
                 onlineMode = onlineMode,
