@@ -14,50 +14,18 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:background="@drawable/bg_studio_tile"
-        android:padding="12dp">
+        android:padding="8dp">
 
         <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/switchPirate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="32dp"
             android:text="Allow cracked players"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/on_surface"
             android:checked="false" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Disables Mojang license check (online-mode=false)."
-            android:textSize="11sp"
-            android:textColor="@color/on_surface_variant" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <ImageView
-                android:layout_width="12dp"
-                android:layout_height="12dp"
-                android:src="@drawable/ic_info"
-                app:tint="@color/secondary"
-                android:importantForAccessibility="no" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:text="Applies after restart"
-                android:textSize="10sp"
-                android:textColor="@color/on_surface_variant" />
-
-        </LinearLayout>
 
     </LinearLayout>
 

@@ -122,9 +122,11 @@ class CreateServerActivity : AppCompatActivity() {
             selectRuntime(selectedServerType)
         }
 
-        // Built-in terminal generates the command itself
+        // Built-in terminal generates the command itself - use text (not hint)
+        // to avoid overlap of TextInputLayout hint ("Start Command")
+        // with EditText hint inside the same layout.
         binding.etStartCommand.isEnabled = false
-        binding.etStartCommand.hint = "Generated automatically (built-in terminal)"
+        binding.etStartCommand.setText("Generated automatically (built-in terminal)")
     }
 
     private fun setupToolbar() {
@@ -564,7 +566,7 @@ class CreateServerActivity : AppCompatActivity() {
         when (selectedServerType) {
             ServerType.MINECRAFT -> {
                 if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("25565")
-                binding.etStartCommand.setText("")
+                binding.etStartCommand.setText("Generated automatically (built-in terminal)")
             }
             ServerType.UBUNTU_SERVER -> {
                 if (binding.etPort.text.isNullOrEmpty()) binding.etPort.setText("22")
