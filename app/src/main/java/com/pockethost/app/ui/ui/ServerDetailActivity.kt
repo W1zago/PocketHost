@@ -98,25 +98,19 @@ class ServerDetailActivity : AppCompatActivity() {
         binding.btnConsole.setOnClickListener { openConsole() }
         binding.btnFiles.setOnClickListener { openFileManager() }
         binding.btnDelete.setOnClickListener { deleteServer() }
-        binding.btnOpenTerminal.setOnClickListener { openConsole() }
         binding.btnCopyAddress.setOnClickListener { copyBindAddress() }
         binding.btnCopyGateway.setOnClickListener { copyBindAddress() }
         binding.btnInstallUbuntu.setOnClickListener { installUbuntu() }
-        // Section tabs: real navigation (scroll within screen or open screen).
+        // Section tabs: real navigation (open screen).
         binding.tabConsole.setOnClickListener { openConsole() }
         binding.tabFiles.setOnClickListener { openFileManager() }
-        binding.tabConfig.setOnClickListener {
-            setActiveTab(binding.tabConfig)
-            binding.scrollView.post { binding.scrollView.smoothScrollTo(0, binding.minecraftSettingsCard.top) }
-        }
     }
 
     /** Active tab pill (design: primary-container) vs idle tabs. */
     private fun setActiveTab(active: View) {
         try {
             val tabs = listOf(
-                binding.tabConsole, binding.tabFiles,
-                binding.tabConfig
+                binding.tabConsole, binding.tabFiles
             )
             val onBg = ContextCompat.getColor(this, R.color.primary_container)
             val onFg = ContextCompat.getColor(this, R.color.on_primary_container)
@@ -285,14 +279,6 @@ class ServerDetailActivity : AppCompatActivity() {
                                     binding.tvErrorMessage.visibility = View.VISIBLE
                                 }
                             }
-                            // Console stream preview: real tail of server.log (last 8 lines).
-                            val tail = newContent.lines().filter { it.isNotBlank() }.takeLast(8).joinToString("\n")
-                            if (tail.isNotBlank()) {
-                                runOnUiThread {
-                                    binding.tvLogPreview.text = tail.take(1200)
-                                    binding.tvLogLive.text = "● LIVE"
-                                }
-                            }
                             offset = currentLength
                         }
                     }
@@ -377,7 +363,6 @@ class ServerDetailActivity : AppCompatActivity() {
             // LAN bind line uses the real device IP + this server port.
             if (server.type == ServerType.MINECRAFT) {
                 minecraftSettingsCard.visibility = View.VISIBLE
-                tabConfig.visibility = View.VISIBLE
                 ubuntuSettingsCard.visibility = View.GONE
                 suppressSettingsSave = true
                 try {
@@ -395,7 +380,6 @@ class ServerDetailActivity : AppCompatActivity() {
                 }
             } else {
                 minecraftSettingsCard.visibility = View.GONE
-                tabConfig.visibility = View.GONE
                 ubuntuSettingsCard.visibility = View.VISIBLE
                 refreshUbuntuCard()
             }
