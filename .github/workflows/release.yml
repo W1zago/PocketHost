@@ -1,0 +1,44 @@
+name: Release universal APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-universal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build universal release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace
+          ls -lh app/build/outputs/apk/release/
+
+      - name: Rename to universal asset
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          SRC=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          DST="PocketHost-${TAG}-universal.apk"
+          cp "$SRC" "$DST"
+          echo "ASSET=$DST" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          generate_release_notes: true

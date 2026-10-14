@@ -20,6 +20,9 @@ android {
         // so no Ukrainian strings can leak in from dependencies.
         resourceConfigurations += "en"
 
+        // Universal APK: no `splits` block on purpose — one APK carries
+        // arm64-v8a + armeabi-v7a + x86_64. The in-app updater looks for
+        // a single `*universal*.apk` asset in GitHub Releases.
         // In-process JVM launcher (порт Mojo jre_launcher): збірка libpockethost_jvm.so
         externalNativeBuild {
             cmake {

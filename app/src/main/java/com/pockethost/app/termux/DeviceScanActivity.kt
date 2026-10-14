@@ -23,9 +23,12 @@ import androidx.lifecycle.lifecycleScope
 import com.pockethost.app.R
 import com.pockethost.app.databinding.ActivityDeviceScanBinding
 import com.pockethost.app.databinding.ItemDeviceCheckBinding
+import com.pockethost.app.update.AppUpdater
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -46,6 +49,24 @@ class DeviceScanActivity : AppCompatActivity() {
         refresh()
     }
 
+    // ---- Optional in-app update (universal APK, Session API, never forced) ----
+    private var pendingUpdate: AppUpdater.UpdateInfo? = null
+    private var downloadedApk: File? = null
+    private var updateJob: Job? = null
+
+    private val unknownSourcesLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // User returned from "Allow from this source" — retry install only if
+        // the permission is now granted AND we already have the APK.
+        val apk = downloadedApk
+        if (apk != null && apk.exists() && AppUpdater.canRequestInstall(this)) {
+            installDownloadedApk()
+        } else if (!AppUpdater.canRequestInstall(this)) {
+            Toast.makeText(this, "Install from this source not allowed", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityDeviceScanBinding.inflate(layoutInflater)
@@ -63,6 +84,8 @@ class DeviceScanActivity : AppCompatActivity() {
 
         binding.btnRescan.setOnClickListener { refreshWithInternet() }
         binding.btnAutoGrant.setOnClickListener { autoRequestAll() }
+
+        setupUpdateCard()
 
         refresh()
     }
@@ -347,5 +370,140 @@ class DeviceScanActivity : AppCompatActivity() {
 
     private fun openWifiSettings() {
         try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } catch (_: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    }
+
+    // ---------- Optional app update card (manual only) ----------
+
+    private fun setupUpdateCard() {
+        try {
+            binding.updateTitle.text = "Installed ${AppUpdater.currentLabel()}"
+            binding.updateSubtitle.text = "Tap Check for updates — optional, universal APK."
+            binding.updateProgress.visibility = View.GONE
+            // Only Check is visible at first; Install appears when an update
+            // is found and downloads + installs in one tap.
+            binding.btnInstallUpdate.visibility = View.GONE
+            binding.btnCheckUpdate.setOnClickListener { checkForAppUpdate() }
+            binding.btnInstallUpdate.setOnClickListener { onInstallClicked() }
+        } catch (_: Exception) {}
+    }
+
+    private fun checkForAppUpdate() {
+        if (updateJob?.isActive == true) return
+        updateJob = lifecycleScope.launch {
+            try {
+                binding.btnCheckUpdate.isEnabled = false
+                // Keep Install visible only if we already have an APK on disk.
+                binding.btnInstallUpdate.visibility =
+                    if (downloadedApk?.exists() == true) View.VISIBLE else View.GONE
+                binding.updateSubtitle.text = "Checking GitHub releases…"
+                val info = withContext(Dispatchers.IO) { AppUpdater.checkForUpdate() }
+                if (info == null) {
+                    pendingUpdate = null
+                    binding.updateTitle.text = "Installed ${AppUpdater.currentLabel()} — up to date"
+                    binding.updateSubtitle.text = "No newer release found."
+                } else {
+                    pendingUpdate = info
+                    val sizeMb = if (info.assetSize > 0) info.assetSize / 1024 / 1024 else -1
+                    binding.updateTitle.text = "Update available: ${info.tag} (${info.assetName})"
+                    binding.updateSubtitle.text = buildString {
+                        append("Installed ${AppUpdater.currentLabel()}")
+                        if (sizeMb >= 0) append(" • ~${sizeMb} MB")
+                        if (info.body.isNotBlank()) append("\n${info.body.take(300)}")
+                    }
+                    binding.btnInstallUpdate.visibility = View.VISIBLE
+                    binding.btnInstallUpdate.isEnabled = true
+                    Toast.makeText(this@DeviceScanActivity, "Update ${info.tag} found (optional)", Toast.LENGTH_SHORT).show()
+                }
+            } catch (_: Exception) {
+                try { binding.updateSubtitle.text = "Check failed — no internet?" } catch (_: Exception) {}
+            } finally {
+                try { binding.btnCheckUpdate.isEnabled = true } catch (_: Exception) {}
+            }
+        }
+    }
+
+    /**
+     * Single-tap Install: reuses the cached APK when present,
+     * otherwise downloads it first and commits to the installer right away.
+     */
+    private fun onInstallClicked() {
+        val info = pendingUpdate ?: run {
+            Toast.makeText(this, "Check for updates first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!AppUpdater.canRequestInstall(this)) {
+            // One-time system gate for "install unknown apps from this source".
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                unknownSourcesLauncher.launch(intent)
+                Toast.makeText(this, "Allow installs from PocketHost, then tap Install again", Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Allow installs from this source in Settings", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        val cached = downloadedApk
+        if (cached != null && cached.exists()) {
+            installDownloadedApk()
+            return
+        }
+        if (updateJob?.isActive == true) return
+        updateJob = lifecycleScope.launch {
+            try {
+                binding.btnCheckUpdate.isEnabled = false
+                binding.btnInstallUpdate.isEnabled = false
+                binding.updateProgress.visibility = View.VISIBLE
+                binding.updateProgress.isIndeterminate = false
+                binding.updateProgress.progress = 0
+                val file = AppUpdater.downloadApk(this@DeviceScanActivity, info) { pct, doneMb, totalMb ->
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        try {
+                            binding.updateProgress.progress = pct
+                            binding.updateSubtitle.text = "Downloading… $pct% ($doneMb/$totalMb MB)"
+                        } catch (_: Exception) {}
+                    }
+                }
+                binding.updateProgress.visibility = View.GONE
+                if (file != null) {
+                    downloadedApk = file
+                    installDownloadedApk()
+                } else {
+                    binding.updateSubtitle.text = "Download failed — try again."
+                    binding.btnInstallUpdate.isEnabled = true
+                }
+            } catch (_: Exception) {
+                try {
+                    binding.updateProgress.visibility = View.GONE
+                    binding.updateSubtitle.text = "Download failed — try again."
+                    binding.btnInstallUpdate.isEnabled = true
+                } catch (_: Exception) {}
+            } finally {
+                try { binding.btnCheckUpdate.isEnabled = true } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun installDownloadedApk() {
+        val apk = downloadedApk
+        if (apk == null || !apk.exists()) return
+        lifecycleScope.launch {
+            try {
+                binding.btnInstallUpdate.isEnabled = false
+                binding.updateSubtitle.text = "Sending to installer… (system will ask)"
+                val ok = AppUpdater.installViaSession(this@DeviceScanActivity, apk)
+                if (!ok) {
+                    binding.updateSubtitle.text = "Installer rejected the session — try again."
+                    binding.btnInstallUpdate.isEnabled = true
+                }
+                // On success the system consent dialog takes over; nothing else to do.
+            } catch (_: Exception) {
+                try {
+                    binding.updateSubtitle.text = "Install failed — try again."
+                    binding.btnInstallUpdate.isEnabled = true
+                } catch (_: Exception) {}
+            }
+        }
     }
 }
