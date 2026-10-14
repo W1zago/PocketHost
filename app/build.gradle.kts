@@ -6,6 +6,10 @@ plugins {
 android {
     namespace = "com.pockethost.app"
     compileSdk = 34
+    // Must match the NDK installed in CI (.github/workflows/release.yml).
+    // Without this AGP silently picks the newest local NDK, so local and
+    // CI builds could compile native code with different toolchains.
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.pockethost.app"

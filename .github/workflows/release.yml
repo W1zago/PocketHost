@@ -1,9 +1,20 @@
 name: Release per-ABI APKs
 
-# Manual releases: APKs are built locally (stable debug signature for updates)
-# and uploaded by hand. Tag pushes do NOT trigger this workflow.
+# Manual releases via workflow_dispatch. Tag pushes do NOT trigger this workflow.
+#
+# SIGNATURE WARNING: release APKs are signed with the DEBUG key.
+# A fresh CI runner generates a NEW debug key on every run, so CI-built APKs
+# do NOT match locally built ones (and not even each other across runs).
+# Never mix CI-built and locally-built APKs under one release version,
+# otherwise Android updates fail with a signature mismatch.
+# Long-term fix: dedicated release keystore stored in GitHub Secrets (TODO).
 on:
-  workflow_dispatch
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, e.g. v1.0.1 (must match versionName in app/build.gradle.kts)'
+        required: true
+        default: 'v1.0.1'
 
 permissions:
   contents: write
@@ -18,10 +29,30 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+          cache: gradle
 
+      # NOTE: android-actions/setup-android MUST stay on v4+.
+      # v3 requested the legacy 'tools' package that Google removed, failing with:
+      #   sdkmanager exited with code 1 / "Warning: Failed to find package 'tools'".
+      # v4 skips 'tools' and installs cmdline-tools instead. `packages` is a
+      # space-separated list (no quotes around items); versions must match the
+      # project: compileSdk/targetSdk 34, build-tools 34.0.0, cmake 3.22.1,
+      # NDK 27.0.12077973 (see app/build.gradle.kts ndkVersion).
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0 cmake;3.22.1 ndk;27.0.12077973
+
+      - name: Check tag matches versionName
+        run: |
+          TAG="${{ inputs.tag }}"
+          VER="$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')"
+          echo "tag=$TAG versionName=$VER"
+          if [ "v$VER" != "$TAG" ]; then
+            echo "::error::inputs.tag ($TAG) does not match versionName (v$VER) in app/build.gradle.kts"
+            exit 1
+          fi
 
       - name: Build per-ABI release APKs
         run: |
@@ -31,7 +62,7 @@ jobs:
 
       - name: Rename to release assets
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ inputs.tag }}"
           OUT="app/build/outputs/apk/release"
           cp "$OUT/app-arm64-v8a-release.apk"   "PocketHost-${TAG}-arm64-v8a.apk"
           cp "$OUT/app-armeabi-v7a-release.apk" "PocketHost-${TAG}-armeabi-v7a.apk"
@@ -42,6 +73,7 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           files: |
             PocketHost-*.apk
             SHA256SUMS.txt
